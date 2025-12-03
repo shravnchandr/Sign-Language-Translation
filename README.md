@@ -1,1 +1,1 @@
-# Google---Isolated-Sign-Language-Recognition
+# Google-Isolated-Sign-Language-Recognition
