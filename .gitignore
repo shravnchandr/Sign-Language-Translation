@@ -211,4 +211,7 @@ __marimo__/
 
 # Models & Data
 Saved_Models/
-Kaggle_Data/
+# data/
+
+# WLASL Repo
+WLASL_Repo/
