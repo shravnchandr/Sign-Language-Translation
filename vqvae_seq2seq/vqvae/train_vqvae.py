@@ -13,6 +13,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.amp import autocast, GradScaler
 
 from .config import ImprovedVQVAEConfig
 from .vqvae_model import ImprovedVQVAE
@@ -25,6 +26,7 @@ def train_epoch(
     model: ImprovedVQVAE,
     dataloader: DataLoader,
     optimizer: torch.optim.Optimizer,
+    scaler: GradScaler,
     device: torch.device,
     epoch: int,
 ) -> Dict[str, float]:
@@ -38,25 +40,23 @@ def train_epoch(
         "diversity": 0,
     }
     n_batches = 0
+    use_amp = device.type == "cuda"
 
     pbar = tqdm(dataloader, desc=f"Epoch {epoch}")
     for batch in pbar:
-        # Move to device
         landmarks = batch["landmarks"].to(device)
         mask = batch["mask"].to(device)
 
-        # Forward pass
         optimizer.zero_grad()
-        outputs = model(landmarks, mask)
+        with autocast(device_type=device.type, enabled=use_amp):
+            outputs = model(landmarks, mask)
+            loss = outputs["losses"]["total"]
 
-        # Backward pass
-        loss = outputs["losses"]["total"]
-        loss.backward()
-
-        # Gradient clipping
+        scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-
-        optimizer.step()
+        scaler.step(optimizer)
+        scaler.update()
 
         # Accumulate losses
         for key in total_losses:
@@ -165,7 +165,7 @@ def load_checkpoint(
     scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
 ) -> int:
     """Load training checkpoint."""
-    checkpoint = torch.load(checkpoint_path)
+    checkpoint = torch.load(checkpoint_path, weights_only=True)
     model.load_state_dict(checkpoint["model_state_dict"])
 
     if optimizer is not None:
@@ -278,6 +278,8 @@ def main():
         eta_min=config.learning_rate / 100,
     )
 
+    scaler = GradScaler(enabled=device.type == "cuda")
+
     # Resume if specified
     start_epoch = 0
     if args.resume:
@@ -287,8 +289,7 @@ def main():
     best_val_loss = float("inf")
 
     for epoch in range(start_epoch, config.max_epochs):
-        # Train
-        train_losses = train_epoch(model, train_loader, optimizer, device, epoch)
+        train_losses = train_epoch(model, train_loader, optimizer, scaler, device, epoch)
 
         # Validate
         val_losses = validate(model, val_loader, device)
