@@ -267,9 +267,9 @@ def collate_translation(
 
 def create_dataloader(
     dataset: Dataset,
-    batch_size: int = 32,
+    batch_size: int = 64,
     shuffle: bool = True,
-    num_workers: int = 6,
+    num_workers: int = 4,
     collate_fn: Callable = collate_vqvae,
 ) -> DataLoader:
     """Create a DataLoader with appropriate settings."""
@@ -280,5 +280,7 @@ def create_dataloader(
         num_workers=num_workers,
         collate_fn=collate_fn,
         pin_memory=True,
+        prefetch_factor=2,
+        persistent_workers=True,
         drop_last=False,
     )
