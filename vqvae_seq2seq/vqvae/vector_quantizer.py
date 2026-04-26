@@ -258,7 +258,8 @@ class EMAVectorQuantizer(nn.Module):
             noise = torch.randn_like(new_embeddings) * 0.01
             new_embeddings = new_embeddings + noise
 
-            # Reset underused codes
+            # Reset underused codes (cast to fp32 — embeddings stay in full precision under AMP)
+            new_embeddings = new_embeddings.to(self.embeddings.dtype)
             self.embeddings[underused] = new_embeddings
             self.ema_embed_sum[underused] = new_embeddings
             self.ema_cluster_size[underused] = 1.0
