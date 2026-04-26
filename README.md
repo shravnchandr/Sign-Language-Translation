@@ -114,8 +114,11 @@ Types: `pose` (33 landmarks), `left_hand` (21), `right_hand` (21), `face` (468) 
 ```bash
 uv run python -m vqvae_seq2seq.vqvae.train_vqvae \
   --data-dir ./data/Isolated_ASL_Recognition \
+  --cache-dir ./data/cache \
   --epochs 100
 ```
+
+The first epoch builds a tensor cache under `data/cache/` by processing all parquet files. Subsequent epochs load directly from cache, skipping parquet parsing entirely.
 
 ### Phase 2: Sign Translator
 
@@ -145,7 +148,9 @@ uv run python training/train_translator.py \
 
 **Variable-length batching**: all datasets return a `padding_mask` tensor `(B, T)` where `True` marks padding positions. Pass alongside `landmarks` to every model forward call.
 
-**AMP training**: `torch.amp.autocast` + `GradScaler` are used in both standalone scripts. Set `device: "mps"` or `"cpu"` in config for local runs.
+**AMP training**: `torch.amp.autocast` + `GradScaler` wrap every forward/backward pass. Automatically disabled when not on CUDA, so local CPU/MPS runs are unaffected.
+
+**Preprocessing cache**: `VQVAEDataset` and `TranslationDataset` accept a `cache_dir` argument. On first access each sample is processed from parquet and saved as a `.pt` file; subsequent accesses load the cached tensor directly. Pass `--cache-dir ./data/cache` to the training scripts.
 
 ## Code Formatting
 

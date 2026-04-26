@@ -13,7 +13,7 @@ An Isolated Sign Language Recognition system classifying 250 ASL signs from Medi
 uv sync
 
 # Train VQ-VAE (Phase 1)
-uv run python -m vqvae_seq2seq.vqvae.train_vqvae --data-dir ./data/Isolated_ASL_Recognition --epochs 100
+uv run python -m vqvae_seq2seq.vqvae.train_vqvae --data-dir ./data/Isolated_ASL_Recognition --cache-dir ./data/cache --epochs 100
 
 # Train Translator (Phase 2)
 uv run python -m vqvae_seq2seq.translation.train_translator --vqvae-checkpoint ./checkpoints/vqvae/best_model.pt
@@ -95,7 +95,9 @@ kaggle competitions download -c asl-fingerspelling       # Fingerspelling
 
 **Variable-length batching**: All datasets return a `padding_mask` `(B, T)` bool tensor (`True` = padding). Pass to model alongside `landmarks`.
 
-**AMP training**: Use `torch.amp.autocast` + `GradScaler` (already in standalone scripts). Config has `device: str = "cuda"` — override to `"mps"` or `"cpu"` locally.
+**AMP training**: `torch.amp.autocast` + `GradScaler` wrap every forward/backward pass in `train_vqvae.py`. Disabled automatically when not on CUDA. Config has `device: str = "cuda"` — override to `"mps"` or `"cpu"` locally.
+
+**Preprocessing cache**: `VQVAEDataset` and `TranslationDataset` accept `cache_dir`. First access processes each parquet and saves a `.pt` tensor; subsequent accesses skip parquet parsing entirely. Default cache dir is `data/cache/`. Cache files are excluded from git via `.gitignore`.
 
 **Standalone vs modular**: `training/` scripts inline all code from `vqvae_seq2seq/` to be self-contained for Kaggle notebook submission. When editing model logic, update both `vqvae_seq2seq/` and `training/` if the change needs to run on Kaggle.
 
