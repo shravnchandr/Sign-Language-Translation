@@ -26,6 +26,7 @@ class VQVAEDataset(Dataset):
         max_frames: int = 256,
         augment: bool = False,
         augment_fn: Optional[Callable] = None,
+        cache_dir: Optional[str] = None,
     ):
         """
         Args:
@@ -35,6 +36,9 @@ class VQVAEDataset(Dataset):
             max_frames: Maximum sequence length (longer sequences are subsampled)
             augment: Whether to apply augmentation
             augment_fn: Custom augmentation function
+            cache_dir: Directory to cache processed tensors. On first access each
+                sample is processed from parquet and saved as a .pt file; subsequent
+                accesses load the cached tensor directly, skipping parquet parsing.
         """
         self.df = df.reset_index(drop=True)
         self.base_path = Path(base_path)
@@ -42,6 +46,7 @@ class VQVAEDataset(Dataset):
         self.max_frames = max_frames
         self.augment = augment
         self.augment_fn = augment_fn
+        self.cache_dir = Path(cache_dir) if cache_dir else None
 
     def __len__(self) -> int:
         return len(self.df)
@@ -53,25 +58,17 @@ class VQVAEDataset(Dataset):
             return row["full_path"]
         return str(self.base_path / row["path"])
 
-    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        """
-        Returns:
-            Dictionary with:
-            - 'landmarks': (T, N, 3) tensor of all landmarks
-            - 'left_hand': (T, 21, 3)
-            - 'right_hand': (T, 21, 3)
-            - 'pose': (T, 33, 3)
-            - 'face': (T, N_face, 3)
-            - 'length': original sequence length
-        """
-        path = self._get_path(idx)
+    def _get_cache_path(self, idx: int) -> Optional[Path]:
+        if self.cache_dir is None:
+            return None
+        row = self.df.iloc[idx]
+        rel = row["path"] if "path" in self.df.columns else str(idx)
+        return self.cache_dir / Path(rel).with_suffix(".pt")
+
+    def _process_parquet(self, path: str) -> Dict[str, torch.Tensor]:
+        """Process a parquet file into a tensor dict (no augmentation)."""
         data = self.processor.process(path)
 
-        # Apply augmentation if enabled
-        if self.augment and self.augment_fn is not None:
-            data = self.augment_fn(data)
-
-        # Subsample if needed
         T = data["left_hand"].shape[0]
         if T > self.max_frames:
             indices = np.linspace(0, T - 1, self.max_frames).astype(int)
@@ -79,19 +76,11 @@ class VQVAEDataset(Dataset):
                 data[key] = data[key][indices]
             T = self.max_frames
 
-        # Concatenate all landmarks
         landmarks = np.concatenate(
-            [
-                data["left_hand"],
-                data["right_hand"],
-                data["pose"],
-                data["face"],
-            ],
+            [data["left_hand"], data["right_hand"], data["pose"], data["face"]],
             axis=1,
         )
-
-        # Convert to tensors
-        result = {
+        return {
             "landmarks": torch.tensor(landmarks, dtype=torch.float32),
             "left_hand": torch.tensor(data["left_hand"], dtype=torch.float32),
             "right_hand": torch.tensor(data["right_hand"], dtype=torch.float32),
@@ -99,6 +88,22 @@ class VQVAEDataset(Dataset):
             "face": torch.tensor(data["face"], dtype=torch.float32),
             "length": torch.tensor(T, dtype=torch.long),
         }
+
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        cache_path = self._get_cache_path(idx)
+
+        if cache_path is not None and cache_path.exists():
+            result = torch.load(cache_path, weights_only=True)
+        else:
+            result = self._process_parquet(self._get_path(idx))
+            if cache_path is not None:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = cache_path.with_suffix(".tmp")
+                torch.save(result, tmp)
+                tmp.rename(cache_path)  # atomic write
+
+        if self.augment and self.augment_fn is not None:
+            result = self.augment_fn(result)
 
         return result
 
@@ -119,17 +124,8 @@ class TranslationDataset(Dataset):
         max_frames: int = 256,
         augment: bool = False,
         augment_fn: Optional[Callable] = None,
+        cache_dir: Optional[str] = None,
     ):
-        """
-        Args:
-            df: DataFrame with 'path' and 'sign' columns
-            base_path: Base directory for landmark files
-            sign_to_idx: Mapping from sign names to indices
-            config: Landmark processing configuration
-            max_frames: Maximum sequence length
-            augment: Whether to apply augmentation
-            augment_fn: Custom augmentation function
-        """
         self.df = df.reset_index(drop=True)
         self.base_path = Path(base_path)
         self.sign_to_idx = sign_to_idx
@@ -137,35 +133,27 @@ class TranslationDataset(Dataset):
         self.max_frames = max_frames
         self.augment = augment
         self.augment_fn = augment_fn
+        self.cache_dir = Path(cache_dir) if cache_dir else None
 
     def __len__(self) -> int:
         return len(self.df)
 
     def _get_path(self, idx: int) -> str:
-        """Get full path for a sample."""
         row = self.df.iloc[idx]
         if "full_path" in self.df.columns:
             return row["full_path"]
         return str(self.base_path / row["path"])
 
-    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        """
-        Returns:
-            Dictionary with:
-            - 'landmarks': (T, N, 3) tensor
-            - 'label': scalar tensor with sign index
-            - 'length': original sequence length
-        """
+    def _get_cache_path(self, idx: int) -> Optional[Path]:
+        if self.cache_dir is None:
+            return None
         row = self.df.iloc[idx]
-        path = self._get_path(idx)
+        rel = row["path"] if "path" in self.df.columns else str(idx)
+        return self.cache_dir / Path(rel).with_suffix(".pt")
 
+    def _process_parquet(self, path: str) -> Dict[str, torch.Tensor]:
         data = self.processor.process(path)
 
-        # Apply augmentation if enabled
-        if self.augment and self.augment_fn is not None:
-            data = self.augment_fn(data)
-
-        # Subsample if needed
         T = data["left_hand"].shape[0]
         if T > self.max_frames:
             indices = np.linspace(0, T - 1, self.max_frames).astype(int)
@@ -173,32 +161,45 @@ class TranslationDataset(Dataset):
                 data[key] = data[key][indices]
             T = self.max_frames
 
-        # Concatenate all landmarks
         landmarks = np.concatenate(
-            [
-                data["left_hand"],
-                data["right_hand"],
-                data["pose"],
-                data["face"],
-            ],
+            [data["left_hand"], data["right_hand"], data["pose"], data["face"]],
             axis=1,
         )
-
-        # Get label
-        sign = row["sign"]
-        label = self.sign_to_idx.get(sign, -1)
-        if label == -1:
-            raise ValueError(f"Unknown sign: {sign}")
-
         return {
             "landmarks": torch.tensor(landmarks, dtype=torch.float32),
             "left_hand": torch.tensor(data["left_hand"], dtype=torch.float32),
             "right_hand": torch.tensor(data["right_hand"], dtype=torch.float32),
             "pose": torch.tensor(data["pose"], dtype=torch.float32),
             "face": torch.tensor(data["face"], dtype=torch.float32),
-            "label": torch.tensor(label, dtype=torch.long),
             "length": torch.tensor(T, dtype=torch.long),
         }
+
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        row = self.df.iloc[idx]
+        cache_path = self._get_cache_path(idx)
+
+        if cache_path is not None and cache_path.exists():
+            result = torch.load(cache_path, weights_only=True)
+        else:
+            result = self._process_parquet(self._get_path(idx))
+            if cache_path is not None:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = cache_path.with_suffix(".tmp")
+                torch.save(result, tmp)
+                tmp.rename(cache_path)
+
+        sign = row["sign"]
+        label = self.sign_to_idx.get(sign, -1)
+        if label == -1:
+            raise ValueError(f"Unknown sign: {sign}")
+
+        result = dict(result)
+        result["label"] = torch.tensor(label, dtype=torch.long)
+
+        if self.augment and self.augment_fn is not None:
+            result = self.augment_fn(result)
+
+        return result
 
 
 def collate_vqvae(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
@@ -268,7 +269,7 @@ def create_dataloader(
     dataset: Dataset,
     batch_size: int = 32,
     shuffle: bool = True,
-    num_workers: int = 4,
+    num_workers: int = 6,
     collate_fn: Callable = collate_vqvae,
 ) -> DataLoader:
     """Create a DataLoader with appropriate settings."""

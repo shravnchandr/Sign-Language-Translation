@@ -196,6 +196,12 @@ def main():
     parser.add_argument("--batch-size", type=int, default=32, help="Batch size")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument(
+        "--cache-dir",
+        type=str,
+        default="data/cache",
+        help="Directory to cache preprocessed tensors (built on first run, reused after)",
+    )
+    parser.add_argument(
         "--resume", type=str, default=None, help="Resume from checkpoint"
     )
     parser.add_argument("--device", type=str, default="cuda", help="Device to use")
@@ -236,6 +242,7 @@ def main():
         base_path=args.data_dir,
         config=landmark_config,
         augment=True,
+        cache_dir=args.cache_dir,
     )
 
     val_dataset = VQVAEDataset(
@@ -243,6 +250,7 @@ def main():
         base_path=args.data_dir,
         config=landmark_config,
         augment=False,
+        cache_dir=args.cache_dir,
     )
 
     train_loader = create_dataloader(
