@@ -269,6 +269,12 @@ def main():
 
     print(f"Train samples: {len(train_dataset)}, Val samples: {len(val_dataset)}")
 
+    if args.cache_dir:
+        cache_dir = Path(args.cache_dir)
+        cached = sum(1 for _ in cache_dir.rglob("*.pt")) if cache_dir.exists() else 0
+        total = len(train_dataset) + len(val_dataset)
+        print(f"Cache: {cached}/{total} samples ready ({cached/total*100:.1f}%) — {'loading from cache' if cached == total else 'will build cache for missing samples'}")
+
     # Create model
     model = ImprovedVQVAE(config).to(device)
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
