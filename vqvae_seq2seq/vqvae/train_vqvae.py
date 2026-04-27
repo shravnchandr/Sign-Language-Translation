@@ -193,7 +193,7 @@ def main():
         help="Output directory for checkpoints",
     )
     parser.add_argument("--epochs", type=int, default=100, help="Number of epochs")
-    parser.add_argument("--batch-size", type=int, default=32, help="Batch size")
+    parser.add_argument("--batch-size", type=int, default=128, help="Batch size")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument(
         "--cache-dir",
@@ -278,6 +278,9 @@ def main():
     # Create model
     model = ImprovedVQVAE(config).to(device)
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+    if device.type == "cuda":
+        model = torch.compile(model)
+        print("Model compiled with torch.compile")
 
     # Optimizer and scheduler
     optimizer = AdamW(

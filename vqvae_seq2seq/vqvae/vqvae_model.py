@@ -206,6 +206,8 @@ class ImprovedVQVAE(nn.Module):
             },
             commitment_weight=self.config.commitment_weight,
             ema_decay=self.config.ema_decay,
+            reset_threshold=self.config.codebook_reset_threshold,
+            reset_patience=self.config.codebook_reset_patience,
         )
 
         # Diversity loss
@@ -343,12 +345,13 @@ class ImprovedVQVAE(nn.Module):
         Returns:
             (B, T, N*C) reconstructed landmarks
         """
-        # Fuse factors
+        # Map all 4 quantized codebooks into the 4 fusion slots so every
+        # codebook receives gradient from the reconstruction loss.
         factors = {
             "dominant_hand": quantized["pose"],
-            "non_dominant_hand": quantized["pose"],  # Use pose for both
-            "pose": quantized["motion"],
-            "face": quantized.get("face", quantized["dynamics"]),
+            "non_dominant_hand": quantized["motion"],
+            "pose": quantized["dynamics"],
+            "face": quantized["face"],
         }
         fused = self.factor_fusion(factors)
 

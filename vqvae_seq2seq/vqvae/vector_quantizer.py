@@ -336,7 +336,9 @@ class FactorizedVectorQuantizer(nn.Module):
         self,
         codebook_configs: Dict[str, Tuple[int, int]],  # {name: (num_codes, dim)}
         commitment_weight: float = 0.25,
-        ema_decay: float = 0.99,
+        ema_decay: float = 0.97,
+        reset_threshold: float = 0.01,
+        reset_patience: int = 100,
     ):
         super().__init__()
 
@@ -349,6 +351,8 @@ class FactorizedVectorQuantizer(nn.Module):
                 embedding_dim=dim,
                 commitment_weight=commitment_weight,
                 ema_decay=ema_decay,
+                reset_threshold=reset_threshold,
+                reset_patience=reset_patience,
             )
 
     def forward(

@@ -36,11 +36,11 @@ class ImprovedVQVAEConfig:
     encoder_n_layers: int = 3
     encoder_dropout: float = 0.1
 
-    # Codebook sizes (blindspot #10: increased sizes)
-    pose_codebook_size: int = 1024  # Was 512
-    motion_codebook_size: int = 512  # Was 256
-    dynamics_codebook_size: int = 256  # Was 128
-    face_codebook_size: int = 256  # New dedicated face codebook
+    # Codebook sizes — sized to ~2x observed utilization at epoch 3
+    pose_codebook_size: int = 256
+    motion_codebook_size: int = 256
+    dynamics_codebook_size: int = 128
+    face_codebook_size: int = 128
 
     # Embedding dimensions
     embed_dim: int = 128  # Codebook embedding dimension
@@ -48,9 +48,9 @@ class ImprovedVQVAEConfig:
 
     # Vector quantizer settings
     commitment_weight: float = 0.25
-    ema_decay: float = 0.99
-    codebook_reset_threshold: float = 0.01  # Reset codes used < 1% of time
-    codebook_reset_patience: int = 100  # Steps before resetting
+    ema_decay: float = 0.97
+    codebook_reset_threshold: float = 0.01
+    codebook_reset_patience: int = 100
 
     # Cross-factor attention (blindspot #8)
     use_cross_attention: bool = True
