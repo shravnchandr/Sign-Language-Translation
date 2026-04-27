@@ -152,7 +152,7 @@ class Trainer:
                 encoder_lengths = ((~mask).sum(dim=1) // 8).clamp(min=1)
 
             target_lengths = torch.ones(
-                labels.shape[0], device=self.device
+                labels.shape[0], device=self.device, dtype=torch.long
             )  # Single token targets
 
             # Forward pass
