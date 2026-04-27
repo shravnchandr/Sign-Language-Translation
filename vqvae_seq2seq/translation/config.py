@@ -33,11 +33,11 @@ class TranslationConfig:
     eos_idx: int = 2
     unk_idx: int = 3
 
-    # Input embedding (from VQ-VAE codebooks)
-    pose_codebook_size: int = 1024
-    motion_codebook_size: int = 512
-    dynamics_codebook_size: int = 256
-    face_codebook_size: int = 256
+    # Input embedding (from VQ-VAE codebooks) — must match ImprovedVQVAEConfig
+    pose_codebook_size: int = 256
+    motion_codebook_size: int = 256
+    dynamics_codebook_size: int = 128
+    face_codebook_size: int = 128
     embed_dim: int = 128  # VQ-VAE embedding dimension
 
     # CTC
