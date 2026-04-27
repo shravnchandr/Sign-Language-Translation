@@ -64,8 +64,9 @@ class CTCHead(nn.Module):
         log_probs = self(encoder_output)  # (B, T, V)
         log_probs = log_probs.permute(1, 0, 2)  # (T, B, V) for CTC
 
+        # Cast to float32 — F.ctc_loss is numerically unstable in FP16 under AMP
         loss = F.ctc_loss(
-            log_probs,
+            log_probs.float(),
             targets,
             encoder_lengths,
             target_lengths,
