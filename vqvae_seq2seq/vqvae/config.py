@@ -50,7 +50,7 @@ class ImprovedVQVAEConfig:
     commitment_weight: float = 0.25
     ema_decay: float = 0.97
     codebook_reset_threshold: float = 0.01
-    codebook_reset_patience: int = 20
+    codebook_reset_patience: int = 50
 
     # Cross-factor attention (blindspot #8)
     use_cross_attention: bool = True

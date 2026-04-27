@@ -292,8 +292,10 @@ def main():
     if args.resume:
         start_epoch = load_checkpoint(args.resume, model, optimizer, scheduler)
 
-    # Training loop
-    best_val_loss = float("inf")
+    # Training loop — track val reconstruction (not total loss) for best-model
+    # selection. The diversity term dominates total loss magnitude and is a poor
+    # ranking signal for downstream tokenization quality.
+    best_val_recon = float("inf")
 
     for epoch in range(start_epoch, config.max_epochs):
         train_losses = train_epoch(model, train_loader, optimizer, scaler, device, epoch)
@@ -335,9 +337,10 @@ def main():
                 os.path.join(args.output_dir, f"checkpoint_epoch_{epoch}.pt"),
             )
 
-        # Save best model
-        if val_losses["total"] < best_val_loss:
-            best_val_loss = val_losses["total"]
+        # Save best model based on val reconstruction loss
+        val_recon = val_losses["reconstruction"]
+        if val_recon < best_val_recon:
+            best_val_recon = val_recon
             save_checkpoint(
                 model,
                 optimizer,
@@ -346,10 +349,10 @@ def main():
                 val_losses,
                 os.path.join(args.output_dir, "best_model.pt"),
             )
-            print(f"  New best model saved!")
+            print(f"  New best model saved! (val recon: {best_val_recon:.4f})")
 
     print("\nTraining complete!")
-    print(f"Best validation loss: {best_val_loss:.4f}")
+    print(f"Best val reconstruction: {best_val_recon:.4f}")
 
 
 if __name__ == "__main__":
