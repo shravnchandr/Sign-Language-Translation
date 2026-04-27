@@ -208,7 +208,7 @@ class Trainer:
             else:
                 mask = batch["mask"].to(self.device)
                 encoder_lengths = ((~mask).sum(dim=1) // 8).clamp(min=1)
-            target_lengths = torch.ones(labels.shape[0], device=self.device)
+            target_lengths = torch.ones(labels.shape[0], device=self.device, dtype=torch.long)
 
             # Forward
             losses = self.model(
