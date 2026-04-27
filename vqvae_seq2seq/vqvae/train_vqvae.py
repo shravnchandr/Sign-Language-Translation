@@ -91,12 +91,7 @@ def validate(
         "vq": 0,
         "diversity": 0,
     }
-    codebook_usage = {
-        name: torch.zeros(config.pose_codebook_size)
-        for name, config in [
-            ("pose", model.config),
-        ]
-    }
+    codebook_usage = {}
     n_batches = 0
 
     for batch in tqdm(dataloader, desc="Validation"):
