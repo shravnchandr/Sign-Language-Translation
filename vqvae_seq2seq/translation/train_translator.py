@@ -111,11 +111,11 @@ class Trainer:
             landmarks = batch["landmarks"].to(self.device)
             mask = batch["mask"].to(self.device)
             indices = self.vqvae.tokenize(landmarks, mask)
-            # Attach lengths derived from actual token output (avoids hardcoding chunk size)
-            first = next(iter(indices.values()))
-            indices["_lengths"] = torch.full(
-                (first.shape[0],), first.shape[1], dtype=torch.long, device=self.device
-            )
+            # Per-sample token lengths: divide frame counts by VQ-VAE chunk size (8).
+            # batch["lengths"] here is frame counts from collate_vqvae.
+            indices["_lengths"] = (
+                batch["lengths"].to(self.device) // 8
+            ).clamp(min=1)
             return indices
 
     def _prepare_targets(
