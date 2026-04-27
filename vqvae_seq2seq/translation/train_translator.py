@@ -161,13 +161,17 @@ class Trainer:
                 labels.shape[0], device=self.device, dtype=torch.long
             )  # Single token targets
 
+            encoder_mask = batch.get("token_mask")
+            if encoder_mask is not None:
+                encoder_mask = encoder_mask.to(self.device)
+
             # Forward + backward with AMP
             self.optimizer.zero_grad()
             with autocast(device_type=self.device.type, enabled=self.use_amp):
                 losses = self.model(
                     token_indices,
                     targets,
-                    encoder_mask=None,
+                    encoder_mask=encoder_mask,
                     encoder_lengths=encoder_lengths,
                     target_lengths=target_lengths,
                 )
@@ -211,17 +215,19 @@ class Trainer:
             labels = batch["labels"].to(self.device)
             targets = self._prepare_targets(labels)
 
-            if "lengths" in batch:
+            encoder_lengths = token_indices.pop("_lengths", None)
+            if encoder_lengths is None:
                 encoder_lengths = batch["lengths"].to(self.device)
-            else:
-                mask = batch["mask"].to(self.device)
-                encoder_lengths = ((~mask).sum(dim=1) // 8).clamp(min=1)
             target_lengths = torch.ones(labels.shape[0], device=self.device, dtype=torch.long)
 
-            # Forward
+            encoder_mask = batch.get("token_mask")
+            if encoder_mask is not None:
+                encoder_mask = encoder_mask.to(self.device)
+
             losses = self.model(
                 token_indices,
                 targets,
+                encoder_mask=encoder_mask,
                 encoder_lengths=encoder_lengths,
                 target_lengths=target_lengths,
             )
