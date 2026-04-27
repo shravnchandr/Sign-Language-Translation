@@ -182,11 +182,12 @@ class EMAVectorQuantizer(nn.Module):
         indices = distances.argmin(dim=1)
         z_q_flat = self.embeddings[indices]
 
-        # Soft diversity loss — computed on distances (fp32) BEFORE EMA update.
-        # Gradients flow through z_flat → encoder. self.embeddings has no grad
-        # (EMA buffer), so only the encoder is pushed toward more spread-out
-        # representations.
-        soft_assign = F.softmax(-distances.float(), dim=1)  # (N, K)
+        # Soft diversity loss — gradients flow through z_flat → encoder.
+        # Use a detached snapshot of the embeddings so the EMA in-place write
+        # (embeddings.copy_) doesn't invalidate this node in the backward graph.
+        emb_d = self.embeddings.detach()
+        dist_div = z_sq + (emb_d ** 2).sum(dim=1) - 2 * torch.matmul(z_flat, emb_d.t())
+        soft_assign = F.softmax(-dist_div.float(), dim=1)  # (N, K)
         mean_assign = soft_assign.mean(0)  # (K,)
         soft_diversity = (mean_assign * (mean_assign + 1e-10).log()).sum()
 
