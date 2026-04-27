@@ -136,41 +136,26 @@ class TemporalAugmentation(nn.Module):
         self, x: torch.Tensor, keep_mask: torch.Tensor
     ) -> torch.Tensor:
         """
-        Interpolate values for dropped frames.
-
-        Args:
-            x: (B, T, N, C) tensor with zeros at dropped frames
-            keep_mask: (B, T) boolean mask
-
-        Returns:
-            Interpolated tensor
+        Interpolate values for dropped frames using vectorized GPU ops.
+        Replaces the original triple-nested Python loop + numpy round-trips.
         """
         B, T, N, C = x.shape
-        result = x.clone()
+        # (B, N*C, T) — layout F.interpolate expects
+        result = x.reshape(B, T, N * C).permute(0, 2, 1)
 
         for b in range(B):
-            mask = keep_mask[b]
-            if mask.all():
+            mask_b = keep_mask[b]
+            if mask_b.all():
                 continue
-
-            kept_indices = mask.nonzero().squeeze(-1).cpu().numpy()
-            dropped_indices = (~mask).nonzero().squeeze(-1).cpu().numpy()
-
-            if len(kept_indices) < 2:
+            kept_idx = mask_b.nonzero(as_tuple=True)[0]
+            if kept_idx.numel() < 2:
                 continue
+            # Interpolate kept frames to full length entirely on GPU
+            kept = result[b : b + 1, :, kept_idx]  # (1, N*C, n_kept)
+            full = F.interpolate(kept, size=T, mode="linear", align_corners=True)
+            result[b : b + 1, :, ~mask_b] = full[:, :, ~mask_b]
 
-            # Interpolate each landmark and coordinate
-            for n in range(N):
-                for c in range(C):
-                    kept_values = x[b, kept_indices, n, c].cpu().numpy()
-                    interp_values = np.interp(
-                        dropped_indices, kept_indices, kept_values
-                    )
-                    result[b, dropped_indices, n, c] = torch.tensor(
-                        interp_values, device=x.device, dtype=x.dtype
-                    )
-
-        return result
+        return result.permute(0, 2, 1).reshape(B, T, N, C)
 
     def temporal_jitter(self, x: torch.Tensor) -> torch.Tensor:
         """

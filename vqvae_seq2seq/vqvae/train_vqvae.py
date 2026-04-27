@@ -44,8 +44,8 @@ def train_epoch(
 
     pbar = tqdm(dataloader, desc=f"Epoch {epoch}")
     for batch in pbar:
-        landmarks = batch["landmarks"].to(device)
-        mask = batch["mask"].to(device)
+        landmarks = batch["landmarks"].to(device, non_blocking=True)
+        mask = batch["mask"].to(device, non_blocking=True)
 
         optimizer.zero_grad()
         with autocast(device_type=device.type, enabled=use_amp):
@@ -58,22 +58,22 @@ def train_epoch(
         scaler.step(optimizer)
         scaler.update()
 
-        # Accumulate losses
+        # Accumulate losses without blocking the GPU
         for key in total_losses:
             if key in outputs["losses"]:
-                total_losses[key] += outputs["losses"][key].item()
+                total_losses[key] += outputs["losses"][key].detach()
         n_batches += 1
 
-        # Update progress bar
-        pbar.set_postfix(
-            {
-                "loss": f"{loss.item():.4f}",
-                "recon": f"{outputs['losses']['reconstruction'].item():.4f}",
-            }
-        )
+        # .item() forces a CPU-GPU sync — only do it every 20 batches
+        if n_batches % 20 == 0:
+            pbar.set_postfix(
+                {
+                    "loss": f"{loss.item():.4f}",
+                    "recon": f"{outputs['losses']['reconstruction'].item():.4f}",
+                }
+            )
 
-    # Average losses
-    return {k: v / n_batches for k, v in total_losses.items()}
+    return {k: (v / n_batches).item() if isinstance(v, torch.Tensor) else v / n_batches for k, v in total_losses.items()}
 
 
 @torch.no_grad()
@@ -100,8 +100,8 @@ def validate(
     n_batches = 0
 
     for batch in tqdm(dataloader, desc="Validation"):
-        landmarks = batch["landmarks"].to(device)
-        mask = batch["mask"].to(device)
+        landmarks = batch["landmarks"].to(device, non_blocking=True)
+        mask = batch["mask"].to(device, non_blocking=True)
 
         outputs = model(landmarks, mask)
 
@@ -109,12 +109,10 @@ def validate(
             if key in outputs["losses"]:
                 total_losses[key] += outputs["losses"][key].item()
 
-        # Track codebook usage
+        # Track codebook usage on GPU
         for name, indices in outputs["indices"].items():
-            usage = torch.bincount(
-                indices.flatten().cpu(),
-                minlength=model.quantizers.quantizers[name].num_embeddings,
-            ).float()
+            n_embed = model.quantizers.quantizers[name].num_embeddings
+            usage = torch.bincount(indices.flatten(), minlength=n_embed).float()
             if name not in codebook_usage:
                 codebook_usage[name] = usage
             else:
