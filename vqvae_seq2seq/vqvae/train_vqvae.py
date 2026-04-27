@@ -278,9 +278,6 @@ def main():
     # Create model
     model = ImprovedVQVAE(config).to(device)
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
-    if device.type == "cuda":
-        model = torch.compile(model)
-        print("Model compiled with torch.compile")
 
     # Optimizer and scheduler
     optimizer = AdamW(
