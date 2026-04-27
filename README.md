@@ -22,10 +22,10 @@ Parquet → LandmarkProcessor → (T, 543, 3)
 
 | Codebook | Size | Captures |
 |----------|------|---------|
-| Pose | 1024 | Body/hand configuration |
-| Motion | 512 | Velocity between frames |
-| Dynamics | 256 | Acceleration patterns |
-| Face | 256 | Non-manual markers (NMMs) |
+| Pose | 256 | Body/hand configuration |
+| Motion | 256 | Velocity between frames |
+| Dynamics | 128 | Acceleration patterns |
+| Face | 128 | Non-manual markers (NMMs) |
 
 Training is fully unsupervised — uses all available datasets including fingerspelling.
 

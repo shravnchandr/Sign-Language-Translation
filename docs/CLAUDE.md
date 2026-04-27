@@ -32,7 +32,7 @@ uv run black <file_or_directory>
 
 **Phase 1 — Factorized VQ-VAE** (`vqvae_seq2seq/vqvae/`):
 - Encodes landmark chunks into 3–4 discrete tokens per chunk: `(pose_id, motion_id, dynamics_id[, face_id])`
-- Factorized codebooks: Pose (1024), Motion (512), Dynamics (256), Face (256)
+- Factorized codebooks: Pose (256), Motion (256), Dynamics (128), Face (128)
 - Multi-scale temporal encoding at chunk sizes `(4, 8, 16)` via `MultiScaleMotionEncoder`
 - EMA vector quantization with codebook reset for dead codes
 - Cross-factor attention (`CrossFactorAttention`) fuses pose/motion/dynamics representations
