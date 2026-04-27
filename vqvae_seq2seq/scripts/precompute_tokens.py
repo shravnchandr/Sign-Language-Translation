@@ -51,16 +51,17 @@ def precompute(
     batch_size: int,
     device: torch.device,
     split_name: str,
+    num_workers: int = 4,
 ):
     loader = DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=4,
+        num_workers=num_workers,
         collate_fn=collate_vqvae,
         pin_memory=True,
         prefetch_factor=2,
-        persistent_workers=True,
+        persistent_workers=num_workers > 0,
     )
 
     sample_idx = 0
@@ -118,6 +119,8 @@ def main():
         help="Landmark cache dir (speeds up parquet loading)",
     )
     parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--num-workers", type=int, default=4,
+                        help="DataLoader workers for CPU preprocessing (try 8-12 on fast SSDs)")
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument(
         "--splits",
@@ -155,7 +158,7 @@ def main():
             cache_dir=args.cache_dir,
         )
         print(f"\n{split_name}: {len(dataset)} samples")
-        precompute(vqvae, dataset, df, token_dir, args.batch_size, device, split_name)
+        precompute(vqvae, dataset, df, token_dir, args.batch_size, device, split_name, args.num_workers)
 
     # Save VQ-VAE config alongside tokens for reference
     vqvae_ckpt = torch.load(
