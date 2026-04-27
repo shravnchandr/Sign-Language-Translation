@@ -10,7 +10,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 VQVAE_EPOCHS=100
 TRANSLATOR_EPOCHS=100
-BATCH_SIZE=64
+BATCH_SIZE=32
 DATA_DIR="data/Isolated_ASL_Recognition"
 CACHE_DIR="data/cache"
 TOKEN_DIR="data/tokens"
