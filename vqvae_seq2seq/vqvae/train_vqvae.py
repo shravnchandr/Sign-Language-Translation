@@ -305,6 +305,9 @@ def main():
             resets_frozen = True
             print(f"  Codebook resets disabled (warmdown from epoch {epoch}/{config.max_epochs})")
 
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+
         train_losses = train_epoch(model, train_loader, optimizer, scaler, device, epoch)
 
         # Validate
