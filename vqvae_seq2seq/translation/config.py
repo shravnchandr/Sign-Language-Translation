@@ -56,7 +56,7 @@ class TranslationConfig:
     weight_decay: float = 0.01
     label_smoothing: float = 0.1
     max_epochs: int = 100
-    batch_size: int = 32
+    batch_size: int = 64
     gradient_clip: float = 1.0
 
     # Regularization
