@@ -419,6 +419,10 @@ class ImprovedVQVAE(nn.Module):
             "losses": losses,
         }
 
+    def freeze_codebook_resets(self):
+        """Disable codebook resets — call at the start of the warmdown phase."""
+        self.quantizers.freeze_resets()
+
     def tokenize(
         self, landmarks: torch.Tensor, mask: Optional[torch.Tensor] = None
     ) -> Dict[str, torch.Tensor]:

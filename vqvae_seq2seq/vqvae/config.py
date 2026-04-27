@@ -51,6 +51,7 @@ class ImprovedVQVAEConfig:
     ema_decay: float = 0.97
     codebook_reset_threshold: float = 0.001
     codebook_reset_patience: int = 50
+    codebook_reset_warmdown_ratio: float = 0.8  # disable resets after this fraction of training
 
     # Cross-factor attention (blindspot #8)
     use_cross_attention: bool = True

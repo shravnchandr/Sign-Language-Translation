@@ -274,6 +274,10 @@ class EMAVectorQuantizer(nn.Module):
         self.usage_count.zero_()
         self.steps_since_reset.zero_()
 
+    def freeze_resets(self):
+        """Disable codebook resets permanently (call during reset warmdown phase)."""
+        self.reset_threshold = 0.0
+
     def get_codebook_usage(self, indices: torch.Tensor) -> torch.Tensor:
         """Compute histogram of codebook usage."""
         return torch.bincount(indices.flatten(), minlength=self.num_embeddings).float()
@@ -356,6 +360,11 @@ class FactorizedVectorQuantizer(nn.Module):
         losses["total"] = {"vq_loss": total_vq, "soft_diversity": total_soft_diversity}
 
         return quantized, indices, losses
+
+    def freeze_resets(self):
+        """Disable codebook resets across all factors."""
+        for q in self.quantizers.values():
+            q.freeze_resets()
 
     def get_all_codebook_usage(
         self, indices: Dict[str, torch.Tensor]

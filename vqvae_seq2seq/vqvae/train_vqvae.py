@@ -296,8 +296,15 @@ def main():
     # selection. The diversity term dominates total loss magnitude and is a poor
     # ranking signal for downstream tokenization quality.
     best_val_recon = float("inf")
+    warmdown_epoch = int(config.max_epochs * config.codebook_reset_warmdown_ratio)
+    resets_frozen = False
 
     for epoch in range(start_epoch, config.max_epochs):
+        if not resets_frozen and epoch >= warmdown_epoch:
+            model.freeze_codebook_resets()
+            resets_frozen = True
+            print(f"  Codebook resets disabled (warmdown from epoch {epoch}/{config.max_epochs})")
+
         train_losses = train_epoch(model, train_loader, optimizer, scaler, device, epoch)
 
         # Validate
