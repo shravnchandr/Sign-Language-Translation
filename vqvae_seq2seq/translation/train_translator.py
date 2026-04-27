@@ -13,6 +13,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
+from torch.amp import autocast, GradScaler
 
 from .config import TranslationConfig
 from .translator_model import SignTranslator
@@ -93,6 +94,8 @@ class Trainer:
             num_training_steps=num_training_steps,
         )
 
+        self.scaler = GradScaler(enabled=device.type == "cuda")
+        self.use_amp = device.type == "cuda"
         self.best_val_loss = float("inf")
         self.best_val_acc = 0.0
 
@@ -158,22 +161,24 @@ class Trainer:
                 labels.shape[0], device=self.device, dtype=torch.long
             )  # Single token targets
 
-            # Forward pass
+            # Forward + backward with AMP
             self.optimizer.zero_grad()
-            losses = self.model(
-                token_indices,
-                targets,
-                encoder_mask=None,  # Tokens don't need mask after VQ-VAE
-                encoder_lengths=encoder_lengths,
-                target_lengths=target_lengths,
-            )
+            with autocast(device_type=self.device.type, enabled=self.use_amp):
+                losses = self.model(
+                    token_indices,
+                    targets,
+                    encoder_mask=None,
+                    encoder_lengths=encoder_lengths,
+                    target_lengths=target_lengths,
+                )
 
-            # Backward
-            losses["total"].backward()
+            self.scaler.scale(losses["total"]).backward()
+            self.scaler.unscale_(self.optimizer)
             torch.nn.utils.clip_grad_norm_(
                 self.model.parameters(), self.config.gradient_clip
             )
-            self.optimizer.step()
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
             self.scheduler.step()
 
             # Accumulate losses
