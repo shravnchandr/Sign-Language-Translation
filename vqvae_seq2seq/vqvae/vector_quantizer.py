@@ -167,42 +167,38 @@ class EMAVectorQuantizer(nn.Module):
         """
         input_shape = z.shape
         D = input_shape[-1]
-
-        # Flatten
         z_flat = z.reshape(-1, D)
-        N = z_flat.shape[0]
 
-        # Compute distances
+        # Detach embeddings once. EMA never sends gradients through the codebook
+        # anyway, so this is semantically equivalent and safe from the subsequent
+        # in-place EMA write (embeddings.copy_) that would otherwise invalidate
+        # this node in the backward graph.
+        emb_d = self.embeddings.detach()
+
+        # Compute distances once — reused for both quantization and soft diversity.
         z_sq = (z_flat**2).sum(dim=1, keepdim=True)
-        e_sq = (self.embeddings**2).sum(dim=1)
-        ze = torch.matmul(z_flat, self.embeddings.t())
+        e_sq = (emb_d**2).sum(dim=1)
+        ze = torch.matmul(z_flat, emb_d.t())
         distances = z_sq + e_sq - 2 * ze
 
-        # Get nearest codes
+        # Nearest-code lookup (use live embeddings so the straight-through path
+        # references the same tensor version as the EMA buffers)
         indices = distances.argmin(dim=1)
         z_q_flat = self.embeddings[indices]
 
-        # Soft diversity loss — gradients flow through z_flat → encoder.
-        # Use a detached snapshot of the embeddings so the EMA in-place write
-        # (embeddings.copy_) doesn't invalidate this node in the backward graph.
-        emb_d = self.embeddings.detach()
-        dist_div = z_sq + (emb_d ** 2).sum(dim=1) - 2 * torch.matmul(z_flat, emb_d.t())
-        soft_assign = F.softmax(-dist_div.float(), dim=1)  # (N, K)
+        # Soft diversity loss — same distances tensor, no extra matmul needed.
+        soft_assign = F.softmax(-distances.float(), dim=1)  # (N, K)
         mean_assign = soft_assign.mean(0)  # (K,)
         soft_diversity = (mean_assign * (mean_assign + 1e-10).log()).sum()
 
-        # EMA update during training
+        # EMA update (in-place; safe because distances was built from emb_d)
         if training and self.training:
             self._ema_update(z_flat, indices)
 
-        # Reshape outputs
+        # Reshape and straight-through gradient
         z_q = z_q_flat.reshape(input_shape)
         indices = indices.reshape(input_shape[:-1])
-
-        # Commitment loss only (codebook updated via EMA)
         commitment_loss = F.mse_loss(z_q.detach(), z)
-
-        # Straight-through gradient
         z_q = z + (z_q - z).detach()
 
         losses = {
