@@ -283,6 +283,13 @@ def augment_data_dict(
     """
     Apply augmentation to a dictionary of landmark data.
 
+    WARNING: Each body part is augmented independently, so random decisions
+    (speed, frame dropout) are sampled separately per key. This can de-sync
+    body parts (e.g. one hand gets a speed boost while the other doesn't).
+    Prefer augmenting the full concatenated landmarks tensor directly, as
+    ImprovedVQVAE.forward() does. Only use this function if all body parts
+    are guaranteed to receive the same augmentation parameters.
+
     Args:
         data: Dictionary with 'left_hand', 'right_hand', 'pose', 'face' tensors
         augmenter: TemporalAugmentation instance

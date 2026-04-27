@@ -107,7 +107,13 @@ class Trainer:
         with torch.no_grad():
             landmarks = batch["landmarks"].to(self.device)
             mask = batch["mask"].to(self.device)
-            return self.vqvae.tokenize(landmarks, mask)
+            indices = self.vqvae.tokenize(landmarks, mask)
+            # Attach lengths derived from actual token output (avoids hardcoding chunk size)
+            first = next(iter(indices.values()))
+            indices["_lengths"] = torch.full(
+                (first.shape[0],), first.shape[1], dtype=torch.long, device=self.device
+            )
+            return indices
 
     def _prepare_targets(
         self,
@@ -144,12 +150,9 @@ class Trainer:
             labels = batch["labels"].to(self.device)
             targets = self._prepare_targets(labels)
 
-            if "lengths" in batch:
-                # Pre-tokenized: lengths are already in chunk units
+            encoder_lengths = token_indices.pop("_lengths", None)
+            if encoder_lengths is None:
                 encoder_lengths = batch["lengths"].to(self.device)
-            else:
-                mask = batch["mask"].to(self.device)
-                encoder_lengths = ((~mask).sum(dim=1) // 8).clamp(min=1)
 
             target_lengths = torch.ones(
                 labels.shape[0], device=self.device, dtype=torch.long

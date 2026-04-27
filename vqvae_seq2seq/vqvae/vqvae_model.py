@@ -16,7 +16,6 @@ from .cross_attention import CrossFactorAttention, FactorFusion
 from .vector_quantizer import (
     EMAVectorQuantizer,
     FactorizedVectorQuantizer,
-    DiversityLoss,
 )
 
 
@@ -211,7 +210,6 @@ class ImprovedVQVAE(nn.Module):
         )
 
         # Diversity loss
-        self.diversity_loss = DiversityLoss()
 
         # Decoder
         self.decoder = Decoder(

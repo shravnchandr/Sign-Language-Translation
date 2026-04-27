@@ -292,45 +292,6 @@ class EMAVectorQuantizer(nn.Module):
         return self.embeddings[indices]
 
 
-class DiversityLoss(nn.Module):
-    """
-    Loss to encourage diverse codebook usage.
-
-    Penalizes uneven distribution of codes.
-    """
-
-    def __init__(self, target_perplexity_ratio: float = 0.8):
-        """
-        Args:
-            target_perplexity_ratio: Target perplexity as ratio of codebook size
-        """
-        super().__init__()
-        self.target_perplexity_ratio = target_perplexity_ratio
-
-    def forward(self, indices: torch.Tensor, num_embeddings: int) -> torch.Tensor:
-        """
-        Compute diversity loss.
-
-        Args:
-            indices: Codebook indices from quantization
-            num_embeddings: Size of the codebook
-
-        Returns:
-            Diversity loss (higher when usage is uneven)
-        """
-        # Compute usage distribution
-        usage = torch.bincount(indices.flatten(), minlength=num_embeddings).float()
-        probs = usage / (usage.sum() + 1e-10)
-
-        # Target is uniform distribution
-        target_probs = torch.ones_like(probs) / num_embeddings
-
-        # KL divergence from uniform
-        kl_div = F.kl_div((probs + 1e-10).log(), target_probs, reduction="sum")
-
-        return kl_div
-
-
 class FactorizedVectorQuantizer(nn.Module):
     """
     Factorized quantizer with multiple codebooks.
