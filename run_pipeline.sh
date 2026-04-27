@@ -4,6 +4,9 @@
 
 set -e  # stop on any error
 
+# Reduces CUDA memory fragmentation on long runs
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
 VQVAE_EPOCHS=100
 TRANSLATOR_EPOCHS=100
 BATCH_SIZE=64
