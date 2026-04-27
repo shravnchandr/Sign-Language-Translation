@@ -202,6 +202,75 @@ class TranslationDataset(Dataset):
         return result
 
 
+class TokenizedTranslationDataset(Dataset):
+    """
+    Translation dataset that loads pre-computed VQ-VAE token indices.
+
+    Much faster than TranslationDataset because it skips parquet parsing and
+    the VQ-VAE forward pass entirely — just loads cached .pt token files.
+
+    Use after running: python -m vqvae_seq2seq.scripts.precompute_tokens
+    """
+
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        token_dir: str,
+        sign_to_idx: Dict[str, int],
+    ):
+        self.df = df.reset_index(drop=True)
+        self.token_dir = Path(token_dir)
+        self.sign_to_idx = sign_to_idx
+
+    def __len__(self) -> int:
+        return len(self.df)
+
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        row = self.df.iloc[idx]
+        rel_path = row["path"] if "path" in self.df.columns else str(idx)
+        token_path = self.token_dir / Path(rel_path).with_suffix(".pt")
+
+        tokens = torch.load(token_path, weights_only=True)
+
+        sign = row["sign"]
+        label = self.sign_to_idx.get(sign, -1)
+        if label == -1:
+            raise ValueError(f"Unknown sign: {sign}")
+
+        tokens = dict(tokens)
+        tokens["label"] = torch.tensor(label, dtype=torch.long)
+        return tokens
+
+
+def collate_tokenized(
+    batch: List[Dict[str, torch.Tensor]],
+) -> Dict[str, torch.Tensor]:
+    """
+    Collate pre-tokenized samples, padding token sequences to the same length.
+
+    Each sample has per-factor index tensors of shape (n_chunks,).
+    We pad to max_chunks in the batch with zeros and return a length mask.
+    """
+    factor_names = [k for k in batch[0].keys() if k not in ("n_chunks", "label")]
+    lengths = torch.stack([item["n_chunks"] for item in batch])
+    max_len = lengths.max().item()
+    B = len(batch)
+
+    padded = {name: torch.zeros(B, max_len, dtype=torch.long) for name in factor_names}
+    for i, item in enumerate(batch):
+        n = item["n_chunks"].item()
+        for name in factor_names:
+            padded[name][i, :n] = item[name]
+
+    # True = valid token, False = padding
+    token_mask = torch.arange(max_len).unsqueeze(0) < lengths.unsqueeze(1)
+
+    result = {**padded, "token_mask": token_mask, "lengths": lengths}
+    if "label" in batch[0]:
+        result["labels"] = torch.stack([item["label"] for item in batch])
+    return result
+
+
 def collate_vqvae(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
     """
     Collate function for VQ-VAE dataset.
