@@ -13,17 +13,17 @@ class TranslationConfig:
     """
 
     # Model dimensions
-    d_model: int = 512
-    d_ff: int = 2048
-    n_heads: int = 8
+    d_model: int = 256
+    d_ff: int = 1024
+    n_heads: int = 4
 
     # Encoder (Conformer)
-    n_encoder_layers: int = 12
-    encoder_kernel_size: int = 31
+    n_encoder_layers: int = 6
+    encoder_kernel_size: int = 7  # must be << avg sequence length (5-10 tokens)
     encoder_dropout: float = 0.1
 
     # Decoder (Attention)
-    n_decoder_layers: int = 6
+    n_decoder_layers: int = 3
     decoder_dropout: float = 0.1
 
     # Vocabulary
