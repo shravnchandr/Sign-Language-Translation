@@ -400,13 +400,9 @@ class ImprovedVQVAE(nn.Module):
         pred_velocity = reconstructed[:, 1:] - reconstructed[:, :-1]
         velocity_loss = F.mse_loss(pred_velocity, target_velocity)
 
-        # Compute diversity losses
-        diversity_losses = {}
-        for name, idx in indices.items():
-            codebook_size = getattr(self.config, f"{name}_codebook_size", 256)
-            diversity_losses[name] = self.diversity_loss(idx, codebook_size)
-
-        total_diversity = sum(diversity_losses.values()) / len(diversity_losses)
+        # Soft diversity loss — propagated from EMAVectorQuantizer where it is
+        # computed on continuous distances, giving real gradients back to the encoder.
+        soft_diversity = vq_losses["total"]["soft_diversity"]
 
         # Aggregate losses
         losses = {
@@ -414,7 +410,7 @@ class ImprovedVQVAE(nn.Module):
             "velocity_reconstruction": velocity_loss
             * self.config.velocity_reconstruction_weight,
             "vq": vq_losses["total"]["vq_loss"],
-            "diversity": total_diversity * self.config.codebook_diversity_weight,
+            "diversity": soft_diversity * self.config.codebook_diversity_weight,
         }
         losses["total"] = sum(losses.values())
 

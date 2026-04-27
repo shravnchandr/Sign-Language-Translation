@@ -182,6 +182,14 @@ class EMAVectorQuantizer(nn.Module):
         indices = distances.argmin(dim=1)
         z_q_flat = self.embeddings[indices]
 
+        # Soft diversity loss — computed on distances (fp32) BEFORE EMA update.
+        # Gradients flow through z_flat → encoder. self.embeddings has no grad
+        # (EMA buffer), so only the encoder is pushed toward more spread-out
+        # representations.
+        soft_assign = F.softmax(-distances.float(), dim=1)  # (N, K)
+        mean_assign = soft_assign.mean(0)  # (K,)
+        soft_diversity = (mean_assign * (mean_assign + 1e-10).log()).sum()
+
         # EMA update during training
         if training and self.training:
             self._ema_update(z_flat, indices)
@@ -199,6 +207,7 @@ class EMAVectorQuantizer(nn.Module):
         losses = {
             "commitment_loss": commitment_loss * self.commitment_weight,
             "vq_loss": commitment_loss * self.commitment_weight,
+            "soft_diversity": soft_diversity,
         }
 
         return z_q, indices, losses
@@ -384,8 +393,9 @@ class FactorizedVectorQuantizer(nn.Module):
                 losses[name] = loss
 
         # Aggregate losses
-        total_loss = sum(l["vq_loss"] for l in losses.values())
-        losses["total"] = {"vq_loss": total_loss}
+        total_vq = sum(l["vq_loss"] for l in losses.values())
+        total_soft_diversity = sum(l["soft_diversity"] for l in losses.values()) / len(losses)
+        losses["total"] = {"vq_loss": total_vq, "soft_diversity": total_soft_diversity}
 
         return quantized, indices, losses
 

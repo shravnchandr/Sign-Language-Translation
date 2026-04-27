@@ -50,7 +50,7 @@ class ImprovedVQVAEConfig:
     commitment_weight: float = 0.25
     ema_decay: float = 0.97
     codebook_reset_threshold: float = 0.01
-    codebook_reset_patience: int = 100
+    codebook_reset_patience: int = 20
 
     # Cross-factor attention (blindspot #8)
     use_cross_attention: bool = True
@@ -81,7 +81,7 @@ class ImprovedVQVAEConfig:
     # Loss weights
     reconstruction_weight: float = 1.0
     velocity_reconstruction_weight: float = 0.5
-    codebook_diversity_weight: float = 0.1
+    codebook_diversity_weight: float = 0.2
 
     # Augmentation (blindspot #9)
     augment_speed_range: Tuple[float, float] = (0.8, 1.2)
