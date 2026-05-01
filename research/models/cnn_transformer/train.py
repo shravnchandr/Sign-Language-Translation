@@ -9,7 +9,6 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.amp.autocast_mode import autocast
 from torch.amp.grad_scaler import GradScaler
-from .config import INCLUDE_DEPTH
 from .data.dataset import get_data_loaders
 from .data.augmentation import AdvancedAugmentation, mixup_batch
 from .model.anatomical_conformer import AnatomicalConformer
@@ -70,61 +69,23 @@ def train_epoch(
         x, mask = AdvancedAugmentation.temporal_interpolation(x, mask)
 
         if heavy_augment:
-            # Time stretch: loop so each sample can have a different stretch factor
-            x = x.clone()  # own the tensor before in-place writes
+            x = x.clone()
             mask = mask.clone()
-            for i in range(B):
-                if np.random.random() > 0.5:
-                    new_len = min(int(T * np.random.uniform(0.8, 1.3)), T)
-                    if new_len < T:
-                        xi = (
-                            F.interpolate(
-                                x[i].unsqueeze(0).permute(0, 2, 1),
-                                size=new_len,
-                                mode="linear",
-                                align_corners=False,
-                            )
-                            .permute(0, 2, 1)
-                            .squeeze(0)
-                        )
-                        x[i] = 0.0
-                        x[i, :new_len] = xi
-                        mi = F.interpolate(
-                            mask[i].float().unsqueeze(0).unsqueeze(0),
-                            size=new_len,
-                            mode="linear",
-                            align_corners=False,
-                        ).squeeze()
-                        mask[i] = False
-                        mask[i, :new_len] = mi > 0.5
 
-            # Rotation: vectorized — each selected sample gets an independent angle
+            # Time stretch — one batch-wide interpolation replaces B serial calls
+            if np.random.random() > 0.5:
+                x, mask = AdvancedAugmentation.time_stretch(x, mask)
+
+            # Rotation — batched 2×2 matmul replaces D//2 Python iterations
             sel_rot = torch.rand(B, device=x.device) > 0.5
-            n_sel_rot = int(sel_rot.sum().item())
-            if n_sel_rot > 0:
+            if sel_rot.any():
                 sel_idx = torch.where(sel_rot)[0]
-                angles_rad = torch.tensor(
-                    np.radians(np.random.uniform(-15, 15, n_sel_rot)),
-                    dtype=x.dtype,
-                    device=x.device,
+                x[sel_idx] = AdvancedAugmentation.spatial_rotation(
+                    x[sel_idx], max_angle=15
                 )
-                cos_a = torch.cos(angles_rad)  # (n_sel,)
-                sin_a = torch.sin(angles_rad)
-                coord_stride = 3 if INCLUDE_DEPTH else 2
-                for i_c in range(0, D - 1, coord_stride):
-                    x_c = x[sel_idx, :, i_c].clone()  # (n_sel, T)
-                    y_c = x[sel_idx, :, i_c + 1].clone()
-                    x[sel_idx, :, i_c] = x_c * cos_a.unsqueeze(1) - y_c * sin_a.unsqueeze(1)
-                    x[sel_idx, :, i_c + 1] = x_c * sin_a.unsqueeze(
-                        1
-                    ) + y_c * cos_a.unsqueeze(1)
 
-            # Finger dropout: per-sample loop (zeroing slices is cheap)
-            for i in range(B):
-                if np.random.random() > 0.5:
-                    x[i : i + 1] = AdvancedAugmentation.finger_dropout(
-                        x[i : i + 1], dropout_prob=0.25
-                    )
+            # Finger dropout — batch mask replaces B clone+loop calls
+            x = AdvancedAugmentation.finger_dropout_batch(x)
 
         # --- Mixup ---
         y_a = y

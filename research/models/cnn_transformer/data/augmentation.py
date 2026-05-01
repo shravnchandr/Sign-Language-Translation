@@ -123,17 +123,44 @@ class AdvancedAugmentation:
 
     @staticmethod
     def spatial_rotation(x, max_angle=15):
-        """Rotate around z-axis (viewing angle variation)."""
-        x = x.clone()
-        angle = np.radians(np.random.uniform(-max_angle, max_angle))
-        cos_a, sin_a = float(np.cos(angle)), float(np.sin(angle))
-        coord_stride = COORDS_PER_LM
-        for i in range(0, x.shape[-1] - 1, coord_stride):
-            x_c = x[:, :, i].clone()
-            y_c = x[:, :, i + 1].clone()
-            x[:, :, i] = x_c * cos_a - y_c * sin_a
-            x[:, :, i + 1] = x_c * sin_a + y_c * cos_a
-        return x
+        """Per-sample z-axis rotation via batched 2×2 matmul (no Python coord loop)."""
+        B, T, D = x.shape
+        angles = torch.tensor(
+            np.radians(np.random.uniform(-max_angle, max_angle, B)),
+            dtype=x.dtype, device=x.device,
+        )  # (B,)
+        cos_a, sin_a = torch.cos(angles), torch.sin(angles)
+        # (B, 2, 2) rotation matrices, broadcast over T and K (landmark pairs)
+        rot = torch.stack([
+            torch.stack([ cos_a, -sin_a], dim=-1),
+            torch.stack([ sin_a,  cos_a], dim=-1),
+        ], dim=-2)  # (B, 2, 2)
+        # Reshape to expose (x,y) pairs: (B, T, K, C) where K = D // COORDS_PER_LM
+        x_lm = x.reshape(B, T, D // COORDS_PER_LM, COORDS_PER_LM)
+        xy = x_lm[..., :2]  # (B, T, K, 2) — covers all pairs when COORDS_PER_LM==2
+        # Batched matmul: rot[:, None, None] is (B,1,1,2,2), xy[..., None] is (B,T,K,2,1)
+        xy_rot = (rot[:, None, None] @ xy.unsqueeze(-1)).squeeze(-1)  # (B, T, K, 2)
+        if COORDS_PER_LM == 2:
+            return xy_rot.reshape(B, T, D)
+        x_lm_out = x_lm.clone()
+        x_lm_out[..., :2] = xy_rot
+        return x_lm_out.reshape(B, T, D)
+
+    @staticmethod
+    def finger_dropout_batch(x, sample_prob=0.5, dropout_prob=0.25):
+        """Vectorized finger dropout: batch mask replaces per-sample clone + loop."""
+        B, T, D = x.shape
+        device = x.device
+        dmask = x.new_ones(B, D)
+        sample_gate = torch.rand(B, device=device) < sample_prob  # (B,)
+        for hand_label in ("left", "right"):
+            for fi in range(len(FINGER_LM_RANGES)):
+                drop = sample_gate & (torch.rand(B, device=device) < dropout_prob)
+                if not drop.any():
+                    continue
+                for feat_lo, feat_hi in FINGER_COORD_SLICES[(hand_label, fi)]:
+                    dmask[drop, feat_lo:feat_hi] = 0.0
+        return x * dmask.unsqueeze(1)
 
     @staticmethod
     def random_scale(x, min_scale=0.9, max_scale=1.1):
