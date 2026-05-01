@@ -38,11 +38,17 @@ def _lmdb_length_key(path: str) -> bytes:
 
 
 def _open_lmdb_env(lmdb_path: str):
-    """Return one readonly LMDB env per process/path."""
-    key = str(Path(lmdb_path).resolve())  # canonical: no relative paths, symlinks, or trailing slashes
+    """Return one readonly LMDB env per (process, path).
+
+    Keyed by PID so forked workers never reuse the parent's handle — sharing
+    an lmdb.Environment across fork() deadlocks because the internal mutexes
+    are tied to the parent's PID.
+    """
+    canonical = str(Path(lmdb_path).resolve())
+    key = (os.getpid(), canonical)
     env = _LMDB_ENV_CACHE.get(key)
     if env is None:
-        env = lmdb.open(key, readonly=True, lock=False, readahead=False, meminit=False)
+        env = lmdb.open(canonical, readonly=True, lock=False, readahead=False, meminit=False)
         _LMDB_ENV_CACHE[key] = env
     return env
 
