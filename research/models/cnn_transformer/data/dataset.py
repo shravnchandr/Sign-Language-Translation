@@ -25,6 +25,11 @@ except ImportError:
 _CACHE_VERSION = hashlib.md5("|".join(ALL_COLUMNS).encode()).hexdigest()[:8]
 
 
+def _lmdb_key(path: str) -> bytes:
+    """LMDB lookup key: version-prefixed so stale archives never shadow new configs."""
+    return f"{_CACHE_VERSION}:{path}".encode()
+
+
 class ASLDataset(Dataset):
     """
     ASL landmark dataset with three-tier caching: LMDB → per-sample .pt → parquet.
@@ -56,15 +61,31 @@ class ASLDataset(Dataset):
 
         # LMDB: open with lock=False so multiple DataLoader workers can share
         # the same environment after fork() without deadlocking.
+        # Guard: data.mdb must exist (empty dirs and interrupted builds crash lmdb.open).
         self.lmdb_env = None
-        if lmdb_path and _LMDB_AVAILABLE and Path(lmdb_path).exists():
-            self.lmdb_env = lmdb.open(
-                str(lmdb_path),
-                readonly=True,
-                lock=False,
-                readahead=False,
-                meminit=False,
-            )
+        if lmdb_path and _LMDB_AVAILABLE:
+            lmdb_dir = Path(lmdb_path)
+            if lmdb_dir.exists() and (lmdb_dir / "data.mdb").exists():
+                try:
+                    self.lmdb_env = lmdb.open(
+                        str(lmdb_path),
+                        readonly=True,
+                        lock=False,
+                        readahead=False,
+                        meminit=False,
+                    )
+                except lmdb.Error as exc:
+                    import warnings
+                    warnings.warn(
+                        f"Could not open LMDB at {lmdb_path}: {exc}. "
+                        "Falling back to .pt / parquet cache."
+                    )
+            elif lmdb_dir.exists():
+                import warnings
+                warnings.warn(
+                    f"LMDB directory {lmdb_path} exists but data.mdb is missing "
+                    "(empty or interrupted build). Falling back to .pt / parquet cache."
+                )
 
         self.lengths = self._load_or_compute_lengths()
 
@@ -92,7 +113,7 @@ class ASLDataset(Dataset):
         """Return raw position coordinates (T, D_pos) as a float32 tensor."""
         # Tier 1: LMDB — single file, one open() per training run on network storage
         if self.lmdb_env is not None:
-            key = self.df.iloc[idx]["path"].encode()
+            key = _lmdb_key(self.df.iloc[idx]["path"])
             with self.lmdb_env.begin(buffers=True) as txn:
                 val = txn.get(key)
                 if val is not None:

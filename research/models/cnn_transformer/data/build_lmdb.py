@@ -13,22 +13,33 @@ Run once before training (from the project root):
 
 Resume safety: existing keys are skipped, so an interrupted run can be
 restarted without re-processing completed samples.
+
+Keys are versioned (_CACHE_VERSION prefix) so rebuilding after a config
+change (e.g. new face landmark set) produces new keys and never silently
+reuses stale tensors.
 """
 import argparse
 import io
+import sys
 from pathlib import Path
 
 import lmdb
 import pandas as pd
 import torch
 
+from .dataset import _lmdb_key
 from .preprocessing import frame_stacked_data
 
 # Write this many samples per LMDB transaction to cap in-memory dirty pages.
 _WRITE_BATCH = 2_000
 
 
-def build_lmdb(data_dir: str, lmdb_path: str, map_size_gb: int = 100) -> None:
+def build_lmdb(
+    data_dir: str,
+    lmdb_path: str,
+    map_size_gb: int = 100,
+    allow_errors: bool = False,
+) -> None:
     data_dir = Path(data_dir)
     lmdb_path = Path(lmdb_path)
     lmdb_path.mkdir(parents=True, exist_ok=True)
@@ -45,7 +56,7 @@ def build_lmdb(data_dir: str, lmdb_path: str, map_size_gb: int = 100) -> None:
         batch = df.iloc[batch_start : batch_start + _WRITE_BATCH]
         with env.begin(write=True) as txn:
             for _, row in batch.iterrows():
-                key = row["path"].encode()
+                key = _lmdb_key(row["path"])
                 if txn.get(key) is not None:
                     skipped += 1
                     continue
@@ -60,7 +71,7 @@ def build_lmdb(data_dir: str, lmdb_path: str, map_size_gb: int = 100) -> None:
                     written += 1
                 except Exception as e:
                     errors += 1
-                    print(f"  WARNING: skipping {row['path']}: {e}")
+                    print(f"  ERROR: skipping {row['path']}: {e}", file=sys.stderr)
 
         done = batch_start + len(batch)
         print(
@@ -74,6 +85,14 @@ def build_lmdb(data_dir: str, lmdb_path: str, map_size_gb: int = 100) -> None:
         f"  written={written}  skipped={skipped}  errors={errors}"
     )
 
+    if errors > 0 and not allow_errors:
+        print(
+            f"\nFATAL: {errors} sample(s) failed. Re-run to retry, or pass "
+            "--allow-errors to ignore and proceed.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
 
 def main():
     parser = argparse.ArgumentParser(description="Build LMDB cache for ASL dataset")
@@ -85,8 +104,13 @@ def main():
         default=100,
         help="LMDB virtual address space ceiling in GB (default 100)",
     )
+    parser.add_argument(
+        "--allow-errors",
+        action="store_true",
+        help="Exit 0 even if some samples fail (useful for known-bad parquets)",
+    )
     args = parser.parse_args()
-    build_lmdb(args.data_dir, args.lmdb_path, args.map_size_gb)
+    build_lmdb(args.data_dir, args.lmdb_path, args.map_size_gb, args.allow_errors)
 
 
 if __name__ == "__main__":

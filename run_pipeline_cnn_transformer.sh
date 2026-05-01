@@ -61,18 +61,13 @@ echo "  Batch size:      $BATCH_SIZE"
 echo "  Num workers:     $NUM_WORKERS"
 echo "========================================"
 
-# ── LMDB build (one-time, resumable) ────────────────────────────────────────
+# ── LMDB build (resumable — always invoked so partial builds get completed) ──
 if [ "$SKIP_LMDB" = false ]; then
-    if [ -d "$LMDB_PATH" ]; then
-        echo ""
-        echo "[LMDB] Archive found at $LMDB_PATH — skipping build."
-    else
-        echo ""
-        echo "[LMDB] Building archive from parquets (one-time, resumable)..."
-        uv run python -m cnn_transformer.data.build_lmdb \
-            --data-dir "$DATA_DIR" \
-            --lmdb-path "$LMDB_PATH"
-    fi
+    echo ""
+    echo "[LMDB] Building / resuming LMDB archive (existing keys are skipped)..."
+    uv run python -m cnn_transformer.data.build_lmdb \
+        --data-dir "$DATA_DIR" \
+        --lmdb-path "$LMDB_PATH"
 else
     echo ""
     echo "[LMDB] Skipped (--skip-lmdb). Training will fall back to .pt cache."
