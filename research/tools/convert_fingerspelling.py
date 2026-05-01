@@ -335,7 +335,7 @@ def merge_batch_csvs(output_dir: str) -> pd.DataFrame:
 
     if not batch_files:
         print("No batch files found")
-        return None
+        return pd.DataFrame()
 
     print(f"Found {len(batch_files)} batch files")
 
