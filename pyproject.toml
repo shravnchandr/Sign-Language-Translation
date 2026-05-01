@@ -14,3 +14,9 @@ dependencies = [
     "scikit-learn>=1.7.2",
     "torch>=2.9.1",
 ]
+
+[project.optional-dependencies]
+preprocess = [
+    "mediapipe>=0.10",
+    "opencv-python-headless>=4.8",
+]
