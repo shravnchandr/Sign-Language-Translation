@@ -4,7 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-An Isolated Sign Language Recognition system classifying 250 ASL signs from MediaPipe landmarks. The approach: unsupervised Factorized Temporal VQ-VAE pre-training → Conformer-based translator trained on tokenized sequences.
+An Isolated Sign Language Recognition system classifying 250 ASL signs from MediaPipe landmarks.
+
+Two approaches are under active development, both under `research/models/`:
+
+| Approach | Location | Status |
+|---|---|---|
+| Factorized VQ-VAE → Conformer translator | `research/models/vqvae_seq2seq/` | Primary pipeline |
+| AnatomicalConformer (end-to-end) | `research/models/cnn_transformer/` | Kaggle training target |
+| ST-GCN (baseline) | `research/models/st_gcn/` | Experimental |
 
 ## Commands
 
@@ -12,18 +20,23 @@ An Isolated Sign Language Recognition system classifying 250 ASL signs from Medi
 # Install dependencies (UV package manager, Python 3.14)
 uv sync
 
-# Full pipeline (Phase 1 → pre-tokenize → Phase 2)
-bash run_pipeline.sh
-bash run_pipeline.sh --vqvae-epochs 10 --translator-epochs 10  # quick test
+# Full pipeline (run from project root — requires research/models/ on PYTHONPATH)
+PYTHONPATH=research/models bash run_pipeline.sh
+PYTHONPATH=research/models bash run_pipeline.sh --vqvae-epochs 10 --translator-epochs 10
 
 # Train VQ-VAE (Phase 1)
-uv run python -m vqvae_seq2seq.vqvae.train_vqvae --data-dir data/Isolated_ASL_Recognition --cache-dir data/cache --epochs 100
+PYTHONPATH=research/models uv run python -m vqvae_seq2seq.vqvae.train_vqvae \
+  --data-dir data/Isolated_ASL_Recognition --cache-dir data/cache --epochs 100
 
 # Pre-tokenize dataset with trained VQ-VAE (run once after Phase 1)
-uv run python -m vqvae_seq2seq.scripts.precompute_tokens --vqvae-checkpoint checkpoints/vqvae/best_model.pt --data-dir data/Isolated_ASL_Recognition --token-dir data/tokens --cache-dir data/cache --num-workers 4
+PYTHONPATH=research/models uv run python -m vqvae_seq2seq.scripts.precompute_tokens \
+  --vqvae-checkpoint checkpoints/vqvae/best_model.pt \
+  --data-dir data/Isolated_ASL_Recognition --token-dir data/tokens \
+  --cache-dir data/cache --num-workers 4
 
 # Train Translator (Phase 2) — fast path using pre-tokenized data
-uv run python -m vqvae_seq2seq.translation.train_translator --token-dir data/tokens --data-dir data/Isolated_ASL_Recognition --epochs 100
+PYTHONPATH=research/models uv run python -m vqvae_seq2seq.translation.train_translator \
+  --token-dir data/tokens --data-dir data/Isolated_ASL_Recognition --epochs 100
 
 # Format code
 uv run black <file_or_directory>
@@ -31,46 +44,93 @@ uv run black <file_or_directory>
 
 ## Architecture
 
-### Two-Phase Pipeline
+### Approach 1 — Factorized VQ-VAE Pipeline (`research/models/vqvae_seq2seq/`)
 
-**Phase 1 — Factorized VQ-VAE** (`vqvae_seq2seq/vqvae/`):
+**Phase 1 — Factorized VQ-VAE:**
 - Encodes landmark chunks into 4 discrete tokens per chunk: `(pose_id, motion_id, dynamics_id, face_id)`
 - Factorized codebooks: Pose (256), Motion (256), Dynamics (128), Face (128)
 - Multi-scale temporal encoding at chunk sizes `(4, 8, 16)` via `MultiScaleMotionEncoder`
 - EMA vector quantization with soft diversity loss and codebook reset for dead codes
 - Cross-factor attention (`CrossFactorAttention`) fuses pose/motion/dynamics representations
+- `HandDominanceModule` reorders left/right hands so dominant hand is always in the first slot
 - Training is unsupervised — no labels needed; uses all available datasets
 
-**Phase 2 — Sign Translator** (`vqvae_seq2seq/translation/`):
+**Phase 2 — Sign Translator:**
 - Input: pre-tokenized indices loaded from `data/tokens/` (no VQ-VAE in memory during training)
 - Encoder: Conformer (CNN + self-attention, kernel=7, 6 layers, d_model=256)
 - Decoder: Hybrid CTC + Attention decoder (`HybridDecoder`, 3 layers)
 - Inference: beam search with CTC prefix scoring (`BeamSearch`)
 - 250-class supervised classification using Google ASL Signs labels
 
-### Data Flow
+**Data Flow:**
 ```
-Parquet file → LandmarkProcessor → (T, N, 3) tensor
-  → VQ-VAE → [(pose_id, motion_id, dyn_id, face_id), ...] per chunk  [saved to data/tokens/]
-  → FactorizedTokenEmbedding → Conformer (kernel=7) → 250-class output
+Parquet → LandmarkProcessor → (T, N, 3)
+  → RobustPreprocessor → HandDominanceModule
+  → MultiScaleMotionEncoder → CrossFactorAttention
+  → FactorizedVectorQuantizer → [(pose_id, motion_id, dyn_id, face_id), ...]  [saved to data/tokens/]
+  → FactorizedTokenEmbedding → Conformer → HybridDecoder → 250-class output
 ```
 
-### Key Modules
+### Approach 2 — AnatomicalConformer (`research/models/cnn_transformer/`)
+
+End-to-end supervised classification without VQ-VAE pre-training. Designed for Kaggle training.
+
+- Per-body-part projection: separate `nn.Linear` for LH, RH, pose, face landmarks
+- Velocity stream projected separately and fused with position features
+- Conformer blocks (depthwise conv + self-attention) + CLS token for classification
+- `RobustNormalization` in-model (nose → shoulder fallback)
+- Two-phase training: Phase 1 (80 epochs, heavy aug, mixup) → Phase 2 (20 epochs, fine-tune)
+- Test-time augmentation (5-pass TTA) at evaluation
+
+**Known architectural gaps (not yet implemented):**
+- `HandDominanceModule`: `lh_proj`/`rh_proj` are weight-independent; left-handed signers share no weights with right-handed signers for the same sign. Should reorder hands by motion energy before projection.
+- Per-part velocity: `vel_proj` projects all 418 velocity features jointly. Should mirror the position stream with per-part velocity projections (`lh_vel_proj`, `rh_vel_proj`, `pose_vel_proj`, `face_vel_proj`). Note: velocities ARE already body-relative (computed from nose-subtracted positions).
+
+## Key Modules
+
+### VQ-VAE pipeline (`research/models/vqvae_seq2seq/`)
+
 | File | Purpose |
 |------|---------|
-| `vqvae_seq2seq/vqvae/config.py` | `ImprovedVQVAEConfig` — all hyperparameters |
-| `vqvae_seq2seq/vqvae/vqvae_model.py` | Main VQ-VAE model (assembles all sub-modules) |
-| `vqvae_seq2seq/vqvae/vector_quantizer.py` | `EMAVectorQuantizer`, `FactorizedVectorQuantizer` |
-| `vqvae_seq2seq/vqvae/multi_scale_encoder.py` | Multi-scale motion encoding |
-| `vqvae_seq2seq/vqvae/face_encoder.py` | Dedicated face NMM encoder (5 regions) |
-| `vqvae_seq2seq/vqvae/hand_dominance.py` | Detects & reorders dominant/non-dominant hands |
-| `vqvae_seq2seq/scripts/precompute_tokens.py` | Pre-tokenize dataset with frozen VQ-VAE |
-| `vqvae_seq2seq/data/preprocessing.py` | `RobustPreprocessor`, `LandmarkConfig` |
-| `vqvae_seq2seq/data/dataset.py` | `VQVAEDataset`, `TranslationDataset`, `TokenizedTranslationDataset` |
-| `vqvae_seq2seq/translation/translator_model.py` | `SignTranslator` (full model) |
-| `vqvae_seq2seq/translation/conformer.py` | Conformer encoder blocks |
-| `vqvae_seq2seq/translation/config.py` | `TranslationConfig` |
-| `run_pipeline.sh` | End-to-end pipeline script |
+| `vqvae/config.py` | `ImprovedVQVAEConfig` — all hyperparameters |
+| `vqvae/vqvae_model.py` | Main VQ-VAE model (assembles all sub-modules) |
+| `vqvae/vector_quantizer.py` | `EMAVectorQuantizer`, `FactorizedVectorQuantizer` |
+| `vqvae/multi_scale_encoder.py` | Multi-scale motion encoding |
+| `vqvae/face_encoder.py` | Dedicated face NMM encoder (5 regions) |
+| `vqvae/hand_dominance.py` | Detects & reorders dominant/non-dominant hands |
+| `vqvae/cross_attention.py` | `CrossFactorAttention` fuses pose/motion/dynamics |
+| `scripts/precompute_tokens.py` | Pre-tokenize dataset with frozen VQ-VAE |
+| `data/preprocessing.py` | `RobustPreprocessor`, `LandmarkProcessor` |
+| `data/dataset.py` | `VQVAEDataset`, `TranslationDataset`, `TokenizedTranslationDataset` |
+| `translation/translator_model.py` | `SignTranslator` (full model) |
+| `translation/conformer.py` | Conformer encoder blocks |
+| `translation/decoder.py` | `HybridDecoder` (CTC + attention) |
+| `translation/beam_search.py` | Beam search with CTC prefix scoring |
+| `translation/config.py` | `TranslationConfig` |
+
+### AnatomicalConformer (`research/models/cnn_transformer/`)
+
+| File | Purpose |
+|------|---------|
+| `config.py` | Landmark layout constants, feature dimensions |
+| `model/anatomical_conformer.py` | `AnatomicalConformer` — main model |
+| `model/conformer.py` | `ConformerBlock`, `SinusoidalPositionalEncoding` |
+| `model/normalization.py` | `RobustNormalization` (in-model, nose→shoulder fallback) |
+| `data/dataset.py` | `ASLDataset`, `BucketBatchSampler`, `get_data_loaders` |
+| `data/augmentation.py` | `AdvancedAugmentation` (7 types), `mixup_batch` |
+| `data/preprocessing.py` | `frame_stacked_data` — parquet → numpy array |
+| `train.py` | Two-phase training loop with TTA evaluation |
+
+## Known Bugs
+
+| File | Line | Issue |
+|------|------|-------|
+| `research/models/vqvae_seq2seq/vqvae/vqvae_model.py` | 348–353 | `decode()` maps wrong factors to slots: pose_q→dominant_hand, motion_q→non_dominant_hand, dynamics_q→pose. Should match each factor to its own slot. |
+| `research/models/vqvae_seq2seq/vqvae/vector_quantizer.py` | 201 | MSE loss arguments reversed: `F.mse_loss(z_q.detach(), z)` should be `F.mse_loss(z, z_q.detach())` to pull input toward codebook. |
+| `research/models/vqvae_seq2seq/vqvae/hand_dominance.py` | 173–193 | `HandMirrorAugmentation` doesn't correctly flip x-coordinates. |
+| `research/models/vqvae_seq2seq/translation/train_translator.py` | 117 | Chunk size hardcoded as `8` when computing encoder lengths. Should use `config.base_chunk_size`. |
+| `research/models/st_gcn/st_gcn_model.py` | 106–110 | `edge_importance` parameter is allocated but never used in `forward()`. |
+| `research/models/st_gcn/st_gcn_training.py` | 219–225 | Double-normalizes adjacency matrix: `LandmarkGraph.get_normalized_adjacency()` already normalizes, then chain-edges are added and it's normalized again. |
 
 ## Data
 
@@ -92,24 +152,26 @@ kaggle competitions download -c asl-fingerspelling       # Fingerspelling
 
 ## Key Patterns
 
-**Normalization fallback chain** (`RobustPreprocessor`): nose → shoulder center → hip center. Subtracts the origin to make coordinates body-relative. Falls back when nose landmark is missing.
+**Normalization fallback chain** (`RobustPreprocessor`, `RobustNormalization`): nose → shoulder center → hip center. Subtracts the origin to make coordinates body-relative. Falls back when nose landmark is missing.
 
-**Hand dominance** (`HandDominanceModule`): Detects dominant hand from wrist velocity; reorders left/right channels so dominant hand is always in the first slot before encoding.
+**Velocity is body-relative by construction**: velocities in `ASLDataset` are computed as frame differences of already-normalized positions (nose-subtracted per frame). The resulting velocity is `world_vel[t] − body_translation[t]`, i.e., relative to body movement.
+
+**Hand dominance** (`HandDominanceModule` in VQ-VAE): detects dominant hand from wrist velocity; reorders left/right channels so dominant hand is always in the first slot before encoding. Not yet implemented in `AnatomicalConformer`.
 
 **Soft diversity loss** (`EMAVectorQuantizer`): computed from the distance matrix using `softmax(-distances)` before the argmin step. Gradients flow through `z_flat` to the encoder, pushing it toward spread-out representations. The codebook (EMA buffer) is detached — only the encoder receives this gradient.
 
-**Variable-length batching**: All datasets return a `padding_mask` `(B, T)` bool tensor (`True` = valid). Pass to model alongside `landmarks` or token indices.
+**Variable-length batching**: all datasets return a `padding_mask` `(B, T)` bool tensor (`True` = valid). Pass to model alongside `landmarks` or token indices.
 
-**AMP training**: `torch.amp.autocast` + `GradScaler` wrap every forward/backward pass in `train_vqvae.py`. Disabled automatically when not on CUDA.
+**AMP training**: `torch.amp.autocast` + `GradScaler` wrap every forward/backward pass. Disabled automatically when not on CUDA.
 
 **Preprocessing cache**: `VQVAEDataset` accepts `cache_dir`. First access processes each parquet and saves a `.pt` tensor; subsequent accesses skip parquet parsing entirely. Default: `data/cache/`.
 
-**Pre-tokenization cache**: `precompute_tokens.py` runs the frozen VQ-VAE once, saves per-sample token indices to `data/tokens/` mirroring the data directory structure. `TokenizedTranslationDataset` loads these directly — no VQ-VAE needed during Phase 2 training.
+**Pre-tokenization cache**: `precompute_tokens.py` runs the frozen VQ-VAE once, saves per-sample token indices to `data/tokens/`. `TokenizedTranslationDataset` loads these directly — no VQ-VAE needed during Phase 2 training.
 
 **Conformer kernel size**: must be significantly smaller than the average sequence length. VQ-VAE chunk size 8 → 40–80 frame signs produce 5–10 tokens. `encoder_kernel_size=7` fits within the sequence; larger values operate mostly on padding.
 
 **Best model selection**: Phase 1 saves checkpoints based on val reconstruction loss (not total loss). The diversity term dominates total loss magnitude and is a poor ranking signal.
 
-**Standalone vs modular**: `training/` scripts inline all code from `vqvae_seq2seq/` to be self-contained for Kaggle notebook submission. When editing model logic, update both `vqvae_seq2seq/` and `training/` if the change needs to run on Kaggle.
+**Per-sample augmentation** (`cnn_transformer/train.py`): each sample in a batch gets an independent augmentation decision. Vectorized for flip/noise/rotation; per-sample loop for time_stretch/finger_dropout.
 
 **Label mapping**: 250 ASL signs indexed 0–249. Mapping lives in `data/Isolated_ASL_Recognition/sign_to_prediction_index_map.json`.

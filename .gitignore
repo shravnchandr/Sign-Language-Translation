@@ -30,13 +30,15 @@ Saved_Models/
 *.npy
 *.hdf5
 *.h5
-data/Isolated_ASL_Recognition/train_landmark_files/
-data/ASL_Fingerspelling_Recognition/train_landmarks/
-data/WLASL_Landmarks/train_landmark_files/
-data/cache/
-data/tokens/
+# data/Isolated_ASL_Recognition/train_landmark_files/
+# data/ASL_Fingerspelling_Recognition/train_landmarks/
+# data/WLASL_Landmarks/train_landmark_files/
+# data/cache/
+# data/tokens/
+data/
 
 # Training artifacts
+docs/
 logs/
 runs/
 wandb/
