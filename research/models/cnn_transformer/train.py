@@ -341,7 +341,7 @@ def main():
     else:
         scheduler = None
 
-    best_acc = 0.0
+    best_acc = -float("inf")
     patience = 0
     p1_saved = False   # guards against loading a checkpoint from a previous run
 
