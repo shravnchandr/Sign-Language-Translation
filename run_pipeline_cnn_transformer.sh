@@ -80,8 +80,11 @@ if [ "$SKIP_LMDB" = false ]; then
         $( [ "$ALLOW_ERRORS" = true ] && echo "--allow-errors" )
 else
     echo ""
-    echo "[LMDB] Skipped (--skip-lmdb). Training will fall back to .pt cache."
-    LMDB_PATH=""
+    if [ -n "$LMDB_PATH" ]; then
+        echo "[LMDB] Skipped (--skip-lmdb). Using pre-built LMDB at $LMDB_PATH."
+    else
+        echo "[LMDB] Skipped (--skip-lmdb). Training will fall back to .pt cache."
+    fi
 fi
 
 # ── Train ────────────────────────────────────────────────────────────────────
