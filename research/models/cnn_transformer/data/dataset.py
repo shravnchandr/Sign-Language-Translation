@@ -39,16 +39,11 @@ def _lmdb_length_key(path: str) -> bytes:
 
 def _open_lmdb_env(lmdb_path: str):
     """Return one readonly LMDB env per process/path."""
-    env = _LMDB_ENV_CACHE.get(lmdb_path)
+    key = str(Path(lmdb_path).resolve())  # canonical: no relative paths, symlinks, or trailing slashes
+    env = _LMDB_ENV_CACHE.get(key)
     if env is None:
-        env = lmdb.open(
-            lmdb_path,
-            readonly=True,
-            lock=False,
-            readahead=False,
-            meminit=False,
-        )
-        _LMDB_ENV_CACHE[lmdb_path] = env
+        env = lmdb.open(key, readonly=True, lock=False, readahead=False, meminit=False)
+        _LMDB_ENV_CACHE[key] = env
     return env
 
 
@@ -90,7 +85,7 @@ class ASLDataset(Dataset):
         if lmdb_path and _LMDB_AVAILABLE:
             lmdb_dir = Path(lmdb_path)
             if lmdb_dir.exists() and (lmdb_dir / "data.mdb").exists():
-                self.lmdb_path = str(lmdb_dir)
+                self.lmdb_path = str(lmdb_dir.resolve())
             elif lmdb_dir.exists():
                 import warnings
                 warnings.warn(
