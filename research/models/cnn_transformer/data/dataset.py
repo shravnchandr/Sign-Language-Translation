@@ -10,14 +10,13 @@ from typing import List, Optional, Tuple
 from sklearn.model_selection import train_test_split
 from .augmentation import augment_sample
 from .preprocessing import frame_stacked_data
-from ..config import INCLUDE_FACE, INCLUDE_DEPTH, N_FACE
+from ..config import INCLUDE_FACE, INCLUDE_DEPTH, ALL_COLUMNS
 
-# Short hash of preprocessing-relevant config values.
-# Changing INCLUDE_FACE, INCLUDE_DEPTH, or the face landmark set produces a
-# different hash, preventing silently reusing incompatible cached tensors.
-_CACHE_VERSION = hashlib.md5(
-    f"v1:face={INCLUDE_FACE}:depth={INCLUDE_DEPTH}:n_face={N_FACE}".encode()
-).hexdigest()[:8]
+# Hash of the exact column list serialized into each cached tensor.
+# ALL_COLUMNS encodes INCLUDE_FACE, INCLUDE_DEPTH, and the full face landmark
+# selection (including ordering), so any change that shifts column semantics
+# produces a new hash and forces a clean cache rebuild.
+_CACHE_VERSION = hashlib.md5("|".join(ALL_COLUMNS).encode()).hexdigest()[:8]
 
 
 class ASLDataset(Dataset):

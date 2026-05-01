@@ -328,15 +328,18 @@ def main():
     )
     scaler = GradScaler(enabled=use_amp)
 
-    # Phase 1 scheduler: OneCycleLR sized for the actual number of optimizer steps.
-    # ceil() accounts for the remainder-batch step in train_epoch.
-    steps_p1 = math.ceil(len(train_loader) / 4) * NUM_EPOCHS_PHASE1
-    scheduler = optim.lr_scheduler.OneCycleLR(
-        optimizer,
-        max_lr=5e-4,
-        total_steps=steps_p1,
-        pct_start=0.1,
-    )
+    # Phase 1 scheduler: only created when Phase 1 will actually run.
+    # OneCycleLR rejects total_steps=0, so --phase1-epochs 0 would crash.
+    if NUM_EPOCHS_PHASE1 > 0:
+        steps_p1 = math.ceil(len(train_loader) / 4) * NUM_EPOCHS_PHASE1
+        scheduler = optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            max_lr=5e-4,
+            total_steps=steps_p1,
+            pct_start=0.1,
+        )
+    else:
+        scheduler = None
 
     best_acc = 0.0
     patience = 0
