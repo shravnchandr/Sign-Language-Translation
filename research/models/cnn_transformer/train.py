@@ -46,7 +46,10 @@ def train_epoch(
     train_loss, correct, total = 0, 0, 0
     optimizer.zero_grad()
 
+    n_batches = len(data_loader)
     for idx, (x, mask, y) in enumerate(data_loader):
+        if idx % 50 == 0:
+            print(f"  batch {idx}/{n_batches}", flush=True)
         x, mask, y = x.to(device), mask.to(device), y.to(device)
         B, T, D = x.shape
 
@@ -302,6 +305,7 @@ def main():
         num_workers=args.num_workers,
     )
 
+    print(f"Device      : {device}")
     print(f"Num classes : {NUM_CLASSES}")
     print(f"Model params: {sum(p.numel() for p in model.parameters()):,}")
 
