@@ -1,5 +1,6 @@
 import argparse
 import json
+import math
 import os
 import numpy as np
 import torch
@@ -324,11 +325,11 @@ def main():
     )
     scaler = GradScaler(enabled=use_amp)
 
-    # Optimizer steps per epoch depend on gradient accumulation.
-    # Phase 1 uses accumulation=4, Phase 2 uses accumulation=2.
-    # Total optimizer steps across both phases:
-    steps_p1 = max(1, len(train_loader) // 4) * NUM_EPOCHS_PHASE1
-    steps_p2 = max(1, len(train_loader) // 2) * NUM_EPOCHS_PHASE2
+    # Optimizer steps per epoch = ceil(batches / accumulation_steps) because
+    # train_epoch steps once more for any remainder batches (line ~149).
+    # Floor division would under-count and let OneCycleLR run out of total_steps.
+    steps_p1 = math.ceil(len(train_loader) / 4) * NUM_EPOCHS_PHASE1
+    steps_p2 = math.ceil(len(train_loader) / 2) * NUM_EPOCHS_PHASE2
     scheduler = optim.lr_scheduler.OneCycleLR(
         optimizer,
         max_lr=5e-4,

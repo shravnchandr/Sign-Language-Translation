@@ -99,7 +99,11 @@ class ConformerBlock(nn.Module):
         x = x + residual
 
         # 3. Convolution Module
-        # Zero the conv residual at padded positions to prevent boundary leakage.
+        # Zero padded positions BEFORE conv so they don't bleed into valid
+        # boundary frames through the depthwise kernel, then zero again AFTER
+        # so padded slots stay clean in the residual stream.
+        if mask is not None:
+            x = x * mask.unsqueeze(-1)
         conv_out = self.conv(x)
         if mask is not None:
             conv_out = conv_out * mask.unsqueeze(-1)
@@ -108,7 +112,12 @@ class ConformerBlock(nn.Module):
         # 4. Feed Forward 2
         x = x + 0.5 * self.ff2(x)
 
-        return self.final_norm(x)
+        x = self.final_norm(x)
+        # Re-zero padded positions after the full block so accumulated padding
+        # signal doesn't propagate into the next conformer layer's conv.
+        if mask is not None:
+            x = x * mask.unsqueeze(-1)
+        return x
 
 
 class SinusoidalPositionalEncoding(nn.Module):
