@@ -25,20 +25,15 @@ Saved_Models/
 *.pth
 *.ckpt
 
-# Data (large files)
+# Data (large files) — /data/ anchored to root, so research/models/*/data/ packages are unaffected
 *.parquet
 *.npy
 *.hdf5
 *.h5
-data/Isolated_ASL_Recognition/train_landmark_files/
-data/ASL_Fingerspelling_Recognition/train_landmarks/
-data/WLASL_Landmarks/train_landmark_files/
-data/cache/
-data/tokens/
-# data/ — intentionally not ignored; research/models/*/data/ are Python packages
+/data/
 
 # Training artifacts
-docs/
+/docs/
 logs/
 runs/
 wandb/
