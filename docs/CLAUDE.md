@@ -131,6 +131,15 @@ End-to-end supervised classification without VQ-VAE pre-training. Designed for K
 | `research/models/vqvae_seq2seq/translation/train_translator.py` | 117 | Chunk size hardcoded as `8` when computing encoder lengths. Should use `config.base_chunk_size`. |
 | `research/models/st_gcn/st_gcn_model.py` | 106–110 | `edge_importance` parameter is allocated but never used in `forward()`. |
 | `research/models/st_gcn/st_gcn_training.py` | 219–225 | Double-normalizes adjacency matrix: `LandmarkGraph.get_normalized_adjacency()` already normalizes, then chain-edges are added and it's normalized again. |
+| `research/models/cnn_transformer/data/preprocessing.py` | — | ~~BASE_PATH double-prefixing: `frame_stacked_data` prepended `BASE_PATH` to an already-absolute path built by `dataset.py`. Fixed: `pd.read_parquet(file_path)` directly.~~ **Fixed.** |
+| `research/models/cnn_transformer/model/anatomical_conformer.py` | — | ~~Hand dominance swap inverted: `lh_energy > rh_energy` triggered swap when LH was already dominant.~~ **Fixed: `rh_energy > lh_energy`.** |
+| `research/models/cnn_transformer/model/normalization.py` | — | ~~`RobustNormalization` mutated input in-place, corrupting TTA source tensors.~~ **Fixed: clones output before writing.** |
+| `research/models/cnn_transformer/data/augmentation.py` | — | ~~`random_flip` double-negated velocity x-coords (two loop passes, each covering full tensor).~~ **Fixed: single pass.** |
+| `research/models/cnn_transformer/data/augmentation.py` | — | ~~`mixup_batch` discarded the shuffled sample's mask.~~ **Fixed: returns `mask \| mask[index]`.** |
+| `research/models/cnn_transformer/train.py` | — | ~~OneCycleLR `steps_per_epoch=len(train_loader)` ignored gradient accumulation, making schedule 2–4× slower.~~ **Fixed: `total_steps` computed from actual optimizer step counts per phase.** |
+| `research/models/cnn_transformer/train.py` | — | ~~Phase 2 loop `range(epoch_idx+1, total_steps)` ran too many epochs after early stopping.~~ **Fixed: `range(NUM_EPOCHS_PHASE2)`.** |
+| `research/models/cnn_transformer/train.py` | — | ~~Validation used 5× stochastic TTA, making checkpoint selection noisy.~~ **Fixed: `evaluate_epoch` is deterministic; TTA reserved for final reporting via `evaluate_epoch_tta`.** |
+| `research/models/cnn_transformer/model/conformer.py` | — | ~~Depthwise conv ran over padded positions, leaking zeros into valid boundary frames.~~ **Fixed: conv residual zeroed at padded positions.** |
 
 ## Data
 
@@ -156,7 +165,7 @@ kaggle competitions download -c asl-fingerspelling       # Fingerspelling
 
 **Velocity is body-relative by construction**: velocities in `ASLDataset` are computed as frame differences of already-normalized positions (nose-subtracted per frame). The resulting velocity is `world_vel[t] − body_translation[t]`, i.e., relative to body movement.
 
-**Hand dominance** (`HandDominanceModule` in VQ-VAE): detects dominant hand from wrist velocity; reorders left/right channels so dominant hand is always in the first slot before encoding. Not yet implemented in `AnatomicalConformer`.
+**Hand dominance** (`HandDominanceModule`): detects dominant hand from wrist velocity; reorders left/right channels so dominant hand is always in the first (LH) slot before projection. Implemented in both `AnatomicalConformer` and the VQ-VAE pipeline. Swap triggers when right-hand energy exceeds left-hand energy — left-handed signers naturally already have dominant hand in the LH slot.
 
 **Soft diversity loss** (`EMAVectorQuantizer`): computed from the distance matrix using `softmax(-distances)` before the argmin step. Gradients flow through `z_flat` to the encoder, pushing it toward spread-out representations. The codebook (EMA buffer) is detached — only the encoder receives this gradient.
 

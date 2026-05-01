@@ -122,7 +122,7 @@ def train_epoch(
         # --- Mixup ---
         y_a = y
         if use_mixup:
-            x, y_a, y_b, lam = mixup_batch(x, y)
+            x, y_a, y_b, lam, mask = mixup_batch(x, y, mask)
 
         with autocast(device_type=device.type, enabled=use_amp):
             logits = model(x, mask)
@@ -207,6 +207,21 @@ def predict_with_tta(model, x, mask, n_augmentations=5):
 
 @torch.no_grad()
 def evaluate_epoch(model, data_loader, criterion):
+    """Deterministic evaluation — no TTA — for stable model selection."""
+    model.train(False)
+    test_loss, correct, total = 0, 0, 0
+    for x, mask, y in data_loader:
+        x, mask, y = x.to(device), mask.to(device), y.to(device)
+        logits = model(x, mask)
+        test_loss += criterion(logits, y).item()
+        correct += (logits.argmax(dim=1) == y).sum().item()
+        total += y.size(0)
+    return test_loss / len(data_loader), correct / total
+
+
+@torch.no_grad()
+def evaluate_epoch_tta(model, data_loader, criterion):
+    """TTA evaluation — used for final/reporting accuracy only."""
     model.train(False)
     test_loss, correct, total = 0, 0, 0
     for x, mask, y in data_loader:
@@ -309,12 +324,15 @@ def main():
     )
     scaler = GradScaler(enabled=use_amp)
 
-    total_steps = NUM_EPOCHS_PHASE1 + NUM_EPOCHS_PHASE2
+    # Optimizer steps per epoch depend on gradient accumulation.
+    # Phase 1 uses accumulation=4, Phase 2 uses accumulation=2.
+    # Total optimizer steps across both phases:
+    steps_p1 = max(1, len(train_loader) // 4) * NUM_EPOCHS_PHASE1
+    steps_p2 = max(1, len(train_loader) // 2) * NUM_EPOCHS_PHASE2
     scheduler = optim.lr_scheduler.OneCycleLR(
         optimizer,
         max_lr=5e-4,
-        steps_per_epoch=len(train_loader),
-        epochs=total_steps,
+        total_steps=steps_p1 + steps_p2,
         pct_start=0.1,
     )
 
@@ -358,7 +376,7 @@ def main():
     if os.path.exists(p1_ckpt):
         model.load_state_dict(torch.load(p1_ckpt, weights_only=True))
 
-    for epoch_idx in range(epoch_idx + 1, total_steps):
+    for p2_epoch in range(NUM_EPOCHS_PHASE2):
         t_loss, t_acc = train_epoch(
             model,
             train_loader,
@@ -366,12 +384,12 @@ def main():
             criterion,
             scaler,
             accumulation_steps=2,
-            use_mixup=True,
+            use_mixup=False,
             scheduler=scheduler,
         )
         v_loss, v_acc = evaluate_epoch(model, test_loader, criterion)
         print(
-            f"Epoch {epoch_idx:3d} | Train Acc: {t_acc:.4f} | "
+            f"P2 Epoch {p2_epoch:3d} | Train Acc: {t_acc:.4f} | "
             f"Val Acc: {v_acc:.4f} | LR: {optimizer.param_groups[0]['lr']:.2e}"
         )
         if v_acc > best_acc:
@@ -380,7 +398,14 @@ def main():
             print(f"  → Saved FINAL best model ({best_acc:.4f})")
 
     print("-" * 80)
-    print(f"Best val accuracy: {best_acc:.4f}")
+    # Final TTA evaluation on best model
+    if os.path.exists(final_ckpt):
+        model.load_state_dict(torch.load(final_ckpt, weights_only=True))
+    elif os.path.exists(p1_ckpt):
+        model.load_state_dict(torch.load(p1_ckpt, weights_only=True))
+    _, tta_acc = evaluate_epoch_tta(model, test_loader, criterion)
+    print(f"Best val accuracy (deterministic): {best_acc:.4f}")
+    print(f"Best val accuracy (TTA):           {tta_acc:.4f}")
 
 
 if __name__ == "__main__":

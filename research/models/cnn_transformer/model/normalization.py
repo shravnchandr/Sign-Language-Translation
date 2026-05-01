@@ -28,7 +28,7 @@ class RobustNormalization(nn.Module):
             torch.where(shoulder_valid, shoulder_center, torch.zeros_like(nose)),
         )
 
-        x_pos = x[:, :, :COORD_FEAT].reshape(B, T, -1, c)
-        x_pos = x_pos - origin.unsqueeze(2)
-        x[:, :, :COORD_FEAT] = x_pos.reshape(B, T, -1)
-        return x
+        x_pos = x[:, :, :COORD_FEAT].reshape(B, T, -1, c) - origin.unsqueeze(2)
+        out = x.clone()
+        out[:, :, :COORD_FEAT] = x_pos.reshape(B, T, -1)
+        return out

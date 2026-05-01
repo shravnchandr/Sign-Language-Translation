@@ -43,10 +43,9 @@ class HandDominanceModule(nn.Module):
         lh_energy = (lh_wrist_vel**2).sum(dim=-1).mean(dim=1)  # (B,)
         rh_energy = (rh_wrist_vel**2).sum(dim=-1).mean(dim=1)  # (B,)
 
-        # swap[b] = True means LH is dominant → move it to the LH (first) slot
-        # In that case, RH goes to the LH slot and LH goes to the RH slot,
-        # so the "more active hand" is always first.
-        swap = (lh_energy > rh_energy)[:, None, None]  # (B, 1, 1)
+        # swap[b] = True when RH is dominant → move it to the LH (first) slot.
+        # No swap needed when LH is already the dominant hand.
+        swap = (rh_energy > lh_energy)[:, None, None]  # (B, 1, 1)
 
         if not swap.any():
             return x

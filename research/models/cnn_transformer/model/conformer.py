@@ -99,7 +99,11 @@ class ConformerBlock(nn.Module):
         x = x + residual
 
         # 3. Convolution Module
-        x = x + self.conv(x)
+        # Zero the conv residual at padded positions to prevent boundary leakage.
+        conv_out = self.conv(x)
+        if mask is not None:
+            conv_out = conv_out * mask.unsqueeze(-1)
+        x = x + conv_out
 
         # 4. Feed Forward 2
         x = x + 0.5 * self.ff2(x)
