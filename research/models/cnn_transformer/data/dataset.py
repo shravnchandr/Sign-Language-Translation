@@ -1,4 +1,5 @@
 import hashlib
+import io
 import json
 import os
 import numpy as np
@@ -7,26 +8,35 @@ import torch
 from pathlib import Path
 from torch.utils.data import DataLoader, Dataset, Sampler
 from typing import List, Optional, Tuple
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GroupShuffleSplit, train_test_split
 from .augmentation import augment_sample
 from .preprocessing import frame_stacked_data
-from ..config import INCLUDE_FACE, INCLUDE_DEPTH, ALL_COLUMNS
+from ..config import ALL_COLUMNS
+
+try:
+    import lmdb
+    _LMDB_AVAILABLE = True
+except ImportError:
+    _LMDB_AVAILABLE = False
 
 # Hash of the exact column list serialized into each cached tensor.
-# ALL_COLUMNS encodes INCLUDE_FACE, INCLUDE_DEPTH, and the full face landmark
-# selection (including ordering), so any change that shifts column semantics
-# produces a new hash and forces a clean cache rebuild.
+# Any change to ALL_COLUMNS (face selection, depth flag, ordering) forces a
+# clean rebuild so stale incompatible tensors are never silently reused.
 _CACHE_VERSION = hashlib.md5("|".join(ALL_COLUMNS).encode()).hexdigest()[:8]
 
 
 class ASLDataset(Dataset):
     """
-    ASL landmark dataset with per-sample .pt caching.
+    ASL landmark dataset with three-tier caching: LMDB → per-sample .pt → parquet.
 
-    First access processes each parquet and saves a .pt tensor under cache_dir,
-    mirroring the parquet's relative path. Subsequent accesses skip parquet parsing.
-    Velocity (body-relative frame differences) is computed at runtime so augmented
-    coordinates produce the correct velocity.
+    LMDB is the preferred backend on RunPod / network-attached storage: a single
+    file avoids the per-open() overhead of 94k individual .pt files.  Build it
+    once with `python -m cnn_transformer.data.build_lmdb`.
+
+    The .pt cache is the fallback when LMDB hasn't been built yet.
+
+    Velocity is computed at __getitem__ time after augmentation so augmented
+    coordinates produce the correct body-relative velocity.
     """
 
     def __init__(
@@ -34,6 +44,7 @@ class ASLDataset(Dataset):
         df: pd.DataFrame,
         base_path: str,
         cache_dir: Optional[str] = None,
+        lmdb_path: Optional[str] = None,
         max_frames: int = 128,
         augment: bool = False,
     ):
@@ -43,8 +54,18 @@ class ASLDataset(Dataset):
         self.max_frames = max_frames
         self.augment = augment
 
-        # Compute (and optionally cache) sequence lengths so BucketBatchSampler
-        # can group similar-length sequences without reloading every sample.
+        # LMDB: open with lock=False so multiple DataLoader workers can share
+        # the same environment after fork() without deadlocking.
+        self.lmdb_env = None
+        if lmdb_path and _LMDB_AVAILABLE and Path(lmdb_path).exists():
+            self.lmdb_env = lmdb.open(
+                str(lmdb_path),
+                readonly=True,
+                lock=False,
+                readahead=False,
+                meminit=False,
+            )
+
         self.lengths = self._load_or_compute_lengths()
 
     def __len__(self) -> int:
@@ -56,12 +77,33 @@ class ASLDataset(Dataset):
         rel = self.df.iloc[idx]["path"]
         return self.cache_dir / Path(rel).with_suffix(f".{_CACHE_VERSION}.pt")
 
+    def _fast_length_from_parquet(self, idx: int) -> int:
+        """Count unique frames using only the 'frame' column — avoids reading all landmarks."""
+        full_path = str(self.base_path / self.df.iloc[idx]["path"])
+        try:
+            return min(
+                pd.read_parquet(full_path, columns=["frame"])["frame"].nunique(),
+                self.max_frames,
+            )
+        except Exception:
+            return self.max_frames
+
     def _load_coords(self, idx: int) -> torch.Tensor:
         """Return raw position coordinates (T, D_pos) as a float32 tensor."""
+        # Tier 1: LMDB — single file, one open() per training run on network storage
+        if self.lmdb_env is not None:
+            key = self.df.iloc[idx]["path"].encode()
+            with self.lmdb_env.begin(buffers=True) as txn:
+                val = txn.get(key)
+                if val is not None:
+                    return torch.load(io.BytesIO(bytes(val)), weights_only=True)
+
+        # Tier 2: per-sample .pt cache
         cp = self._cache_path(idx)
         if cp is not None and cp.exists():
             return torch.load(cp, weights_only=True)
-        # Parse from parquet and cache
+
+        # Tier 3: parse parquet and populate .pt cache for future runs
         full_path = str(self.base_path / self.df.iloc[idx]["path"])
         coords = torch.tensor(frame_stacked_data(full_path), dtype=torch.float32)
         if cp is not None:
@@ -70,22 +112,31 @@ class ASLDataset(Dataset):
         return coords
 
     def _load_or_compute_lengths(self) -> List[int]:
-        """Load sequence lengths from a sidecar JSON, or compute and save them."""
+        """Return per-sample sequence lengths, loading from sidecar JSON if available."""
         lengths_file = (
-            (self.cache_dir / f"_lengths_{_CACHE_VERSION}.json") if self.cache_dir else None
+            (self.cache_dir / f"_lengths_{_CACHE_VERSION}.json")
+            if self.cache_dir else None
         )
         if lengths_file is not None and lengths_file.exists():
             with open(lengths_file) as f:
                 lengths = json.load(f)
-            # Stored length list is for the full dataset, re-index to our subset
             if len(lengths) == len(self.df):
                 return lengths
 
-        # Load (and cache) every sample to get its length; this only happens once
+        # Compute lengths. Prefer fast paths over full tensor loads:
+        #   .pt exists → load tensor (still O(N) but avoids parquet parsing)
+        #   otherwise  → read only the 'frame' column (columnar parquet is fast)
+        # LMDB is intentionally skipped here: deserializing each tensor to check
+        # len() is slower than reading one parquet column, and the sidecar makes
+        # this O(N) scan a one-time cost.
         lengths = []
         for i in range(len(self.df)):
-            coords = self._load_coords(i)
-            lengths.append(min(len(coords), self.max_frames))
+            cp = self._cache_path(i)
+            if cp is not None and cp.exists():
+                t = torch.load(cp, weights_only=True)
+                lengths.append(min(len(t), self.max_frames))
+            else:
+                lengths.append(self._fast_length_from_parquet(i))
 
         if lengths_file is not None:
             lengths_file.parent.mkdir(parents=True, exist_ok=True)
@@ -97,16 +148,13 @@ class ASLDataset(Dataset):
         coords = self._load_coords(idx)  # (T, D_pos)
         label = int(self.df.iloc[idx]["sign"])
 
-        # Optional augmentation on raw positions before velocity computation
         if self.augment:
             coords = torch.tensor(augment_sample(coords.numpy()), dtype=torch.float32)
 
-        # Truncate long sequences
         if coords.shape[0] > self.max_frames:
             idxs = torch.linspace(0, coords.shape[0] - 1, self.max_frames).long()
             coords = coords[idxs]
 
-        # Velocity: body-relative because coords are already origin-subtracted
         vel = torch.zeros_like(coords)
         vel[1:] = coords[1:] - coords[:-1]
 
@@ -159,15 +207,17 @@ class BucketBatchSampler(Sampler):
 def get_data_loaders(
     data_dir: str,
     cache_dir: Optional[str] = None,
+    lmdb_path: Optional[str] = None,
     batch_size: int = 64,
     num_workers: int = 4,
     max_frames: int = 128,
 ) -> Tuple[DataLoader, DataLoader]:
     """
     Args:
-        data_dir:    Directory containing train.csv and sign_to_prediction_index_map.json.
-        cache_dir:   Directory for per-sample .pt cache files. Built automatically on
-                     first run; subsequent runs skip parquet parsing.
+        data_dir:    Directory with train.csv and sign_to_prediction_index_map.json.
+        cache_dir:   Directory for per-sample .pt files (fallback when LMDB not built).
+        lmdb_path:   Path to LMDB archive (recommended on network storage). Build with
+                     `python -m cnn_transformer.data.build_lmdb`.
         batch_size:  Samples per batch.
         num_workers: DataLoader worker processes.
         max_frames:  Truncate sequences longer than this.
@@ -181,19 +231,34 @@ def get_data_loaders(
     df = pd.read_csv(train_csv)
     df["sign"] = df["sign"].map(sign2idx)
 
-    train_df, test_df = train_test_split(
-        df, test_size=0.1, stratify=df["sign"], random_state=42
-    )
+    # Signer-independent split: ensures no participant appears in both train and val,
+    # matching the Kaggle evaluation setup. Falls back to stratified random split
+    # if participant_id is absent.
+    if "participant_id" in df.columns:
+        gss = GroupShuffleSplit(n_splits=1, test_size=0.1, random_state=42)
+        train_idx, test_idx = next(gss.split(df, groups=df["participant_id"]))
+        train_df = df.iloc[train_idx]
+        test_df = df.iloc[test_idx]
+        print(
+            f"Signer-independent split: "
+            f"{train_df['participant_id'].nunique()} train signers, "
+            f"{test_df['participant_id'].nunique()} val signers"
+        )
+    else:
+        train_df, test_df = train_test_split(
+            df, test_size=0.1, stratify=df["sign"], random_state=42
+        )
 
-    # Separate cache subdirs so the lengths sidecar files don't collide
     train_cache = str(Path(cache_dir) / "train") if cache_dir else None
     test_cache = str(Path(cache_dir) / "test") if cache_dir else None
 
     train_dataset = ASLDataset(
-        train_df, data_dir, cache_dir=train_cache, max_frames=max_frames, augment=True
+        train_df, data_dir, cache_dir=train_cache, lmdb_path=lmdb_path,
+        max_frames=max_frames, augment=True,
     )
     test_dataset = ASLDataset(
-        test_df, data_dir, cache_dir=test_cache, max_frames=max_frames, augment=False
+        test_df, data_dir, cache_dir=test_cache, lmdb_path=lmdb_path,
+        max_frames=max_frames, augment=False,
     )
 
     train_loader = DataLoader(

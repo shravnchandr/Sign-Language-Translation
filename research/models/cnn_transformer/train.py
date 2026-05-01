@@ -175,30 +175,22 @@ def predict_with_tta(model, x, mask, n_augmentations=5):
         if np.random.random() > 0.5:
             x_aug = AdvancedAugmentation.gaussian_noise(x_aug, std=0.005)
         if np.random.random() > 0.5:
-            B_tta, T_tta, _ = x_aug.shape
-            for i in range(B_tta):
-                new_len = min(int(T_tta * np.random.uniform(0.9, 1.1)), T_tta)
-                if new_len < T_tta:
-                    xi = (
-                        F.interpolate(
-                            x_aug[i].unsqueeze(0).permute(0, 2, 1),
-                            size=new_len,
-                            mode="linear",
-                            align_corners=False,
-                        )
-                        .permute(0, 2, 1)
-                        .squeeze(0)
-                    )
-                    x_aug[i] = 0.0
-                    x_aug[i, :new_len] = xi
-                    mi = F.interpolate(
-                        mask_aug[i].float().unsqueeze(0).unsqueeze(0),
-                        size=new_len,
-                        mode="linear",
-                        align_corners=False,
-                    ).squeeze()
-                    mask_aug[i] = False
-                    mask_aug[i, :new_len] = mi > 0.5
+            B_tta, T_tta, D_tta = x_aug.shape
+            new_len = min(int(T_tta * np.random.uniform(0.9, 1.1)), T_tta)
+            if new_len < T_tta:
+                # Batch-vectorized: same stretch factor for whole batch this pass.
+                x_aug = F.interpolate(
+                    x_aug.permute(0, 2, 1),
+                    size=new_len, mode="linear", align_corners=False,
+                ).permute(0, 2, 1)
+                x_aug = F.pad(x_aug, (0, 0, 0, T_tta - new_len))
+                mask_aug = (
+                    F.interpolate(
+                        mask_aug.float().unsqueeze(1),
+                        size=new_len, mode="linear", align_corners=False,
+                    ).squeeze(1) > 0.5
+                )
+                mask_aug = F.pad(mask_aug, (0, T_tta - new_len))
         if np.random.random() > 0.5:
             x_aug = AdvancedAugmentation.spatial_rotation(x_aug, max_angle=10)
         if np.random.random() > 0.5:
@@ -275,6 +267,12 @@ def main():
     parser.add_argument(
         "--num-workers", type=int, default=4, help="DataLoader worker processes"
     )
+    parser.add_argument(
+        "--lmdb-path",
+        default=None,
+        help="Path to LMDB archive (recommended on RunPod). "
+             "Build with: python -m cnn_transformer.data.build_lmdb",
+    )
     args = parser.parse_args()
 
     os.makedirs(args.checkpoint_dir, exist_ok=True)
@@ -295,10 +293,11 @@ def main():
         num_classes=NUM_CLASSES, d_model=512, n_heads=8, n_layers=8, dropout=0.1
     ).to(device)
 
-    print("Building data loaders (first run caches parquets as .pt files)...")
+    print("Building data loaders...")
     train_loader, test_loader = get_data_loaders(
         data_dir=args.data_dir,
         cache_dir=args.cache_dir,
+        lmdb_path=args.lmdb_path,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
     )
