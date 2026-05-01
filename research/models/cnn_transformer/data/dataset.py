@@ -19,6 +19,8 @@ try:
 except ImportError:
     _LMDB_AVAILABLE = False
 
+_LMDB_ENV_CACHE = {}
+
 # Hash of the exact column list serialized into each cached tensor.
 # Any change to ALL_COLUMNS (face selection, depth flag, ordering) forces a
 # clean rebuild so stale incompatible tensors are never silently reused.
@@ -28,6 +30,26 @@ _CACHE_VERSION = hashlib.md5("|".join(ALL_COLUMNS).encode()).hexdigest()[:8]
 def _lmdb_key(path: str) -> bytes:
     """LMDB lookup key: version-prefixed so stale archives never shadow new configs."""
     return f"{_CACHE_VERSION}:{path}".encode()
+
+
+def _lmdb_length_key(path: str) -> bytes:
+    """LMDB metadata key for the raw sequence length of a sample."""
+    return f"{_CACHE_VERSION}:len:{path}".encode()
+
+
+def _open_lmdb_env(lmdb_path: str):
+    """Return one readonly LMDB env per process/path."""
+    env = _LMDB_ENV_CACHE.get(lmdb_path)
+    if env is None:
+        env = lmdb.open(
+            lmdb_path,
+            readonly=True,
+            lock=False,
+            readahead=False,
+            meminit=False,
+        )
+        _LMDB_ENV_CACHE[lmdb_path] = env
+    return env
 
 
 class ASLDataset(Dataset):
@@ -59,27 +81,16 @@ class ASLDataset(Dataset):
         self.max_frames = max_frames
         self.augment = augment
 
-        # LMDB: open with lock=False so multiple DataLoader workers can share
-        # the same environment after fork() without deadlocking.
-        # Guard: data.mdb must exist (empty dirs and interrupted builds crash lmdb.open).
-        self.lmdb_env = None
+        # Store the LMDB path string, NOT the Environment object.
+        # lmdb.Environment is not picklable; Python 3.14 uses forkserver by
+        # default on Linux, so DataLoader workers require the dataset to be
+        # picklable.  _get_lmdb_env() opens lazily per process via the
+        # module-level _LMDB_ENV_CACHE so each worker gets its own handle.
+        self.lmdb_path: Optional[str] = None
         if lmdb_path and _LMDB_AVAILABLE:
             lmdb_dir = Path(lmdb_path)
             if lmdb_dir.exists() and (lmdb_dir / "data.mdb").exists():
-                try:
-                    self.lmdb_env = lmdb.open(
-                        str(lmdb_path),
-                        readonly=True,
-                        lock=False,
-                        readahead=False,
-                        meminit=False,
-                    )
-                except lmdb.Error as exc:
-                    import warnings
-                    warnings.warn(
-                        f"Could not open LMDB at {lmdb_path}: {exc}. "
-                        "Falling back to .pt / parquet cache."
-                    )
+                self.lmdb_path = str(lmdb_dir)
             elif lmdb_dir.exists():
                 import warnings
                 warnings.warn(
@@ -91,6 +102,18 @@ class ASLDataset(Dataset):
 
     def __len__(self) -> int:
         return len(self.df)
+
+    def _get_lmdb_env(self):
+        """Open (or retrieve from cache) the LMDB env for this process."""
+        if self.lmdb_path is None or not _LMDB_AVAILABLE:
+            return None
+        try:
+            return _open_lmdb_env(self.lmdb_path)
+        except lmdb.Error as exc:
+            import warnings
+            warnings.warn(f"Could not open LMDB at {self.lmdb_path}: {exc}. Falling back.")
+            self.lmdb_path = None
+            return None
 
     def _cache_path(self, idx: int) -> Optional[Path]:
         if self.cache_dir is None:
@@ -112,9 +135,10 @@ class ASLDataset(Dataset):
     def _load_coords(self, idx: int) -> torch.Tensor:
         """Return raw position coordinates (T, D_pos) as a float32 tensor."""
         # Tier 1: LMDB — single file, one open() per training run on network storage
-        if self.lmdb_env is not None:
+        env = self._get_lmdb_env()
+        if env is not None:
             key = _lmdb_key(self.df.iloc[idx]["path"])
-            with self.lmdb_env.begin(buffers=True) as txn:
+            with env.begin(buffers=True) as txn:
                 val = txn.get(key)
                 if val is not None:
                     return torch.load(io.BytesIO(bytes(val)), weights_only=True)
@@ -131,6 +155,23 @@ class ASLDataset(Dataset):
             cp.parent.mkdir(parents=True, exist_ok=True)
             torch.save(coords, cp)
         return coords
+
+    def _length_from_lmdb(self, idx: int) -> Optional[int]:
+        env = self._get_lmdb_env()
+        if env is None:
+            return None
+        path = self.df.iloc[idx]["path"]
+        with env.begin(buffers=True) as txn:
+            length_val = txn.get(_lmdb_length_key(path))
+            if length_val is not None:
+                return min(int(bytes(length_val).decode()), self.max_frames)
+
+            # Backward-compatible fallback for LMDBs built before length metadata.
+            tensor_val = txn.get(_lmdb_key(path))
+            if tensor_val is not None:
+                coords = torch.load(io.BytesIO(bytes(tensor_val)), weights_only=True)
+                return min(len(coords), self.max_frames)
+        return None
 
     def _load_or_compute_lengths(self) -> List[int]:
         """Return per-sample sequence lengths, loading from sidecar JSON if available."""
@@ -152,6 +193,11 @@ class ASLDataset(Dataset):
         # this O(N) scan a one-time cost.
         lengths = []
         for i in range(len(self.df)):
+            lmdb_len = self._length_from_lmdb(i)
+            if lmdb_len is not None:
+                lengths.append(lmdb_len)
+                continue
+
             cp = self._cache_path(i)
             if cp is not None and cp.exists():
                 t = torch.load(cp, weights_only=True)
