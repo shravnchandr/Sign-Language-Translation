@@ -8,6 +8,8 @@
 #   bash run_pipeline_cnn_transformer.sh --phase1-epochs 10 --phase2-epochs 5  # quick test
 #   bash run_pipeline_cnn_transformer.sh --data-dir /mnt/data/asl-signs         # custom data path
 #   bash run_pipeline_cnn_transformer.sh --skip-lmdb                            # skip LMDB build
+#   bash run_pipeline_cnn_transformer.sh --map-size-gb 200                      # larger LMDB on big machines
+#   bash run_pipeline_cnn_transformer.sh --allow-errors                         # ignore bad parquets
 
 set -e  # stop on any error
 
@@ -28,6 +30,8 @@ PATIENCE=20
 BATCH_SIZE=64
 NUM_WORKERS=4
 SKIP_LMDB=false
+MAP_SIZE_GB=100
+ALLOW_ERRORS=false
 
 # Parse args
 while [[ $# -gt 0 ]]; do
@@ -42,6 +46,8 @@ while [[ $# -gt 0 ]]; do
         --batch-size)     BATCH_SIZE="$2";     shift 2 ;;
         --num-workers)    NUM_WORKERS="$2";    shift 2 ;;
         --skip-lmdb)      SKIP_LMDB=true;      shift ;;
+        --map-size-gb)    MAP_SIZE_GB="$2";    shift 2 ;;
+        --allow-errors)   ALLOW_ERRORS=true;   shift ;;
         *) echo "Unknown argument: $1"; exit 1 ;;
     esac
 done
@@ -59,6 +65,8 @@ echo "  Phase 2 epochs:  $PHASE2_EPOCHS"
 echo "  Patience:        $PATIENCE"
 echo "  Batch size:      $BATCH_SIZE"
 echo "  Num workers:     $NUM_WORKERS"
+echo "  LMDB map size:   ${MAP_SIZE_GB} GB"
+echo "  Allow errors:    $ALLOW_ERRORS"
 echo "========================================"
 
 # ── LMDB build (resumable — always invoked so partial builds get completed) ──
@@ -67,7 +75,9 @@ if [ "$SKIP_LMDB" = false ]; then
     echo "[LMDB] Building / resuming LMDB archive (existing keys are skipped)..."
     uv run python -m cnn_transformer.data.build_lmdb \
         --data-dir "$DATA_DIR" \
-        --lmdb-path "$LMDB_PATH"
+        --lmdb-path "$LMDB_PATH" \
+        --map-size-gb "$MAP_SIZE_GB" \
+        $( [ "$ALLOW_ERRORS" = true ] && echo "--allow-errors" )
 else
     echo ""
     echo "[LMDB] Skipped (--skip-lmdb). Training will fall back to .pt cache."

@@ -282,12 +282,18 @@ def get_data_loaders(
         max_frames=max_frames, augment=False,
     )
 
+    worker_kwargs = (
+        dict(persistent_workers=True, prefetch_factor=2)
+        if num_workers > 0
+        else {}
+    )
     train_loader = DataLoader(
         train_dataset,
         batch_sampler=BucketBatchSampler(train_dataset.lengths, batch_size),
         collate_fn=collate_batch,
         num_workers=num_workers,
         pin_memory=True,
+        **worker_kwargs,
     )
     test_loader = DataLoader(
         test_dataset,
@@ -295,5 +301,6 @@ def get_data_loaders(
         collate_fn=collate_batch,
         num_workers=num_workers,
         pin_memory=True,
+        **worker_kwargs,
     )
     return train_loader, test_loader
