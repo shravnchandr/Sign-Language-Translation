@@ -29,6 +29,5 @@ class RobustNormalization(nn.Module):
         )
 
         x_pos = x[:, :, :COORD_FEAT].reshape(B, T, -1, c) - origin.unsqueeze(2)
-        out = x.clone()
-        out[:, :, :COORD_FEAT] = x_pos.reshape(B, T, -1)
-        return out
+        x[:, :, :COORD_FEAT] = x_pos.reshape(B, T, -1)
+        return x

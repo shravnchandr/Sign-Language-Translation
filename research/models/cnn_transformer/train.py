@@ -16,6 +16,8 @@ from .model.anatomical_conformer import AnatomicalConformer
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 use_amp = device.type == "cuda"
+if device.type == "cuda":
+    torch.backends.cudnn.benchmark = True
 
 
 class FocalLoss(nn.Module):
@@ -136,10 +138,12 @@ def train_epoch(
 @torch.no_grad()
 def predict_with_tta(model, x, mask, n_augmentations=5):
     """Average logits over the original input plus independently augmented copies."""
+    # RobustNormalization normalizes x in-place inside model(); preserve the
+    # pre-normalization tensor so each TTA pass starts from the same raw input.
+    x_orig = x.clone()
     predictions = [model(x, mask)]
     for _ in range(n_augmentations - 1):
-        # Clone so per-sample in-place ops don't touch the originals
-        x_aug = x.clone()
+        x_aug = x_orig.clone()
         mask_aug = mask.clone()
         if np.random.random() > 0.5:
             x_aug = AdvancedAugmentation.random_flip(x_aug, probability=1.0)
