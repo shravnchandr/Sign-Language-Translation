@@ -39,6 +39,7 @@ def train_epoch(
     scaler,
     accumulation_steps=4,
     use_mixup=True,
+    heavy_augment=True,
     scheduler=None,
 ):
     model.train()
@@ -51,11 +52,12 @@ def train_epoch(
 
         # --- Per-sample augmentation (each sample gets an independent decision) ---
 
-        # Flip: compute one flipped copy of the whole batch, then select per sample
-        flip_sel = torch.rand(B, device=x.device) > 0.5
-        if flip_sel.any():
-            x_flipped = AdvancedAugmentation.random_flip(x, probability=1.0)
-            x = torch.where(flip_sel[:, None, None], x_flipped, x)
+        if heavy_augment:
+            # Flip: compute one flipped copy of the whole batch, then select per sample
+            flip_sel = torch.rand(B, device=x.device) > 0.5
+            if flip_sel.any():
+                x_flipped = AdvancedAugmentation.random_flip(x, probability=1.0)
+                x = torch.where(flip_sel[:, None, None], x_flipped, x)
 
         # Noise: per-sample gate; randn_like already generates independent noise per element
         noise_gate = (torch.rand(B, 1, 1, device=x.device) > 0.5).float()
@@ -64,61 +66,62 @@ def train_epoch(
         # Temporal interpolation: already operates independently per (batch, time) element
         x, mask = AdvancedAugmentation.temporal_interpolation(x, mask)
 
-        # Time stretch: loop so each sample can have a different stretch factor
-        x = x.clone()  # own the tensor before in-place writes
-        mask = mask.clone()
-        for i in range(B):
-            if np.random.random() > 0.5:
-                new_len = min(int(T * np.random.uniform(0.8, 1.3)), T)
-                if new_len < T:
-                    xi = (
-                        F.interpolate(
-                            x[i].unsqueeze(0).permute(0, 2, 1),
+        if heavy_augment:
+            # Time stretch: loop so each sample can have a different stretch factor
+            x = x.clone()  # own the tensor before in-place writes
+            mask = mask.clone()
+            for i in range(B):
+                if np.random.random() > 0.5:
+                    new_len = min(int(T * np.random.uniform(0.8, 1.3)), T)
+                    if new_len < T:
+                        xi = (
+                            F.interpolate(
+                                x[i].unsqueeze(0).permute(0, 2, 1),
+                                size=new_len,
+                                mode="linear",
+                                align_corners=False,
+                            )
+                            .permute(0, 2, 1)
+                            .squeeze(0)
+                        )
+                        x[i] = 0.0
+                        x[i, :new_len] = xi
+                        mi = F.interpolate(
+                            mask[i].float().unsqueeze(0).unsqueeze(0),
                             size=new_len,
                             mode="linear",
                             align_corners=False,
-                        )
-                        .permute(0, 2, 1)
-                        .squeeze(0)
-                    )
-                    x[i] = 0.0
-                    x[i, :new_len] = xi
-                    mi = F.interpolate(
-                        mask[i].float().unsqueeze(0).unsqueeze(0),
-                        size=new_len,
-                        mode="linear",
-                        align_corners=False,
-                    ).squeeze()
-                    mask[i] = False
-                    mask[i, :new_len] = mi > 0.5
+                        ).squeeze()
+                        mask[i] = False
+                        mask[i, :new_len] = mi > 0.5
 
-        # Rotation: vectorized — each selected sample gets an independent angle
-        sel_rot = torch.rand(B, device=x.device) > 0.5
-        n_sel_rot = int(sel_rot.sum().item())
-        if n_sel_rot > 0:
-            sel_idx = torch.where(sel_rot)[0]
-            angles_rad = torch.tensor(
-                np.radians(np.random.uniform(-15, 15, n_sel_rot)),
-                dtype=x.dtype,
-                device=x.device,
-            )
-            cos_a = torch.cos(angles_rad)  # (n_sel,)
-            sin_a = torch.sin(angles_rad)
-            coord_stride = 3 if INCLUDE_DEPTH else 2
-            for i_c in range(0, D - 1, coord_stride):
-                x_c = x[sel_idx, :, i_c].clone()  # (n_sel, T)
-                y_c = x[sel_idx, :, i_c + 1].clone()
-                x[sel_idx, :, i_c] = x_c * cos_a.unsqueeze(1) - y_c * sin_a.unsqueeze(1)
-                x[sel_idx, :, i_c + 1] = x_c * sin_a.unsqueeze(
-                    1
-                ) + y_c * cos_a.unsqueeze(1)
-
-        # Finger dropout: per-sample loop (zeroing slices is cheap)
-        for i in range(B):
-            if np.random.random() > 0.5:
-                x[i : i + 1] = AdvancedAugmentation.finger_dropout(
-                    x[i : i + 1], dropout_prob=0.25
+            # Rotation: vectorized — each selected sample gets an independent angle
+            sel_rot = torch.rand(B, device=x.device) > 0.5
+            n_sel_rot = int(sel_rot.sum().item())
+            if n_sel_rot > 0:
+                sel_idx = torch.where(sel_rot)[0]
+                angles_rad = torch.tensor(
+                    np.radians(np.random.uniform(-15, 15, n_sel_rot)),
+                    dtype=x.dtype,
+                    device=x.device,
                 )
+                cos_a = torch.cos(angles_rad)  # (n_sel,)
+                sin_a = torch.sin(angles_rad)
+                coord_stride = 3 if INCLUDE_DEPTH else 2
+                for i_c in range(0, D - 1, coord_stride):
+                    x_c = x[sel_idx, :, i_c].clone()  # (n_sel, T)
+                    y_c = x[sel_idx, :, i_c + 1].clone()
+                    x[sel_idx, :, i_c] = x_c * cos_a.unsqueeze(1) - y_c * sin_a.unsqueeze(1)
+                    x[sel_idx, :, i_c + 1] = x_c * sin_a.unsqueeze(
+                        1
+                    ) + y_c * cos_a.unsqueeze(1)
+
+            # Finger dropout: per-sample loop (zeroing slices is cheap)
+            for i in range(B):
+                if np.random.random() > 0.5:
+                    x[i : i + 1] = AdvancedAugmentation.finger_dropout(
+                        x[i : i + 1], dropout_prob=0.25
+                    )
 
         # --- Mixup ---
         y_a = y
@@ -325,21 +328,19 @@ def main():
     )
     scaler = GradScaler(enabled=use_amp)
 
-    # Optimizer steps per epoch = ceil(batches / accumulation_steps) because
-    # train_epoch steps once more for any remainder batches (line ~149).
-    # Floor division would under-count and let OneCycleLR run out of total_steps.
+    # Phase 1 scheduler: OneCycleLR sized for the actual number of optimizer steps.
+    # ceil() accounts for the remainder-batch step in train_epoch.
     steps_p1 = math.ceil(len(train_loader) / 4) * NUM_EPOCHS_PHASE1
-    steps_p2 = math.ceil(len(train_loader) / 2) * NUM_EPOCHS_PHASE2
     scheduler = optim.lr_scheduler.OneCycleLR(
         optimizer,
         max_lr=5e-4,
-        total_steps=steps_p1 + steps_p2,
+        total_steps=steps_p1,
         pct_start=0.1,
     )
 
     best_acc = 0.0
     patience = 0
-    epoch_idx = 0
+    p1_saved = False   # guards against loading a checkpoint from a previous run
 
     print("\nPhase 1: Exploration (Heavy Augmentation)")
     print("-" * 80)
@@ -353,6 +354,7 @@ def main():
             scaler,
             accumulation_steps=4,
             use_mixup=True,
+            heavy_augment=True,
             scheduler=scheduler,
         )
         v_loss, v_acc = evaluate_epoch(model, test_loader, criterion)
@@ -364,6 +366,7 @@ def main():
             best_acc = v_acc
             patience = 0
             torch.save(model.state_dict(), p1_ckpt)
+            p1_saved = True
             print(f"  → Saved best P1 model ({best_acc:.4f})")
         else:
             patience += 1
@@ -374,8 +377,20 @@ def main():
     print("\nPhase 2: Fine-tuning (Gentle Augmentation)")
     print("-" * 80)
 
-    if os.path.exists(p1_ckpt):
+    # Load the best Phase 1 checkpoint from THIS run (not a stale file).
+    if p1_saved:
         model.load_state_dict(torch.load(p1_ckpt, weights_only=True))
+
+    # Fresh Phase 2 scheduler — separate from Phase 1 so early stopping doesn't
+    # leave Phase 2 at the wrong point in the LR cycle.
+    steps_p2 = math.ceil(len(train_loader) / 2) * NUM_EPOCHS_PHASE2
+    for pg in optimizer.param_groups:
+        pg["initial_lr"] = pg["lr"] = 1e-4
+    scheduler_p2 = optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=steps_p2, eta_min=1e-6
+    )
+
+    final_saved = False
 
     for p2_epoch in range(NUM_EPOCHS_PHASE2):
         t_loss, t_acc = train_epoch(
@@ -386,7 +401,8 @@ def main():
             scaler,
             accumulation_steps=2,
             use_mixup=False,
-            scheduler=scheduler,
+            heavy_augment=False,
+            scheduler=scheduler_p2,
         )
         v_loss, v_acc = evaluate_epoch(model, test_loader, criterion)
         print(
@@ -396,13 +412,14 @@ def main():
         if v_acc > best_acc:
             best_acc = v_acc
             torch.save(model.state_dict(), final_ckpt)
+            final_saved = True
             print(f"  → Saved FINAL best model ({best_acc:.4f})")
 
     print("-" * 80)
-    # Final TTA evaluation on best model
-    if os.path.exists(final_ckpt):
+    # Final TTA evaluation — load from whichever checkpoint THIS run produced.
+    if final_saved:
         model.load_state_dict(torch.load(final_ckpt, weights_only=True))
-    elif os.path.exists(p1_ckpt):
+    elif p1_saved:
         model.load_state_dict(torch.load(p1_ckpt, weights_only=True))
     _, tta_acc = evaluate_epoch_tta(model, test_loader, criterion)
     print(f"Best val accuracy (deterministic): {best_acc:.4f}")
