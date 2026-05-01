@@ -70,8 +70,6 @@ class AdvancedAugmentation:
         """Replace isolated invalid frames with the average of their neighbours."""
         if x.shape[1] < 3:
             return x, mask
-        x = x.clone()
-        mask = mask.clone()
         left_valid = mask[:, :-2]
         center_inv = ~mask[:, 1:-1]
         right_valid = mask[:, 2:]
@@ -85,28 +83,24 @@ class AdvancedAugmentation:
     @staticmethod
     def time_stretch(x, mask, min_stretch=0.8, max_stretch=1.3):
         B, T, D = x.shape
-        stretch_factor = np.random.uniform(min_stretch, max_stretch)
-        new_len = min(int(T * stretch_factor), T)
+        new_len = int(T * np.random.uniform(min_stretch, max_stretch))
         if new_len == T:
             return x, mask
-        x_reshaped = x.permute(0, 2, 1).reshape(B * D, 1, T)
+        # x.permute(0,2,1) is already (B, D, T) — no reshape needed
         x_stretched = F.interpolate(
-            x_reshaped, size=new_len, mode="linear", align_corners=False
-        )
-        x_stretched = x_stretched.reshape(B, D, new_len).permute(0, 2, 1)
+            x.permute(0, 2, 1), size=new_len, mode="linear", align_corners=False
+        ).permute(0, 2, 1)  # (B, new_len, D)
         mask_stretched = (
             F.interpolate(
-                mask.float().unsqueeze(1),
-                size=new_len,
-                mode="linear",
-                align_corners=False,
-            ).squeeze(1)
-            > 0.5
+                mask.float().unsqueeze(1), size=new_len, mode="linear", align_corners=False
+            ).squeeze(1) > 0.5
         ).bool()
         if new_len < T:
-            pad_len = T - new_len
-            x_stretched = F.pad(x_stretched, (0, 0, 0, pad_len), value=0)
-            mask_stretched = F.pad(mask_stretched, (0, pad_len), value=False)
+            x_stretched = F.pad(x_stretched, (0, 0, 0, T - new_len))
+            mask_stretched = F.pad(mask_stretched, (0, T - new_len))
+        else:
+            x_stretched = x_stretched[:, :T, :]
+            mask_stretched = mask_stretched[:, :T]
         return x_stretched, mask_stretched
 
     @staticmethod

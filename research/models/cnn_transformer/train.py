@@ -9,6 +9,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.amp.autocast_mode import autocast
 from torch.amp.grad_scaler import GradScaler
+from tqdm import tqdm
 from .data.dataset import get_data_loaders
 from .data.augmentation import AdvancedAugmentation, mixup_batch
 from .model.anatomical_conformer import AnatomicalConformer
@@ -40,13 +41,20 @@ def train_epoch(
     use_mixup=True,
     heavy_augment=True,
     scheduler=None,
+    epoch=0,
+    total_epochs=1,
 ):
     model.train()
     train_loss, correct, total = 0, 0, 0
     optimizer.zero_grad()
 
-    for idx, (x, mask, y) in enumerate(data_loader):
-        x, mask, y = x.to(device), mask.to(device), y.to(device)
+    pbar = tqdm(data_loader, desc=f"Epoch {epoch + 1}/{total_epochs}")
+    for idx, (x, mask, y) in enumerate(pbar):
+        # Clone once upfront so all augmentations can write in-place without
+        # extra allocations. non_blocking overlaps H2D transfer with CPU work.
+        x = x.to(device, non_blocking=True).clone()
+        mask = mask.to(device, non_blocking=True).clone()
+        y = y.to(device, non_blocking=True)
         B, T, D = x.shape
 
         # --- Per-sample augmentation (each sample gets an independent decision) ---
@@ -62,13 +70,10 @@ def train_epoch(
         noise_gate = (torch.rand(B, 1, 1, device=x.device) > 0.5).float()
         x = x + torch.randn_like(x) * 0.01 * noise_gate
 
-        # Temporal interpolation: already operates independently per (batch, time) element
+        # temporal_interpolation writes in-place; x is already owned (cloned above)
         x, mask = AdvancedAugmentation.temporal_interpolation(x, mask)
 
         if heavy_augment:
-            x = x.clone()
-            mask = mask.clone()
-
             # Time stretch — one batch-wide interpolation replaces B serial calls
             if np.random.random() > 0.5:
                 x, mask = AdvancedAugmentation.time_stretch(x, mask)
@@ -107,9 +112,14 @@ def train_epoch(
             if scheduler is not None:
                 scheduler.step()
 
-        train_loss += loss.item()
-        correct += (logits.argmax(dim=1) == y_a).sum().item()
+        batch_loss = loss.item()
+        batch_correct = (logits.argmax(dim=1) == y_a).sum().item()
+        train_loss += batch_loss
+        correct += batch_correct
         total += y_a.size(0)
+
+        if idx % 20 == 0:
+            pbar.set_postfix({"loss": f"{batch_loss:.4f}", "acc": f"{batch_correct / y_a.size(0):.4f}"})
 
     if len(data_loader) % accumulation_steps != 0:
         scaler.unscale_(optimizer)
@@ -167,7 +177,7 @@ def evaluate_epoch(model, data_loader, criterion):
     """Deterministic evaluation — no TTA — for stable model selection."""
     model.train(False)
     test_loss, correct, total = 0, 0, 0
-    for x, mask, y in data_loader:
+    for x, mask, y in tqdm(data_loader, desc="Validation", leave=False):
         x, mask, y = x.to(device), mask.to(device), y.to(device)
         logits = model(x, mask)
         test_loss += criterion(logits, y).item()
@@ -181,7 +191,7 @@ def evaluate_epoch_tta(model, data_loader, criterion):
     """TTA evaluation — used for final/reporting accuracy only."""
     model.train(False)
     test_loss, correct, total = 0, 0, 0
-    for x, mask, y in data_loader:
+    for x, mask, y in tqdm(data_loader, desc="TTA Eval", leave=False):
         x, mask, y = x.to(device), mask.to(device), y.to(device)
         logits = predict_with_tta(model, x, mask, n_augmentations=5)
         test_loss += criterion(logits, y).item()
@@ -319,10 +329,13 @@ def main():
             use_mixup=True,
             heavy_augment=True,
             scheduler=scheduler,
+            epoch=epoch_idx,
+            total_epochs=NUM_EPOCHS_PHASE1,
         )
         v_loss, v_acc = evaluate_epoch(model, test_loader, criterion)
         print(
-            f"Epoch {epoch_idx:3d} | Train Acc: {t_acc:.4f} | "
+            f"Epoch {epoch_idx + 1:3d}/{NUM_EPOCHS_PHASE1} | "
+            f"Train Loss: {t_loss:.4f} | Train Acc: {t_acc:.4f} | "
             f"Val Acc: {v_acc:.4f} | LR: {optimizer.param_groups[0]['lr']:.2e}"
         )
         if v_acc > best_acc:
@@ -366,10 +379,13 @@ def main():
             use_mixup=False,
             heavy_augment=False,
             scheduler=scheduler_p2,
+            epoch=p2_epoch,
+            total_epochs=NUM_EPOCHS_PHASE2,
         )
         v_loss, v_acc = evaluate_epoch(model, test_loader, criterion)
         print(
-            f"P2 Epoch {p2_epoch:3d} | Train Acc: {t_acc:.4f} | "
+            f"P2 Epoch {p2_epoch + 1:3d}/{NUM_EPOCHS_PHASE2} | "
+            f"Train Loss: {t_loss:.4f} | Train Acc: {t_acc:.4f} | "
             f"Val Acc: {v_acc:.4f} | LR: {optimizer.param_groups[0]['lr']:.2e}"
         )
         if v_acc > best_acc:
