@@ -2,6 +2,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 from typing import Optional
+from torch.nn.attention import SDPBackend, sdpa_kernel
+
+_SDPA_BACKENDS = [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]
 
 
 class Swish(nn.Module):
@@ -95,7 +98,11 @@ class ConformerBlock(nn.Module):
         # 2. Multi-head Self Attention
         residual = x
         x = self.attn_norm(x)
-        x, _ = self.attn(x, x, x, key_padding_mask=~mask if mask is not None else None)
+        key_padding_mask = ~mask if mask is not None else None
+        # need_weights=False enables F.scaled_dot_product_attention (SDPA) dispatch;
+        # sdpa_kernel selects Flash → MemEfficient → Math in priority order.
+        with sdpa_kernel(_SDPA_BACKENDS):
+            x, _ = self.attn(x, x, x, key_padding_mask=key_padding_mask, need_weights=False)
         x = x + residual
 
         # 3. Convolution Module

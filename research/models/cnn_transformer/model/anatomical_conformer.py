@@ -30,9 +30,7 @@ class HandDominanceModule(nn.Module):
     """
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (B, T, 2*COORD_FEAT)
-        # Wrist is landmark 0 → first COORDS_PER_LM features of each hand's
-        # velocity slice.
+        # x: (B, T, 2*COORD_FEAT) — caller owns x (already cloned upstream)
         lh_wrist_vel = x[
             :, :, COORD_FEAT + LH_START : COORD_FEAT + LH_START + COORDS_PER_LM
         ]
@@ -43,30 +41,23 @@ class HandDominanceModule(nn.Module):
         lh_energy = (lh_wrist_vel**2).sum(dim=-1).mean(dim=1)  # (B,)
         rh_energy = (rh_wrist_vel**2).sum(dim=-1).mean(dim=1)  # (B,)
 
-        # swap[b] = True when RH is dominant → move it to the LH (first) slot.
-        # No swap needed when LH is already the dominant hand.
-        swap = (rh_energy > lh_energy)[:, None, None]  # (B, 1, 1)
-
-        if not swap.any():
+        swap_idx = torch.where(rh_energy > lh_energy)[0]
+        if swap_idx.numel() == 0:
             return x
 
-        x = x.clone()
+        # Swap only the samples that need it: index-slice instead of torch.where
+        # avoids allocating full (B, T, D) tensors for the whole batch.
+        # LH ↔ RH position (non-overlapping slices — no aliasing)
+        tmp = x[swap_idx, :, LH_START:POSE_START].clone()
+        x[swap_idx, :, LH_START:POSE_START] = x[swap_idx, :, RH_START:FACE_START]
+        x[swap_idx, :, RH_START:FACE_START] = tmp
 
-        # Position slices
-        lh_pos = x[:, :, LH_START:POSE_START].clone()
-        rh_pos = x[:, :, RH_START:FACE_START].clone()
-        x[:, :, LH_START:POSE_START] = torch.where(swap, rh_pos, lh_pos)
-        x[:, :, RH_START:FACE_START] = torch.where(swap, lh_pos, rh_pos)
-
-        # Velocity slices (same offsets shifted by COORD_FEAT)
-        lh_vel = x[:, :, COORD_FEAT + LH_START : COORD_FEAT + POSE_START].clone()
-        rh_vel = x[:, :, COORD_FEAT + RH_START : COORD_FEAT + FACE_START].clone()
-        x[:, :, COORD_FEAT + LH_START : COORD_FEAT + POSE_START] = torch.where(
-            swap, rh_vel, lh_vel
-        )
-        x[:, :, COORD_FEAT + RH_START : COORD_FEAT + FACE_START] = torch.where(
-            swap, lh_vel, rh_vel
-        )
+        # LH ↔ RH velocity (same offsets shifted by COORD_FEAT)
+        tmp = x[swap_idx, :, COORD_FEAT + LH_START : COORD_FEAT + POSE_START].clone()
+        x[swap_idx, :, COORD_FEAT + LH_START : COORD_FEAT + POSE_START] = x[
+            swap_idx, :, COORD_FEAT + RH_START : COORD_FEAT + FACE_START
+        ]
+        x[swap_idx, :, COORD_FEAT + RH_START : COORD_FEAT + FACE_START] = tmp
 
         return x
 
