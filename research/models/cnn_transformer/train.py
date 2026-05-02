@@ -2,6 +2,7 @@ import argparse
 import json
 import math
 import os
+import time
 import numpy as np
 import torch
 import torch.nn as nn
@@ -369,6 +370,12 @@ def main():
     else:
         scheduler = None
 
+    def _fmt_time(seconds: float) -> str:
+        s = int(seconds)
+        h, m = divmod(s, 3600)
+        m, s = divmod(m, 60)
+        return f"{h}h {m:02d}m {s:02d}s" if h else f"{m}m {s:02d}s"
+
     best_acc = -float("inf")
     patience = 0
     p1_saved = False   # guards against loading a checkpoint from a previous run
@@ -376,7 +383,12 @@ def main():
     print("\nPhase 1: Exploration (Heavy Augmentation)")
     print("-" * 80)
 
+    t_start_total = time.perf_counter()
+    t_start_p1 = time.perf_counter()
+    p1_epochs_run = 0
+
     for epoch_idx in range(NUM_EPOCHS_PHASE1):
+        t_epoch = time.perf_counter()
         t_loss, t_acc = train_epoch(
             model,
             train_loader,
@@ -393,10 +405,13 @@ def main():
             n_signers=n_signers,
         )
         v_loss, v_acc = evaluate_epoch(model, test_loader, criterion)
+        epoch_secs = time.perf_counter() - t_epoch
+        p1_epochs_run += 1
         print(
             f"Epoch {epoch_idx + 1:3d}/{NUM_EPOCHS_PHASE1} | "
             f"Train Loss: {t_loss:.4f} | Train Acc: {t_acc:.4f} | "
-            f"Val Acc: {v_acc:.4f} | LR: {optimizer.param_groups[0]['lr']:.2e}"
+            f"Val Acc: {v_acc:.4f} | LR: {optimizer.param_groups[0]['lr']:.2e} | "
+            f"Time: {_fmt_time(epoch_secs)}"
         )
         if v_acc > best_acc:
             best_acc = v_acc
@@ -407,8 +422,16 @@ def main():
         else:
             patience += 1
         if patience >= MAX_PATIENCE:
-            print(f"\nEarly stopping Phase 1 at epoch {epoch_idx}")
+            print(f"\nEarly stopping Phase 1 at epoch {epoch_idx + 1}")
             break
+
+    p1_total = time.perf_counter() - t_start_p1
+    print(
+        f"\nPhase 1 complete: {p1_epochs_run} epochs | "
+        f"best val acc: {best_acc:.4f} | "
+        f"total time: {_fmt_time(p1_total)} | "
+        f"avg per epoch: {_fmt_time(p1_total / max(p1_epochs_run, 1))}"
+    )
 
     print("\nPhase 2: Cosine Warmdown (Heavy Augmentation Maintained)")
     print("-" * 80)
@@ -427,8 +450,10 @@ def main():
     )
 
     final_saved = False
+    t_start_p2 = time.perf_counter()
 
     for p2_epoch in range(NUM_EPOCHS_PHASE2):
+        t_epoch = time.perf_counter()
         t_loss, t_acc = train_epoch(
             model,
             train_loader,
@@ -445,10 +470,12 @@ def main():
             n_signers=n_signers,
         )
         v_loss, v_acc = evaluate_epoch(model, test_loader, criterion)
+        epoch_secs = time.perf_counter() - t_epoch
         print(
             f"P2 Epoch {p2_epoch + 1:3d}/{NUM_EPOCHS_PHASE2} | "
             f"Train Loss: {t_loss:.4f} | Train Acc: {t_acc:.4f} | "
-            f"Val Acc: {v_acc:.4f} | LR: {optimizer.param_groups[0]['lr']:.2e}",
+            f"Val Acc: {v_acc:.4f} | LR: {optimizer.param_groups[0]['lr']:.2e} | "
+            f"Time: {_fmt_time(epoch_secs)}",
             flush=True,
         )
         if v_acc > best_acc:
@@ -456,6 +483,9 @@ def main():
             torch.save(model.state_dict(), final_ckpt)
             final_saved = True
             print(f"  → Saved FINAL best model ({best_acc:.4f})")
+
+    p2_total = time.perf_counter() - t_start_p2
+    total_time = time.perf_counter() - t_start_total
 
     print("-" * 80)
     # Final TTA evaluation — load from whichever checkpoint THIS run produced.
@@ -466,6 +496,9 @@ def main():
     _, tta_acc = evaluate_epoch_tta(model, test_loader, criterion)
     print(f"Best val accuracy (deterministic): {best_acc:.4f}")
     print(f"Best val accuracy (TTA):           {tta_acc:.4f}")
+    print(f"Phase 1 time : {_fmt_time(p1_total)} ({p1_epochs_run} epochs, avg {_fmt_time(p1_total / max(p1_epochs_run, 1))}/epoch)")
+    print(f"Phase 2 time : {_fmt_time(p2_total)} ({NUM_EPOCHS_PHASE2} epochs, avg {_fmt_time(p2_total / max(NUM_EPOCHS_PHASE2, 1))}/epoch)")
+    print(f"Total time   : {_fmt_time(total_time)}")
 
 
 if __name__ == "__main__":

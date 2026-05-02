@@ -8,10 +8,17 @@ Tracking every training run, the config used, and the result. Goal: 250-class AS
 
 ## Run 001 — Baseline AnatomicalConformer
 **Date:** ~2025-04 (pre-session)  
-**Config:** d_model=512, n_layers=6, n_heads=8, dropout=0.1  
+**Hardware:** RunPod — NVIDIA A40  
+**Config:** d_model=512, n_layers=6, n_heads=8, dropout=0.1, params=~49M  
 **Face landmarks:** 134 (eyebrows + mouth + nose + eyes + face_oval)  
 **Augmentation:** flip, noise, time-stretch, rotation, finger dropout, mixup  
 **Phase 2:** light augmentation (heavy_augment=False, use_mixup=False)  
+**Timing:**
+- Throughput (before vectorization): ~4.05 it/s
+- Throughput (after vectorization):  ~11.4 it/s
+- Per-epoch time: unknown (not logged)
+- Total training time: unknown (not logged)
+
 **Result:**
 - Best val acc (deterministic): **0.7462**
 - Best val acc (TTA):           **0.7463**
@@ -53,13 +60,23 @@ Tracking every training run, the config used, and the result. Goal: 250-class AS
 ---
 
 ## Run 002 — Pending (next RunPod run)
+**Hardware:** RunPod — NVIDIA A40  
 **Config:**
-- d_model=256, n_layers=4, n_heads=4, dropout=0.2
-- drop_path_max=0.1
-- grl_lambda=0.1
+- d_model=256, n_layers=4, n_heads=4, dropout=0.2, params=~6.5M
+- drop_path_max=0.1, grl_lambda=0.1
 - Face landmarks: 56 (eyebrows + mouth only)
-- Phase 2: heavy_augment=True, use_mixup=True
-- Phase 1: 80 epochs, Phase 2: 20 epochs
+- Phase 1: 80 epochs (OneCycleLR, accumulation×4), Phase 2: 20 epochs (CosineAnnealing, accumulation×4)
+- heavy_augment=True, use_mixup=True throughout
+
+**Timing:** *(fill in after run)*
+- Phase 1: — (— epochs, avg —/epoch)
+- Phase 2: — (20 epochs, avg —/epoch)
+- Total:   —
+
+**Result:** *(fill in after run)*
+- Best val acc (deterministic): —
+- Best val acc (TTA):           —
+- Train acc at convergence:     —
 
 **Expected improvements over Run 001:**
 1. GRL: main driver — should close the 25% train-val gap by forcing signer-invariant features
