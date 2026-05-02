@@ -6,8 +6,9 @@ import hashlib
 from ..config import ALL_COLUMNS
 
 # Digest changes whenever ALL_COLUMNS changes (face selection, depth flag, etc.)
-# so stale LMDB archives are never silently reused after a config change.
-CACHE_VERSION = hashlib.md5("|".join(ALL_COLUMNS).encode()).hexdigest()[:8]
+# or when preprocessing normalization logic changes (_NORM_VERSION bump).
+_NORM_VERSION = "v2_fallback"  # bump when normalize_values logic in preprocessing.py changes
+CACHE_VERSION = hashlib.md5(("|".join(ALL_COLUMNS) + "|" + _NORM_VERSION).encode()).hexdigest()[:8]
 
 
 def lmdb_key(path: str) -> bytes:

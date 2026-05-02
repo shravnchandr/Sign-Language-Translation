@@ -212,10 +212,11 @@ PYTHONPATH=research/models uv run python -m vqvae_seq2seq.translation.train_tran
 ### AnatomicalConformer (RunPod / local)
 
 ```bash
-# Recommended: build LMDB cache once (~2 hrs first run, then instant)
+# Recommended: build LMDB cache once (~20 min with default workers, then instant)
 PYTHONPATH=research/models uv run python -m cnn_transformer.data.build_lmdb \
   --data-dir data/Isolated_ASL_Recognition \
-  --lmdb-path /tmp/asl.lmdb
+  --lmdb-path /tmp/asl.lmdb \
+  --num-workers 8   # default: os.cpu_count()
 
 # Train (default: d_model=256, n_layers=4, n_heads=4, drop_path_max=0.1, grl_lambda=0.1)
 PYTHONPATH=research/models uv run python -m cnn_transformer.train \

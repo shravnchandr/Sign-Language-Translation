@@ -76,10 +76,11 @@ End-to-end supervised classification without VQ-VAE pre-training. Designed for K
 - Input coordinates: x, y, z per landmark (`INCLUDE_DEPTH=True`)
 - Per-body-part projection: separate `nn.Linear` for LH, RH, pose; face is split into `eyebrow_proj` (grammatical: questions/negation) and `mouth_proj` (phonological: mouthing), each at `d_model//8` — same total budget as a single face projection
 - Multi-scale velocity stream (Δ1/Δ2/Δ5): Δ1 computed in dataset from raw coords; Δ2 and Δ5 computed inside `forward()` from body-relative positions (after nose subtraction). All three scales concatenated per part and projected to `d_model//4`. Position and velocity get equal `d_model` budget before fusion.
+- Geometry stream: per hand, 15 joint-angle cosines (3 per finger, at MCP/PIP/DIP joints) + 10 fingertip pairwise distances = 25 features/hand. Computed in `_hand_geometry()` from wrist-relative fingers after `WristNormalization`. Projected 2 × `d_model//8` = `d_model//4`. Invariant to wrist rotation and signer hand scale — encodes fine-grained hand shape that raw XYZ obscures.
+- Feature fusion: pos (`d_model`) + vel (`d_model`) + geo (`d_model//4`) → `feat_fuse` → `d_model`
 - Conformer blocks (depthwise conv + self-attention) + CLS token for classification
-- `RobustNormalization` in-model (nose → shoulder fallback)
-- `WristNormalization`: landmark 0 = location (nose-relative), landmarks 1–20 = shape (wrist-relative)
-- Two-phase training: Phase 1 (100 epochs default, heavy aug, mixup) → Phase 2 (20 epochs, cosine warmdown, heavy aug maintained)
+- Body-relative normalization done once at LMDB build time (`normalize_values`: nose → shoulder → hip → 0 fallback). `WristNormalization` applied in-model: landmark 0 = location (nose-relative), landmarks 1–20 = shape (wrist-relative).
+- Single-phase training: Phase 1 (100 epochs default, heavy aug, mixup, OneCycleLR)
 - Test-time augmentation (5-pass TTA) at evaluation
 - Stochastic depth (`drop_path_max=0.1`): linearly increasing per-block skip probability (block 0 = 0, last = drop_path_max). Controlled via `--drop-path-max` CLI arg.
 - GRL signer-invariance (`--grl-lambda 0.1`): `SignerDiscriminator` on CLS token, gradient reversed so feature extractor is forced to discard signer identity. Ganin schedule ramps λ from 0 → max over Phase 1; Phase 2 continues the ramp from Phase 1's endpoint (stays at ~max_lambda). Requires `participant_id` in train.csv; auto-disables when not present. Adversarial loss uses same mixup weighting as sign loss. Discriminator accuracy is logged each epoch alongside chance level (`1/n_signers`) to verify the feature extractor is successfully confusing the discriminator.
@@ -113,11 +114,13 @@ End-to-end supervised classification without VQ-VAE pre-training. Designed for K
 | `config.py` | Landmark layout constants, feature dimensions |
 | `model/anatomical_conformer.py` | `AnatomicalConformer` — main model |
 | `model/conformer.py` | `ConformerBlock`, `SinusoidalPositionalEncoding` |
-| `model/normalization.py` | `RobustNormalization`, `WristNormalization` |
+| `model/normalization.py` | `WristNormalization` |
 | `model/grl.py` | `SignerDiscriminator`, `ganin_lambda` — GRL signer-invariance |
 | `data/dataset.py` | `ASLDataset`, `BucketBatchSampler`, `get_data_loaders` |
 | `data/augmentation.py` | `AdvancedAugmentation` (7 types), `mixup_batch` |
 | `data/preprocessing.py` | `frame_stacked_data` — parquet → numpy array |
+| `data/build_lmdb.py` | One-time LMDB archive builder (parallelised — `os.cpu_count()` workers by default) |
+| `data/_cache_keys.py` | `CACHE_VERSION` hash, `lmdb_key`/`lmdb_length_key` helpers |
 | `train.py` | Two-phase training loop with TTA evaluation |
 
 ## Known Bugs
@@ -140,6 +143,7 @@ End-to-end supervised classification without VQ-VAE pre-training. Designed for K
 | `research/models/cnn_transformer/train.py` | — | ~~Validation used 5× stochastic TTA, making checkpoint selection noisy.~~ **Fixed: `evaluate_epoch` is deterministic; TTA reserved for final reporting via `evaluate_epoch_tta`.** |
 | `research/models/cnn_transformer/model/conformer.py` | — | ~~Depthwise conv ran over padded positions, leaking zeros into valid boundary frames.~~ **Fixed: conv residual zeroed at padded positions.** |
 | `research/models/cnn_transformer/data/augmentation.py` | — | ~~`mixup_batch` paired lh-dominant with rh-dominant samples, producing ambiguous hand slot assignments when `HandDominanceModule` runs inside the model.~~ **Fixed: dominance-aware pairing shuffles within same-dominance groups.** |
+| `research/models/cnn_transformer/data/preprocessing.py` + `model/anatomical_conformer.py` | — | ~~Double normalization: `normalize_values` zeroed the nose before LMDB, so `RobustNormalization` in the model always fell through to the shoulder-center branch (nose appeared missing).~~ **Fixed: `normalize_values` implements the full nose→shoulder→hip fallback; `RobustNormalization` removed from model.** LMDB must be rebuilt (`_NORM_VERSION` bump auto-invalidates). |
 
 ## Data
 

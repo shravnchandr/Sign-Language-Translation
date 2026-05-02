@@ -1,13 +1,12 @@
 import torch
 import torch.nn as nn
 from .conformer import ConformerBlock, SinusoidalPositionalEncoding
-from .normalization import RobustNormalization, WristNormalization
+from .normalization import WristNormalization
 from .grl import SignerDiscriminator
 from ..config import (
     POSE_START,
     COORDS_PER_LM,
     COORD_FEAT,
-    SELECTED_FACE_INDICES,
     LH_START,
     RH_START,
     FACE_START,
@@ -77,9 +76,6 @@ class AnatomicalConformer(nn.Module):
         # assumes face data is present.
         assert INCLUDE_FACE, "AnatomicalConformer requires INCLUDE_FACE=True"
 
-        self.robust_norm = RobustNormalization(
-            pose_start_idx=POSE_START, n_coords=COORDS_PER_LM
-        )
         self.hand_dominance = HandDominanceModule()
         self.wrist_norm = WristNormalization()
 
@@ -103,9 +99,15 @@ class AnatomicalConformer(nn.Module):
         self.pose_vel_proj = nn.Linear(33 * _V, d_model // 4)
         self.face_vel_proj = nn.Linear(N_FACE * _V, d_model // 4)
 
-        # Feature fusion: (d_model pos + d_model vel) → d_model
+        # Geometry stream — explicit joint angles + fingertip distances per hand.
+        # 15 joint-angle cosines + 10 fingertip pairwise distances = 25 per hand.
+        # Equal budget across both hands: 2 × d_model//8 = d_model//4.
+        self.lh_geo_proj = nn.Linear(25, d_model // 8)
+        self.rh_geo_proj = nn.Linear(25, d_model // 8)
+
+        # Feature fusion: (d_model pos + d_model vel + d_model//4 geo) → d_model
         self.feat_fuse = nn.Sequential(
-            nn.Linear(2 * d_model, d_model),
+            nn.Linear(2 * d_model + d_model // 4, d_model),
             nn.LayerNorm(d_model),
             nn.GELU(),
         )
@@ -128,16 +130,61 @@ class AnatomicalConformer(nn.Module):
         )
         self.signer_disc = SignerDiscriminator(d_model, n_signers) if n_signers > 0 else None
 
+    @staticmethod
+    def _hand_geometry(hand: torch.Tensor) -> torch.Tensor:
+        """
+        Compute rotation-invariant hand shape descriptors in the wrist frame.
+
+        hand: (B, T, 21, c) — lm 0 = wrist at origin (zeros), lm 1-20 wrist-relative.
+        Returns: (B, T, 25) = 15 joint-angle cosines + 10 fingertip pairwise distances.
+
+        Joint angles capture finger curl (impossible to infer reliably from raw XYZ).
+        Fingertip distances capture hand openness and inter-finger configuration.
+        Both are invariant to wrist rotation and signer hand scale.
+        """
+        angles = []
+        for chain in (
+            (0, 1, 2, 3, 4),     # thumb:  wrist, CMC, MCP, IP, tip
+            (0, 5, 6, 7, 8),     # index:  wrist, MCP, PIP, DIP, tip
+            (0, 9, 10, 11, 12),  # middle
+            (0, 13, 14, 15, 16), # ring
+            (0, 17, 18, 19, 20), # pinky
+        ):
+            for i in range(3):   # angle at each of the 3 interior joints
+                a = hand[:, :, chain[i]]
+                b = hand[:, :, chain[i + 1]]
+                c = hand[:, :, chain[i + 2]]
+                v1, v2 = a - b, c - b
+                cos_a = (v1 * v2).sum(-1) / (v1.norm(dim=-1) * v2.norm(dim=-1) + 1e-6)
+                angles.append(cos_a.clamp(-1.0, 1.0))  # (B, T)
+
+        tips = hand[:, :, [4, 8, 12, 16, 20]]  # (B, T, 5, c)
+        dists = [
+            (tips[:, :, i] - tips[:, :, j]).norm(dim=-1)
+            for i in range(5) for j in range(i + 1, 5)
+        ]
+        return torch.stack(angles + dists, dim=-1)  # (B, T, 25)
+
     def forward(self, x, mask, grl_lambda: float = 0.0):
         B, T, _ = x.shape
 
-        x = self.robust_norm(x)
         x = self.hand_dominance(x)   # reorder so dominant hand is always in LH slot
         x = self.wrist_norm(x)       # landmark 0 = location, landmarks 1-20 = shape
 
         # Split position and delta-1 velocity halves (dataset layout: [pos | vel1])
         pos = x[:, :, :COORD_FEAT]
         vel1 = x[:, :, COORD_FEAT:]
+
+        # Geometry stream — computed from wrist-relative fingers (after WristNorm).
+        # Wrist itself is at (0, 0, 0) in this frame; concatenate as lm 0.
+        c = COORDS_PER_LM
+        zeros = torch.zeros(B, T, 1, c, device=x.device, dtype=x.dtype)
+        lh_hand = torch.cat([zeros, pos[:, :, LH_START + c:POSE_START].reshape(B, T, 20, c)], dim=2)
+        rh_hand = torch.cat([zeros, pos[:, :, RH_START + c:FACE_START].reshape(B, T, 20, c)], dim=2)
+        geo_feat = torch.cat([
+            self.lh_geo_proj(self._hand_geometry(lh_hand)),
+            self.rh_geo_proj(self._hand_geometry(rh_hand)),
+        ], dim=-1)  # (B, T, d_model // 4)
 
         # Compute additional velocity scales from body-relative positions.
         # Divided by their time delta so all three scales share the same unit
@@ -168,7 +215,7 @@ class AnatomicalConformer(nn.Module):
         fc_v = self.face_vel_proj(_vcat(slice(FACE_START, None)))
         vel_feat = torch.cat([lh_v, ps_v, rh_v, fc_v], dim=-1)  # (B, T, d_model)
 
-        x = self.feat_fuse(torch.cat([pos_feat, vel_feat], dim=-1))
+        x = self.feat_fuse(torch.cat([pos_feat, vel_feat, geo_feat], dim=-1))
 
         # Sequence modeling
         x = self.pos_enc(x)
