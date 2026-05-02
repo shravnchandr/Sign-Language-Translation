@@ -1,4 +1,3 @@
-import hashlib
 import io
 import json
 import os
@@ -11,7 +10,7 @@ from typing import Dict, List, Optional, Tuple
 from sklearn.model_selection import GroupShuffleSplit, train_test_split
 from .augmentation import augment_sample
 from .preprocessing import frame_stacked_data
-from ..config import ALL_COLUMNS
+from ._cache_keys import CACHE_VERSION, lmdb_key as _lmdb_key, lmdb_length_key as _lmdb_length_key
 
 try:
     import lmdb
@@ -20,21 +19,7 @@ except ImportError:
     _LMDB_AVAILABLE = False
 
 _LMDB_ENV_CACHE = {}
-
-# Hash of the exact column list serialized into each cached tensor.
-# Any change to ALL_COLUMNS (face selection, depth flag, ordering) forces a
-# clean rebuild so stale incompatible tensors are never silently reused.
-_CACHE_VERSION = hashlib.md5("|".join(ALL_COLUMNS).encode()).hexdigest()[:8]
-
-
-def _lmdb_key(path: str) -> bytes:
-    """LMDB lookup key: version-prefixed so stale archives never shadow new configs."""
-    return f"{_CACHE_VERSION}:{path}".encode()
-
-
-def _lmdb_length_key(path: str) -> bytes:
-    """LMDB metadata key for the raw sequence length of a sample."""
-    return f"{_CACHE_VERSION}:len:{path}".encode()
+_CACHE_VERSION = CACHE_VERSION  # re-export for any code that still references it
 
 
 def _open_lmdb_env(lmdb_path: str):

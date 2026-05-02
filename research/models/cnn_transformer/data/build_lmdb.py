@@ -27,7 +27,7 @@ import lmdb
 import pandas as pd
 import torch
 
-from .dataset import _lmdb_key, _lmdb_length_key
+from ._cache_keys import lmdb_key as _lmdb_key, lmdb_length_key as _lmdb_length_key
 from .preprocessing import frame_stacked_data
 
 # Write this many samples per LMDB transaction to cap in-memory dirty pages.

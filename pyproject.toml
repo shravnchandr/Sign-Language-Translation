@@ -17,6 +17,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Minimal install for building the LMDB cache on a CPU-only pod.
+# torch is needed for torch.save/load serialization in build_lmdb.py.
+# Install CPU-only torch to save ~1.5 GB of disk vs the CUDA wheel:
+#   uv pip install -e ".[lmdb-build]" --index-url https://download.pytorch.org/whl/cpu
+lmdb-build = [
+    "lmdb>=1.6.2",
+    "numpy>=2.3.5",
+    "pandas>=2.3.3",
+    "pyarrow>=22.0.0",
+    "torch>=2.9.1",
+]
 preprocess = [
     "mediapipe>=0.10",
     "opencv-python-headless>=4.8",
