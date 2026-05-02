@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from .conformer import ConformerBlock, SinusoidalPositionalEncoding
 from .normalization import RobustNormalization, WristNormalization
+from .grl import SignerDiscriminator
 from ..config import (
     POSE_START,
     COORDS_PER_LM,
@@ -63,7 +64,7 @@ class HandDominanceModule(nn.Module):
 
 
 class AnatomicalConformer(nn.Module):
-    def __init__(self, num_classes, d_model=512, n_heads=8, n_layers=6, dropout=0.1):
+    def __init__(self, num_classes, d_model=512, n_heads=8, n_layers=6, dropout=0.1, drop_path_max=0.1, n_signers=0):
         super().__init__()
         # Offsets are computed dynamically from COORDS_PER_LM, so toggling
         # INCLUDE_DEPTH is safe. Toggling INCLUDE_FACE is NOT safe — face_proj
@@ -99,8 +100,11 @@ class AnatomicalConformer(nn.Module):
         self.pos_enc = SinusoidalPositionalEncoding(d_model, dropout=dropout)
         self.cls_token = nn.Parameter(torch.randn(1, 1, d_model))
 
+        # Linearly increasing drop-path: block 0 gets 0, block n_layers-1 gets drop_path_max.
+        # Forces each layer to be independently useful (can't rely on later layers to rescue).
+        drop_rates = [drop_path_max * i / max(n_layers - 1, 1) for i in range(n_layers)]
         self.blocks = nn.ModuleList(
-            [ConformerBlock(d_model, n_heads, dropout=dropout) for _ in range(n_layers)]
+            [ConformerBlock(d_model, n_heads, dropout=dropout, drop_path_rate=r) for r in drop_rates]
         )
 
         self.head = nn.Sequential(
@@ -109,8 +113,9 @@ class AnatomicalConformer(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(d_model, num_classes),
         )
+        self.signer_disc = SignerDiscriminator(d_model, n_signers) if n_signers > 0 else None
 
-    def forward(self, x, mask):
+    def forward(self, x, mask, grl_lambda: float = 0.0):
         B, T, _ = x.shape
 
         x = self.robust_norm(x)
@@ -148,4 +153,8 @@ class AnatomicalConformer(nn.Module):
         for block in self.blocks:
             x = block(x, mask)
 
-        return self.head(x[:, 0])
+        cls_out = x[:, 0]
+        sign_logits = self.head(cls_out)
+        if self.training and self.signer_disc is not None and grl_lambda > 0.0:
+            return sign_logits, self.signer_disc(cls_out, lam=grl_lambda)
+        return sign_logits

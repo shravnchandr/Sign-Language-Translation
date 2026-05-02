@@ -7,6 +7,7 @@ from .conformer import (
 )
 from .normalization import RobustNormalization
 from .anatomical_conformer import AnatomicalConformer, HandDominanceModule
+from .grl import SignerDiscriminator, ganin_lambda
 
 __all__ = [
     "Swish",
@@ -17,4 +18,6 @@ __all__ = [
     "RobustNormalization",
     "AnatomicalConformer",
     "HandDominanceModule",
+    "SignerDiscriminator",
+    "ganin_lambda",
 ]

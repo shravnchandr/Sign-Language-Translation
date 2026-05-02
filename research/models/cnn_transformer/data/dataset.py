@@ -7,7 +7,7 @@ import pandas as pd
 import torch
 from pathlib import Path
 from torch.utils.data import DataLoader, Dataset, Sampler
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from sklearn.model_selection import GroupShuffleSplit, train_test_split
 from .augmentation import augment_sample
 from .preprocessing import frame_stacked_data
@@ -75,12 +75,14 @@ class ASLDataset(Dataset):
         lmdb_path: Optional[str] = None,
         max_frames: int = 128,
         augment: bool = False,
+        signer_to_id: Optional[Dict[str, int]] = None,
     ):
         self.df = df.reset_index(drop=True)
         self.base_path = Path(base_path)
         self.cache_dir = Path(cache_dir) if cache_dir else None
         self.max_frames = max_frames
         self.augment = augment
+        self.signer_to_id: Dict[str, int] = signer_to_id or {}
 
         # Store the LMDB path string, NOT the Environment object.
         # lmdb.Environment is not picklable; Python 3.14 uses forkserver by
@@ -212,7 +214,7 @@ class ASLDataset(Dataset):
                 json.dump(lengths, f)
         return lengths
 
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int]:
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int, int]:
         coords = self._load_coords(idx)  # (T, D_pos)
         label = int(self.df.iloc[idx]["sign"])
 
@@ -226,11 +228,16 @@ class ASLDataset(Dataset):
         vel = torch.zeros_like(coords)
         vel[1:] = coords[1:] - coords[:-1]
 
-        return torch.cat([coords, vel], dim=-1), label  # (T, 2*D_pos)
+        signer_id = -1
+        if self.signer_to_id and "participant_id" in self.df.columns:
+            pid = str(self.df.iloc[idx]["participant_id"])
+            signer_id = self.signer_to_id.get(pid, -1)
+
+        return torch.cat([coords, vel], dim=-1), label, signer_id  # (T, 2*D_pos)
 
 
 def collate_batch(batch):
-    sequences, labels = zip(*batch)
+    sequences, labels, signer_ids = zip(*batch)
     lengths = torch.tensor([seq.shape[0] for seq in sequences])
     max_len = int(lengths.max())
     B, D = len(sequences), sequences[0].shape[1]
@@ -240,7 +247,7 @@ def collate_batch(batch):
         T = seq.shape[0]
         padded[i, :T] = seq
         mask[i, :T] = True
-    return padded, mask, torch.tensor(labels)
+    return padded, mask, torch.tensor(labels), torch.tensor(signer_ids, dtype=torch.long)
 
 
 class BucketBatchSampler(Sampler):
@@ -279,7 +286,7 @@ def get_data_loaders(
     batch_size: int = 64,
     num_workers: int = 4,
     max_frames: int = 128,
-) -> Tuple[DataLoader, DataLoader]:
+) -> Tuple[DataLoader, DataLoader, int]:
     """
     Args:
         data_dir:    Directory with train.csv and sign_to_prediction_index_map.json.
@@ -289,6 +296,10 @@ def get_data_loaders(
         batch_size:  Samples per batch.
         num_workers: DataLoader worker processes.
         max_frames:  Truncate sequences longer than this.
+
+    Returns:
+        (train_loader, test_loader, n_signers) where n_signers is the number of unique
+        training signers (> 0 only when participant_id is present in train.csv).
     """
     sign_map_file = Path(data_dir) / "sign_to_prediction_index_map.json"
     train_csv = Path(data_dir) / "train.csv"
@@ -302,11 +313,18 @@ def get_data_loaders(
     # Signer-independent split: ensures no participant appears in both train and val,
     # matching the Kaggle evaluation setup. Falls back to stratified random split
     # if participant_id is absent.
+    signer_to_id: Dict[str, int] = {}
+    n_signers = 0
     if "participant_id" in df.columns:
         gss = GroupShuffleSplit(n_splits=1, test_size=0.1, random_state=42)
         train_idx, test_idx = next(gss.split(df, groups=df["participant_id"]))
         train_df = df.iloc[train_idx]
         test_df = df.iloc[test_idx]
+        # Build a stable int mapping from training signers only.
+        # Test signers will get signer_id=-1 (unused during evaluation).
+        unique_signers = sorted(train_df["participant_id"].astype(str).unique().tolist())
+        signer_to_id = {pid: i for i, pid in enumerate(unique_signers)}
+        n_signers = len(signer_to_id)
         print(
             f"Signer-independent split: "
             f"{train_df['participant_id'].nunique()} train signers, "
@@ -322,11 +340,11 @@ def get_data_loaders(
 
     train_dataset = ASLDataset(
         train_df, data_dir, cache_dir=train_cache, lmdb_path=lmdb_path,
-        max_frames=max_frames, augment=True,
+        max_frames=max_frames, augment=True, signer_to_id=signer_to_id,
     )
     test_dataset = ASLDataset(
         test_df, data_dir, cache_dir=test_cache, lmdb_path=lmdb_path,
-        max_frames=max_frames, augment=False,
+        max_frames=max_frames, augment=False, signer_to_id=signer_to_id,
     )
 
     worker_kwargs = (
@@ -350,4 +368,4 @@ def get_data_loaders(
         pin_memory=True,
         **worker_kwargs,
     )
-    return train_loader, test_loader
+    return train_loader, test_loader, n_signers

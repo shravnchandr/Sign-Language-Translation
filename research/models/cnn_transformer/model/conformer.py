@@ -62,8 +62,9 @@ class ConformerConvModule(nn.Module):
 class ConformerBlock(nn.Module):
     """Combines Conv-style local modeling with Transformer global modeling."""
 
-    def __init__(self, d_model, n_heads, kernel_size=31, dropout=0.1):
+    def __init__(self, d_model, n_heads, kernel_size=31, dropout=0.1, drop_path_rate=0.0):
         super().__init__()
+        self.drop_path_rate = drop_path_rate
         self.ff1 = nn.Sequential(
             nn.LayerNorm(d_model),
             nn.Linear(d_model, d_model * 4),
@@ -92,6 +93,12 @@ class ConformerBlock(nn.Module):
 
     def forward(self, x, mask=None):
         # x: (B, T, D)
+        # Stochastic depth: skip the entire block with probability drop_path_rate.
+        # Earlier blocks have a lower rate (passed by the caller); later blocks higher.
+        if self.training and self.drop_path_rate > 0.0:
+            if torch.rand(1).item() < self.drop_path_rate:
+                return x
+
         # 1. Feed Forward 1
         x = x + 0.5 * self.ff1(x)
 

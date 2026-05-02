@@ -162,8 +162,21 @@ class AdvancedAugmentation:
 
 
 def mixup_batch(x, y, mask, alpha=0.2):
-    index = torch.randperm(x.size(0), device=x.device)
+    # Dominance-aware pairing: HandDominanceModule reorders hands INSIDE the model
+    # (after mixup), so mixing a lh-dominant sample with a rh-dominant sample
+    # produces ambiguous hand slot assignments. Pair same-dominance samples only.
+    B, device = x.size(0), x.device
+    lh_wrist_vel = x[:, :, COORD_FEAT + LH_START : COORD_FEAT + LH_START + COORDS_PER_LM]
+    rh_wrist_vel = x[:, :, COORD_FEAT + RH_START : COORD_FEAT + RH_START + COORDS_PER_LM]
+    rh_dominant = (rh_wrist_vel**2).sum(-1).mean(1) > (lh_wrist_vel**2).sum(-1).mean(1)
+
+    rh_idx = torch.where(rh_dominant)[0]
+    lh_idx = torch.where(~rh_dominant)[0]
+
+    index = torch.empty(B, dtype=torch.long, device=device)
+    index[rh_idx] = rh_idx[torch.randperm(len(rh_idx), device=device)]
+    index[lh_idx] = lh_idx[torch.randperm(len(lh_idx), device=device)]
+
     lam = np.random.beta(alpha, alpha)
-    # Mixed mask: a frame is valid if either of the two mixed samples has it valid.
     mixed_mask = mask | mask[index]
-    return lam * x + (1 - lam) * x[index], y, y[index], lam, mixed_mask
+    return lam * x + (1 - lam) * x[index], y, y[index], lam, mixed_mask, index

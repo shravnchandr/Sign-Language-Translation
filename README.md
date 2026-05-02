@@ -44,22 +44,35 @@ Phase 1 training is fully unsupervised — uses all available datasets including
 
 ### Approach 2 — AnatomicalConformer (`research/models/cnn_transformer/`)
 
-End-to-end supervised classification without VQ-VAE pre-training. Designed for Kaggle training.
+End-to-end supervised classification without VQ-VAE pre-training. Designed for Kaggle/RunPod training.
 
 ```
-Parquet → frame_stacked_data → (T, D) pos+vel
-  → RobustNormalization (in-model, nose→shoulder fallback)
-  → HandDominanceModule (reorder by motion energy)
-  → Per-part projections: lh, rh, pose, face + per-part velocity
-  → Feature fusion → Conformer blocks (CNN + self-attention)
-  → CLS token → 250-class head
+Parquet → frame_stacked_data → (T, D_pos) positions
+  → velocity computed as frame-delta of positions
+  → concat [pos | vel] → (T, 2·D_pos)
+  → RobustNormalization (nose→shoulder fallback, in-model)
+  → HandDominanceModule (reorder by wrist motion energy)
+  → WristNormalization (lm0=location, lm1-20=shape)
+  → Per-part projections: lh, rh, pose, face (pos + vel streams)
+  → Feature fusion (pos+vel → d_model)
+  → Sinusoidal PE + CLS token prepend
+  → Conformer blocks (FFN→Attention→DepthwiseConv→FFN) × n_layers
+  → CLS token → sign head (250 classes)
+             └→ GRL → SignerDiscriminator (n_signers classes, adversarial)
 ```
+
+**Key regularisation:**
+- Stochastic depth: linearly increasing block-skip probability (0 → `drop_path_max=0.1`)
+- GRL signer-invariance: adversarial discriminator on CLS token forces features to discard signer identity; λ ramped via Ganin schedule
+- Dominance-aware mixup: pairs same-dominant-hand samples so HandDominanceModule receives unambiguous mixed tensors
 
 **Training:**
-- Phase 1: 80 epochs, heavy augmentation (flip, noise, time-stretch, rotation, finger dropout), mixup, gradient accumulation ×4
-- Phase 2: 20 epochs, fine-tuning from Phase 1 checkpoint, gradient accumulation ×2
-- Evaluation: 5-pass test-time augmentation (TTA)
-- Loss: FocalLoss (α=0.25, γ=2.0, label smoothing=0.1)
+- Phase 1: 80 epochs, heavy augmentation (flip, noise, time-stretch, rotation, finger dropout), dominance-aware mixup, gradient accumulation ×4, OneCycleLR
+- Phase 2: 20 epochs, cosine warmdown (heavy augmentation maintained), gradient accumulation ×4
+- Evaluation: 5-pass test-time augmentation (TTA) for final reporting; deterministic eval for checkpoint selection
+- Loss: FocalLoss (α=0.25, γ=2.0, label smoothing=0.1) + GRL adversarial cross-entropy
+
+**Model size:** ~6.5M parameters (d_model=256, n_layers=4, n_heads=4)
 
 ---
 
@@ -191,9 +204,30 @@ PYTHONPATH=research/models uv run python -m vqvae_seq2seq.translation.train_tran
   --epochs 100
 ```
 
-### AnatomicalConformer
+### AnatomicalConformer (RunPod / local)
 
-Designed to run on Kaggle with the NPZ cache mounted as a dataset. Update `cache_path` in `research/models/cnn_transformer/train.py` before running.
+```bash
+# Recommended: build LMDB cache once (~2 hrs first run, then instant)
+PYTHONPATH=research/models uv run python -m cnn_transformer.data.build_lmdb \
+  --data-dir data/Isolated_ASL_Recognition \
+  --lmdb-path /tmp/asl.lmdb
+
+# Train (default: d_model=256, n_layers=4, n_heads=4, drop_path_max=0.1, grl_lambda=0.1)
+PYTHONPATH=research/models uv run python -m cnn_transformer.train \
+  --data-dir data/Isolated_ASL_Recognition \
+  --lmdb-path /tmp/asl.lmdb \
+  --checkpoint-dir checkpoints/cnn_transformer
+
+# Key CLI args
+#   --d-model 256           model width
+#   --n-layers 4            conformer block count
+#   --drop-path-max 0.1     stochastic depth max rate
+#   --grl-lambda 0.1        GRL signer-adversarial weight (0=disable)
+#   --phase1-epochs 80
+#   --phase2-epochs 20
+```
+
+**Note:** Changing face landmark selection in `config.py` (e.g. `FACE_LANDMARK_INDICES`) invalidates the LMDB cache. Delete and rebuild: `rm -rf /tmp/asl.lmdb && python -m cnn_transformer.data.build_lmdb ...`
 
 ---
 

@@ -79,12 +79,11 @@ End-to-end supervised classification without VQ-VAE pre-training. Designed for K
 - Velocity stream projected separately and fused with position features
 - Conformer blocks (depthwise conv + self-attention) + CLS token for classification
 - `RobustNormalization` in-model (nose → shoulder fallback)
-- Two-phase training: Phase 1 (80 epochs, heavy aug, mixup) → Phase 2 (20 epochs, fine-tune)
+- `WristNormalization`: landmark 0 = location (nose-relative), landmarks 1–20 = shape (wrist-relative)
+- Two-phase training: Phase 1 (80 epochs, heavy aug, mixup) → Phase 2 (20 epochs, cosine warmdown, heavy aug maintained)
 - Test-time augmentation (5-pass TTA) at evaluation
-
-**Known architectural gaps (not yet implemented):**
-- `HandDominanceModule`: `lh_proj`/`rh_proj` are weight-independent; left-handed signers share no weights with right-handed signers for the same sign. Should reorder hands by motion energy before projection.
-- Per-part velocity: `vel_proj` projects all 418 velocity features jointly. Should mirror the position stream with per-part velocity projections (`lh_vel_proj`, `rh_vel_proj`, `pose_vel_proj`, `face_vel_proj`). Note: velocities ARE already body-relative (computed from nose-subtracted positions).
+- Stochastic depth (`drop_path_max=0.1`): linearly increasing per-block skip probability (block 0 = 0, last = drop_path_max). Controlled via `--drop-path-max` CLI arg.
+- GRL signer-invariance (`--grl-lambda 0.1`): `SignerDiscriminator` on CLS token, gradient reversed so feature extractor is forced to discard signer identity. Ganin schedule ramps λ from 0 → max over training. Requires `participant_id` in train.csv; auto-disables when not present. Adversarial loss uses same mixup weighting as sign loss.
 
 ## Key Modules
 
@@ -115,7 +114,8 @@ End-to-end supervised classification without VQ-VAE pre-training. Designed for K
 | `config.py` | Landmark layout constants, feature dimensions |
 | `model/anatomical_conformer.py` | `AnatomicalConformer` — main model |
 | `model/conformer.py` | `ConformerBlock`, `SinusoidalPositionalEncoding` |
-| `model/normalization.py` | `RobustNormalization` (in-model, nose→shoulder fallback) |
+| `model/normalization.py` | `RobustNormalization`, `WristNormalization` |
+| `model/grl.py` | `SignerDiscriminator`, `ganin_lambda` — GRL signer-invariance |
 | `data/dataset.py` | `ASLDataset`, `BucketBatchSampler`, `get_data_loaders` |
 | `data/augmentation.py` | `AdvancedAugmentation` (7 types), `mixup_batch` |
 | `data/preprocessing.py` | `frame_stacked_data` — parquet → numpy array |
@@ -140,6 +140,7 @@ End-to-end supervised classification without VQ-VAE pre-training. Designed for K
 | `research/models/cnn_transformer/train.py` | — | ~~Phase 2 loop `range(epoch_idx+1, total_steps)` ran too many epochs after early stopping.~~ **Fixed: `range(NUM_EPOCHS_PHASE2)`.** |
 | `research/models/cnn_transformer/train.py` | — | ~~Validation used 5× stochastic TTA, making checkpoint selection noisy.~~ **Fixed: `evaluate_epoch` is deterministic; TTA reserved for final reporting via `evaluate_epoch_tta`.** |
 | `research/models/cnn_transformer/model/conformer.py` | — | ~~Depthwise conv ran over padded positions, leaking zeros into valid boundary frames.~~ **Fixed: conv residual zeroed at padded positions.** |
+| `research/models/cnn_transformer/data/augmentation.py` | — | ~~`mixup_batch` paired lh-dominant with rh-dominant samples, producing ambiguous hand slot assignments when `HandDominanceModule` runs inside the model.~~ **Fixed: dominance-aware pairing shuffles within same-dominance groups.** |
 
 ## Data
 

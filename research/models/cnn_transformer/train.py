@@ -13,6 +13,7 @@ from tqdm import tqdm
 from .data.dataset import get_data_loaders
 from .data.augmentation import AdvancedAugmentation, mixup_batch
 from .model.anatomical_conformer import AnatomicalConformer
+from .model.grl import ganin_lambda
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 use_amp = device.type == "cuda"
@@ -45,18 +46,24 @@ def train_epoch(
     scheduler=None,
     epoch=0,
     total_epochs=1,
+    grl_lambda=0.0,
+    n_signers=0,
 ):
     model.train()
     train_loss, correct, total = 0, 0, 0
     optimizer.zero_grad()
 
+    # Ganin et al. 2016 schedule: ramps from ~0 at epoch 0 to grl_lambda by mid-training.
+    grl_lam = ganin_lambda(epoch, total_epochs, max_lambda=grl_lambda) if grl_lambda > 0.0 else 0.0
+
     pbar = tqdm(data_loader, desc=f"Epoch {epoch + 1}/{total_epochs}")
-    for idx, (x, mask, y) in enumerate(pbar):
+    for idx, (x, mask, y, signer_ids) in enumerate(pbar):
         # Clone once upfront so all augmentations can write in-place without
         # extra allocations. non_blocking overlaps H2D transfer with CPU work.
         x = x.to(device, non_blocking=True).clone()
         mask = mask.to(device, non_blocking=True).clone()
         y = y.to(device, non_blocking=True)
+        signer_ids = signer_ids.to(device, non_blocking=True)
         B, T, D = x.shape
 
         # --- Per-sample augmentation (each sample gets an independent decision) ---
@@ -92,16 +99,38 @@ def train_epoch(
             x = AdvancedAugmentation.finger_dropout_batch(x)
 
         # --- Mixup ---
-        y_a = y
+        y_a, y_b, lam, mixup_idx = y, None, 1.0, None
         if use_mixup:
-            x, y_a, y_b, lam, mask = mixup_batch(x, y, mask)
+            x, y_a, y_b, lam, mask, mixup_idx = mixup_batch(x, y, mask)
 
         with autocast(device_type=device.type, enabled=use_amp):
-            logits = model(x, mask)
-            if use_mixup:
-                loss = lam * criterion(logits, y_a) + (1 - lam) * criterion(logits, y_b)
+            use_grl = grl_lam > 0.0 and n_signers > 0
+            if use_grl:
+                logits, signer_logits = model(x, mask, grl_lambda=grl_lam)
             else:
-                loss = criterion(logits, y_a)
+                logits = model(x, mask)
+
+            if use_mixup:
+                sign_loss = lam * criterion(logits, y_a) + (1 - lam) * criterion(logits, y_b)
+            else:
+                sign_loss = criterion(logits, y_a)
+
+            if use_grl:
+                valid = signer_ids >= 0
+                if valid.any():
+                    if use_mixup and mixup_idx is not None:
+                        signer_ids_b = signer_ids[mixup_idx]
+                        adv_loss = (
+                            lam * F.cross_entropy(signer_logits[valid], signer_ids[valid]) +
+                            (1 - lam) * F.cross_entropy(signer_logits[valid], signer_ids_b[valid])
+                        )
+                    else:
+                        adv_loss = F.cross_entropy(signer_logits[valid], signer_ids[valid])
+                    loss = sign_loss + grl_lam * adv_loss
+                else:
+                    loss = sign_loss
+            else:
+                loss = sign_loss
 
         scaler.scale(loss / accumulation_steps).backward()
 
@@ -181,7 +210,7 @@ def evaluate_epoch(model, data_loader, criterion):
     """Deterministic evaluation — no TTA — for stable model selection."""
     model.train(False)
     test_loss, correct, total = 0, 0, 0
-    for x, mask, y in tqdm(data_loader, desc="Validation", leave=False):
+    for x, mask, y, _ in tqdm(data_loader, desc="Validation", leave=False):
         x, mask, y = x.to(device), mask.to(device), y.to(device)
         logits = model(x, mask)
         test_loss += criterion(logits, y).item()
@@ -195,7 +224,7 @@ def evaluate_epoch_tta(model, data_loader, criterion):
     """TTA evaluation — used for final/reporting accuracy only."""
     model.train(False)
     test_loss, correct, total = 0, 0, 0
-    for x, mask, y in tqdm(data_loader, desc="TTA Eval", leave=False):
+    for x, mask, y, _ in tqdm(data_loader, desc="TTA Eval", leave=False):
         x, mask, y = x.to(device), mask.to(device), y.to(device)
         logits = predict_with_tta(model, x, mask, n_augmentations=5)
         test_loss += criterion(logits, y).item()
@@ -247,6 +276,19 @@ def main():
     parser.add_argument("--n-layers", type=int, default=4, help="Conformer layers")
     parser.add_argument("--dropout", type=float, default=0.2, help="Dropout rate")
     parser.add_argument(
+        "--drop-path-max",
+        type=float,
+        default=0.1,
+        help="Max stochastic depth drop rate for the last Conformer block (0 = disabled)",
+    )
+    parser.add_argument(
+        "--grl-lambda",
+        type=float,
+        default=0.1,
+        help="Max GRL adversarial weight for signer-invariance (0 = disabled). "
+             "Ramped from 0 via Ganin schedule.",
+    )
+    parser.add_argument(
         "--lmdb-path",
         default=None,
         help="Path to LMDB archive (recommended on RunPod). "
@@ -268,16 +310,19 @@ def main():
     with open(sign_map_file) as f:
         NUM_CLASSES = len(json.load(f))
 
+    grl_active = args.grl_lambda > 0.0 and n_signers > 0
     model = AnatomicalConformer(
         num_classes=NUM_CLASSES,
         d_model=args.d_model,
         n_heads=args.n_heads,
         n_layers=args.n_layers,
         dropout=args.dropout,
+        drop_path_max=args.drop_path_max,
+        n_signers=n_signers if grl_active else 0,
     ).to(device)
 
     print("Building data loaders...")
-    train_loader, test_loader = get_data_loaders(
+    train_loader, test_loader, n_signers = get_data_loaders(
         data_dir=args.data_dir,
         cache_dir=args.cache_dir,
         lmdb_path=args.lmdb_path,
@@ -286,6 +331,7 @@ def main():
     )
 
     print(f"Num classes : {NUM_CLASSES}")
+    print(f"Num signers : {n_signers} ({'GRL active' if grl_active else 'GRL disabled'})")
     print(f"Model params: {sum(p.numel() for p in model.parameters()):,}")
 
     criterion = FocalLoss()
@@ -343,6 +389,8 @@ def main():
             scheduler=scheduler,
             epoch=epoch_idx,
             total_epochs=NUM_EPOCHS_PHASE1,
+            grl_lambda=args.grl_lambda if grl_active else 0.0,
+            n_signers=n_signers,
         )
         v_loss, v_acc = evaluate_epoch(model, test_loader, criterion)
         print(
@@ -393,6 +441,8 @@ def main():
             scheduler=scheduler_p2,
             epoch=p2_epoch,
             total_epochs=NUM_EPOCHS_PHASE2,
+            grl_lambda=args.grl_lambda if grl_active else 0.0,
+            n_signers=n_signers,
         )
         v_loss, v_acc = evaluate_epoch(model, test_loader, criterion)
         print(
