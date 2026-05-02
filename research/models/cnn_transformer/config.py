@@ -24,7 +24,7 @@ else:
     SIGN2INDEX_JSON = {}
 
 INCLUDE_FACE = True
-INCLUDE_DEPTH = False
+INCLUDE_DEPTH = True
 
 FACE_LANDMARK_INDICES = {
     # Eyebrows carry facial grammar signal in ASL (raised = question, furrowed = negation)
@@ -111,6 +111,13 @@ LH_START, POSE_START, RH_START, FACE_START = (
 )
 N_LH, N_POSE, N_RH = 21, 33, 21
 N_FACE = len(SELECTED_FACE_INDICES)
+# Eyebrows (grammatical: questions/negation) and mouth (phonological: mouthing)
+# are split so the model can learn them with separate projections.
+N_FACE_EYEBROW = (
+    len(FACE_LANDMARK_INDICES["left_eyebrow"])
+    + len(FACE_LANDMARK_INDICES["right_eyebrow"])
+)
+N_FACE_MOUTH = N_FACE - N_FACE_EYEBROW
 
 FINGER_LM_RANGES: List[Tuple[int, int]] = [
     (1, 5),  # thumb

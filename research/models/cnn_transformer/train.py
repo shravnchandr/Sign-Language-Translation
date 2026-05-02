@@ -62,8 +62,8 @@ def train_epoch(
     for idx, (x, mask, y, signer_ids) in enumerate(pbar):
         # Clone once upfront so all augmentations can write in-place without
         # extra allocations. non_blocking overlaps H2D transfer with CPU work.
-        x = x.to(device, non_blocking=True).clone()
-        mask = mask.to(device, non_blocking=True).clone()
+        x = x.to(device, non_blocking=True)
+        mask = mask.to(device, non_blocking=True)
         y = y.to(device, non_blocking=True)
         signer_ids = signer_ids.to(device, non_blocking=True)
         B, T, D = x.shape
@@ -263,7 +263,7 @@ def main():
     parser.add_argument(
         "--phase1-epochs",
         type=int,
-        default=80,
+        default=100,
         help="Epochs for Phase 1 (heavy augmentation)",
     )
     parser.add_argument(
@@ -473,8 +473,10 @@ def main():
             use_mixup=True,
             heavy_augment=True,
             scheduler=scheduler_p2,
-            epoch=p2_epoch,
-            total_epochs=NUM_EPOCHS_PHASE2,
+            # Continue the Ganin ramp from where Phase 1 left off so GRL stays
+            # near max_lambda throughout Phase 2 rather than resetting to ~0.
+            epoch=p1_epochs_run + p2_epoch,
+            total_epochs=p1_epochs_run + NUM_EPOCHS_PHASE2,
             grl_lambda=args.grl_lambda if grl_active else 0.0,
             n_signers=n_signers,
         )

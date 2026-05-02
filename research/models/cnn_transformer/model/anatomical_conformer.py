@@ -13,6 +13,8 @@ from ..config import (
     FACE_START,
     INCLUDE_FACE,
     N_FACE,
+    N_FACE_EYEBROW,
+    N_FACE_MOUTH,
 )
 
 
@@ -81,22 +83,29 @@ class AnatomicalConformer(nn.Module):
         self.hand_dominance = HandDominanceModule()
         self.wrist_norm = WristNormalization()
 
-        # Position stream — per-part projections
+        # Position stream — per-part projections.
+        # Face is split into eyebrows (grammatical) and mouth (phonological)
+        # so each pathway can specialise independently.
+        # Total: 3 × d_model//4 + 2 × d_model//8 = d_model
         self.lh_proj = nn.Linear(21 * COORDS_PER_LM, d_model // 4)
         self.rh_proj = nn.Linear(21 * COORDS_PER_LM, d_model // 4)
         self.pose_proj = nn.Linear(33 * COORDS_PER_LM, d_model // 4)
-        self.face_proj = nn.Linear(N_FACE * COORDS_PER_LM, d_model // 4)
+        self.eyebrow_proj = nn.Linear(N_FACE_EYEBROW * COORDS_PER_LM, d_model // 8)
+        self.mouth_proj = nn.Linear(N_FACE_MOUTH * COORDS_PER_LM, d_model // 8)
 
-        # Velocity stream — per-part projections mirroring position stream
-        # 4 × (d_model // 8) = d_model // 2, same total width as before
-        self.lh_vel_proj = nn.Linear(21 * COORDS_PER_LM, d_model // 8)
-        self.rh_vel_proj = nn.Linear(21 * COORDS_PER_LM, d_model // 8)
-        self.pose_vel_proj = nn.Linear(33 * COORDS_PER_LM, d_model // 8)
-        self.face_vel_proj = nn.Linear(N_FACE * COORDS_PER_LM, d_model // 8)
+        # Velocity stream — 3 temporal scales (Δ1, Δ2, Δ5) concatenated per part,
+        # then projected. Equal budget to position stream: 4 × d_model//4 = d_model.
+        # Δ2/Δ5 are computed inside forward() from body-relative positions so they
+        # benefit from nose-subtraction without changing the dataset return shape.
+        _V = 3 * COORDS_PER_LM  # features per landmark across all 3 vel scales
+        self.lh_vel_proj = nn.Linear(21 * _V, d_model // 4)
+        self.rh_vel_proj = nn.Linear(21 * _V, d_model // 4)
+        self.pose_vel_proj = nn.Linear(33 * _V, d_model // 4)
+        self.face_vel_proj = nn.Linear(N_FACE * _V, d_model // 4)
 
-        # Feature fusion: (d_model pos + d_model//2 vel) → d_model
+        # Feature fusion: (d_model pos + d_model vel) → d_model
         self.feat_fuse = nn.Sequential(
-            nn.Linear(d_model + (d_model // 2), d_model),
+            nn.Linear(2 * d_model, d_model),
             nn.LayerNorm(d_model),
             nn.GELU(),
         )
@@ -126,23 +135,35 @@ class AnatomicalConformer(nn.Module):
         x = self.hand_dominance(x)   # reorder so dominant hand is always in LH slot
         x = self.wrist_norm(x)       # landmark 0 = location, landmarks 1-20 = shape
 
-        # Split position and velocity halves
+        # Split position and delta-1 velocity halves (dataset layout: [pos | vel1])
         pos = x[:, :, :COORD_FEAT]
-        vel = x[:, :, COORD_FEAT:]
+        vel1 = x[:, :, COORD_FEAT:]
 
-        # Per-part position features
+        # Compute additional velocity scales from body-relative positions.
+        # Boundary frames stay zero (correct: padded positions are zero).
+        vel2 = torch.zeros_like(pos)
+        vel2[:, 2:] = pos[:, 2:] - pos[:, :-2]
+        vel5 = torch.zeros_like(pos)
+        vel5[:, 5:] = pos[:, 5:] - pos[:, :-5]
+
+        # Per-part position features — face split into eyebrow and mouth streams
+        _eb = N_FACE_EYEBROW * COORDS_PER_LM  # eyebrow feature width
         lh = self.lh_proj(pos[:, :, LH_START:POSE_START])
         ps = self.pose_proj(pos[:, :, POSE_START:RH_START])
         rh = self.rh_proj(pos[:, :, RH_START:FACE_START])
-        fc = self.face_proj(pos[:, :, FACE_START:])
-        pos_feat = torch.cat([lh, ps, rh, fc], dim=-1)  # (B, T, d_model)
+        eb = self.eyebrow_proj(pos[:, :, FACE_START:FACE_START + _eb])
+        mo = self.mouth_proj(pos[:, :, FACE_START + _eb:])
+        pos_feat = torch.cat([lh, ps, rh, eb, mo], dim=-1)  # (B, T, d_model)
 
-        # Per-part velocity features
-        lh_v = self.lh_vel_proj(vel[:, :, LH_START:POSE_START])
-        ps_v = self.pose_vel_proj(vel[:, :, POSE_START:RH_START])
-        rh_v = self.rh_vel_proj(vel[:, :, RH_START:FACE_START])
-        fc_v = self.face_vel_proj(vel[:, :, FACE_START:])
-        vel_feat = torch.cat([lh_v, ps_v, rh_v, fc_v], dim=-1)  # (B, T, d_model//2)
+        # Per-part multi-scale velocity features (Δ1∥Δ2∥Δ5 concatenated per part)
+        def _vcat(s):
+            return torch.cat([vel1[:, :, s], vel2[:, :, s], vel5[:, :, s]], dim=-1)
+
+        lh_v = self.lh_vel_proj(_vcat(slice(LH_START, POSE_START)))
+        ps_v = self.pose_vel_proj(_vcat(slice(POSE_START, RH_START)))
+        rh_v = self.rh_vel_proj(_vcat(slice(RH_START, FACE_START)))
+        fc_v = self.face_vel_proj(_vcat(slice(FACE_START, None)))
+        vel_feat = torch.cat([lh_v, ps_v, rh_v, fc_v], dim=-1)  # (B, T, d_model)
 
         x = self.feat_fuse(torch.cat([pos_feat, vel_feat], dim=-1))
 

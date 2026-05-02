@@ -59,7 +59,8 @@ Tracking every training run, the config used, and the result. Goal: 250-class AS
 
 ---
 
-## Run 002 — Pending (next RunPod run)
+## Run 002 — Regularised AnatomicalConformer
+**Date:** 2026-05-02  
 **Hardware:** RunPod — NVIDIA A40  
 **Config:**
 - d_model=256, n_layers=4, n_heads=4, dropout=0.2, params=~6.5M
@@ -68,23 +69,40 @@ Tracking every training run, the config used, and the result. Goal: 250-class AS
 - Phase 1: 80 epochs (OneCycleLR, accumulation×4), Phase 2: 20 epochs (CosineAnnealing, accumulation×4)
 - heavy_augment=True, use_mixup=True throughout
 
-**Timing:** *(fill in after run)*
-- Phase 1: — (— epochs, avg —/epoch)
-- Phase 2: — (20 epochs, avg —/epoch)
-- Total:   —
+**Timing:**
+- Throughput: ~12–13 it/s (LMDB cache warm); first epoch slow due to cache build (~8m 50s)
+- Phase 1: 2h 19m 32s (80 epochs, avg 1m 44s/epoch)
+- Phase 2: 33m 35s (20 epochs, avg 1m 40s/epoch)
+- Total:   2h 53m 08s
 
-**Result:** *(fill in after run)*
-- Best val acc (deterministic): —
-- Best val acc (TTA):           —
-- Train acc at convergence:     —
+**Result:**
+- Best val acc (deterministic): **0.7555** (Phase 1 epoch 74)
+- Best val acc (TTA):           **0.7569**
+- Train acc at convergence:     ~0.42
 
-**Expected improvements over Run 001:**
-1. GRL: main driver — should close the 25% train-val gap by forcing signer-invariant features
-2. Smaller model + stochastic depth: reduce overfitting capacity
-3. WristNormalization: better rotation/translation invariance for hand shapes
-4. Cleaner face features: no identity-encoding landmarks
+**Analysis:**
+- Overfitting eliminated: train acc ~0.42 vs val acc ~0.755 — inverse of Run 001's 99.9% / 74.6% pattern. Heavy aug + mixup + smaller model all contributing.
+- Phase 2 didn't improve on Phase 1 best (P2 peak 0.7551 vs 0.7555); warmdown acted as polishing, not exploration. `best_final.pth` is the Phase 1 checkpoint.
+- Phase 2 train loss climbed 0.40 → 0.65 over the first ~6 epochs — expected warm restart at LR=1e-4 after Phase 1 finished at LR~8e-6. Val acc held steady throughout.
+- TTA gain negligible (+0.14%) — model predictions stable under augmentation; stochastic variance already low.
+- Disc acc not logged — this run predates the discriminator accuracy logging commit. GRL activity cannot be confirmed from logs alone.
+- Expected 0.82–0.86; achieved 0.7555. Gap vs expectation likely reflects GRL not being verified as active, and the 0.82+ target requiring additional feature improvements (multi-scale velocity, cross-part attention).
 
-**Expected val accuracy:** 0.82–0.86
+---
+
+## Changes Applied After Run 002
+
+*(pending — to be filled in before Run 003)*
+
+---
+
+## Run 003 — Pending (next RunPod run)
+**Config changes under consideration:**
+- Confirm GRL active (disc_acc logging now in place — verify discriminator converges to near chance)
+- Multi-Scale Velocity (idea 2A): delta=1, delta=2, delta=5 velocity channels
+- Cross-part attention (idea 1B): hand↔pose spatial relationship
+
+**Expected val accuracy:** TBD
 
 ---
 
