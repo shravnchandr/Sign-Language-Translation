@@ -5,7 +5,6 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "black>=25.11.0",
     "kaggle>=1.8.2",
     "numpy>=2.3.5",
     "pandas>=2.3.3",
@@ -20,25 +19,4 @@ dependencies = [
 preprocess = [
     "mediapipe>=0.10",
     "opencv-python-headless>=4.8",
-]
-
-# Dependency group for building the LMDB cache on a CPU-only pod.
-# [dependency-groups] are isolated from [project.dependencies], so
-# `uv sync --only-group lmdb-build` installs ONLY these 5 packages.
-#
-# torch must come from the CPU wheel index to avoid pulling the 2 GB CUDA build:
-#
-#   uv pip install lmdb numpy pandas pyarrow
-#   uv pip install torch --index-url https://download.pytorch.org/whl/cpu
-#
-# Then run the builder (no project install needed):
-#   PYTHONPATH=research/models python -m cnn_transformer.data.build_lmdb \
-#       --data-dir data/Isolated_ASL_Recognition --lmdb-path /mnt/lmdb
-[dependency-groups]
-lmdb-build = [
-    "lmdb>=1.6.2",
-    "numpy>=2.3.5",
-    "pandas>=2.3.3",
-    "pyarrow>=22.0.0",
-    "torch>=2.9.1",
 ]
