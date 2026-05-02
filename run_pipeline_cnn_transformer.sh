@@ -32,6 +32,7 @@ NUM_WORKERS=4
 SKIP_LMDB=false
 MAP_SIZE_GB=100
 ALLOW_ERRORS=false
+LMDB_WORKERS=4
 
 # Parse args
 while [[ $# -gt 0 ]]; do
@@ -47,7 +48,8 @@ while [[ $# -gt 0 ]]; do
         --num-workers)    NUM_WORKERS="$2";    shift 2 ;;
         --skip-lmdb)      SKIP_LMDB=true;      shift ;;
         --map-size-gb)    MAP_SIZE_GB="$2";    shift 2 ;;
-        --allow-errors)   ALLOW_ERRORS=true;   shift ;;
+        --allow-errors)   ALLOW_ERRORS=true;        shift ;;
+        --lmdb-workers)   LMDB_WORKERS="$2";        shift 2 ;;
         *) echo "Unknown argument: $1"; exit 1 ;;
     esac
 done
@@ -81,6 +83,7 @@ if [ "$SKIP_LMDB" = false ]; then
         --data-dir "$DATA_DIR" \
         --lmdb-path "$LMDB_PATH" \
         --map-size-gb "$MAP_SIZE_GB" \
+        $( [ -n "$LMDB_WORKERS" ] && echo "--num-workers $LMDB_WORKERS" ) \
         $( [ "$ALLOW_ERRORS" = true ] && echo "--allow-errors" )
 else
     echo ""

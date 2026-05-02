@@ -20,7 +20,9 @@ reuses stale tensors.
 """
 import argparse
 import io
+import os
 import sys
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import lmdb
@@ -31,8 +33,28 @@ from tqdm import tqdm
 from ._cache_keys import lmdb_key as _lmdb_key, lmdb_length_key as _lmdb_length_key
 from .preprocessing import frame_stacked_data
 
-# Write this many samples per LMDB transaction to cap in-memory dirty pages.
+# Commit to LMDB every this many successful writes to cap dirty-page memory.
 _WRITE_BATCH = 2_000
+
+
+def _process_sample(args: tuple) -> tuple:
+    """Worker: parse one parquet file and return serialised tensor bytes.
+
+    Self-contained imports make this safe under spawn/forkserver (Python 3.14
+    default on macOS/Linux). PYTHONPATH is inherited from the parent process.
+    """
+    import io
+    import torch
+    from cnn_transformer.data.preprocessing import frame_stacked_data
+
+    path, full_path = args
+    try:
+        coords = torch.tensor(frame_stacked_data(full_path), dtype=torch.float32)
+        buf = io.BytesIO()
+        torch.save(coords, buf)
+        return path, buf.getvalue(), len(coords), None
+    except Exception as e:
+        return path, None, None, str(e)
 
 
 def build_lmdb(
@@ -40,49 +62,79 @@ def build_lmdb(
     lmdb_path: str,
     map_size_gb: int = 100,
     allow_errors: bool = False,
+    num_workers: int | None = None,
 ) -> None:
     data_dir = Path(data_dir)
     lmdb_path = Path(lmdb_path)
     lmdb_path.mkdir(parents=True, exist_ok=True)
 
+    if num_workers is None:
+        num_workers = os.cpu_count() or 4
+
     df = pd.read_csv(data_dir / "train.csv")
     n = len(df)
-    print(f"Building LMDB: {n} samples → {lmdb_path}")
+    paths = df["path"].tolist()
+    print(f"Building LMDB: {n} samples → {lmdb_path}  (workers={num_workers})")
 
     env = lmdb.open(str(lmdb_path), map_size=map_size_gb * 1024**3)
 
     written = skipped = errors = 0
 
+    # Pre-scan: find which paths still need processing, and backfill any
+    # missing length keys left by older builds (sequential, rare).
+    pending_args: list[tuple[str, str]] = []
+    backfill: list[str] = []
+    with env.begin() as txn:
+        for path in paths:
+            if txn.get(_lmdb_key(path)) is not None:
+                if txn.get(_lmdb_length_key(path)) is None:
+                    backfill.append(path)
+                skipped += 1
+            else:
+                pending_args.append((path, str(data_dir / path)))
+
+    if backfill:
+        print(f"Backfilling length keys for {len(backfill)} existing entries...")
+        with env.begin(write=True) as txn:
+            for path in backfill:
+                raw = txn.get(_lmdb_key(path))
+                coords = torch.load(io.BytesIO(bytes(raw)), weights_only=True)
+                txn.put(_lmdb_length_key(path), str(len(coords)).encode())
+
+    # Parallel parse → single-threaded write.
+    # Workers parse parquets concurrently; the main thread collects results and
+    # writes to LMDB in batches (LMDB does not allow concurrent writes).
+    write_buf: list[tuple[str, bytes, int]] = []
+
+    def _flush(buf: list) -> None:
+        with env.begin(write=True) as txn:
+            for p, data, length in buf:
+                txn.put(_lmdb_key(p), data)
+                txn.put(_lmdb_length_key(p), str(length).encode())
+        buf.clear()
+
     with tqdm(total=n, desc="Building LMDB", unit="sample") as pbar:
-        for batch_start in range(0, n, _WRITE_BATCH):
-            batch = df.iloc[batch_start : batch_start + _WRITE_BATCH]
-            with env.begin(write=True) as txn:
-                for _, row in batch.iterrows():
-                    key = _lmdb_key(row["path"])
-                    length_key = _lmdb_length_key(row["path"])
-                    if txn.get(key) is not None:
-                        if txn.get(length_key) is None:
-                            coords = torch.load(
-                                io.BytesIO(bytes(txn.get(key))), weights_only=True
-                            )
-                            txn.put(length_key, str(len(coords)).encode())
-                        skipped += 1
-                    else:
-                        full_path = str(data_dir / row["path"])
-                        try:
-                            coords = torch.tensor(
-                                frame_stacked_data(full_path), dtype=torch.float32
-                            )
-                            buf = io.BytesIO()
-                            torch.save(coords, buf)
-                            txn.put(key, buf.getvalue())
-                            txn.put(length_key, str(len(coords)).encode())
-                            written += 1
-                        except Exception as e:
-                            errors += 1
-                            tqdm.write(f"  ERROR: skipping {row['path']}: {e}", file=sys.stderr)
-                    pbar.update(1)
-                    pbar.set_postfix(written=written, skipped=skipped, errors=errors)
+        pbar.update(skipped)
+        pbar.set_postfix(written=written, skipped=skipped, errors=errors)
+
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            for path, data, length, error in executor.map(
+                _process_sample, pending_args, chunksize=8
+            ):
+                if error:
+                    errors += 1
+                    tqdm.write(f"  ERROR: skipping {path}: {error}", file=sys.stderr)
+                else:
+                    write_buf.append((path, data, length))
+                    written += 1
+                    if len(write_buf) >= _WRITE_BATCH:
+                        _flush(write_buf)
+
+                pbar.update(1)
+                pbar.set_postfix(written=written, skipped=skipped, errors=errors)
+
+        if write_buf:
+            _flush(write_buf)
 
     env.close()
     print(
@@ -110,12 +162,20 @@ def main():
         help="LMDB virtual address space ceiling in GB (default 100)",
     )
     parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=None,
+        help="Parallel workers for parquet parsing (default: os.cpu_count())",
+    )
+    parser.add_argument(
         "--allow-errors",
         action="store_true",
         help="Exit 0 even if some samples fail (useful for known-bad parquets)",
     )
     args = parser.parse_args()
-    build_lmdb(args.data_dir, args.lmdb_path, args.map_size_gb, args.allow_errors)
+    build_lmdb(
+        args.data_dir, args.lmdb_path, args.map_size_gb, args.allow_errors, args.num_workers
+    )
 
 
 if __name__ == "__main__":
