@@ -311,6 +311,15 @@ def main():
     with open(sign_map_file) as f:
         NUM_CLASSES = len(json.load(f))
 
+    print("Building data loaders...")
+    train_loader, test_loader, n_signers = get_data_loaders(
+        data_dir=args.data_dir,
+        cache_dir=args.cache_dir,
+        lmdb_path=args.lmdb_path,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+    )
+
     grl_active = args.grl_lambda > 0.0 and n_signers > 0
     model = AnatomicalConformer(
         num_classes=NUM_CLASSES,
@@ -321,15 +330,6 @@ def main():
         drop_path_max=args.drop_path_max,
         n_signers=n_signers if grl_active else 0,
     ).to(device)
-
-    print("Building data loaders...")
-    train_loader, test_loader, n_signers = get_data_loaders(
-        data_dir=args.data_dir,
-        cache_dir=args.cache_dir,
-        lmdb_path=args.lmdb_path,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-    )
 
     print(f"Num classes : {NUM_CLASSES}")
     print(f"Num signers : {n_signers} ({'GRL active' if grl_active else 'GRL disabled'})")

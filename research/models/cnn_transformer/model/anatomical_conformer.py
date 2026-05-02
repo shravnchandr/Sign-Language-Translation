@@ -25,10 +25,27 @@ class HandDominanceModule(nn.Module):
     a right-handed signer doing "Hello" both arrive at dominant_proj with the
     same semantics, halving the effective learning burden for one-handed signs.
 
-    Operates on the full [position | velocity] concatenation so both halves are
-    swapped consistently. Applied after RobustNormalization, before splitting
-    into pos/vel.
+    The LH↔RH swap is expressed as a precomputed gather permutation applied in
+    a single indexing op. This is robust to any future change in landmark block
+    layout — no manual slice-pair bookkeeping required.
     """
+
+    def __init__(self):
+        super().__init__()
+        # Build a (2*COORD_FEAT,) permutation where:
+        #   output[:, :, LH_START:POSE_START]  ← input[:, :, RH_START:FACE_START]
+        #   output[:, :, RH_START:FACE_START]  ← input[:, :, LH_START:POSE_START]
+        # All other feature indices remain identity-mapped.
+        D = 2 * COORD_FEAT
+        perm = torch.arange(D)
+        for half in (0, COORD_FEAT):
+            perm[half + LH_START : half + POSE_START] = torch.arange(
+                half + RH_START, half + FACE_START
+            )
+            perm[half + RH_START : half + FACE_START] = torch.arange(
+                half + LH_START, half + POSE_START
+            )
+        self.register_buffer("swap_perm", perm)  # moves to correct device with model
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: (B, T, 2*COORD_FEAT) — caller owns x (already cloned upstream)
@@ -38,7 +55,6 @@ class HandDominanceModule(nn.Module):
         rh_wrist_vel = x[
             :, :, COORD_FEAT + RH_START : COORD_FEAT + RH_START + COORDS_PER_LM
         ]
-
         lh_energy = (lh_wrist_vel**2).sum(dim=-1).mean(dim=1)  # (B,)
         rh_energy = (rh_wrist_vel**2).sum(dim=-1).mean(dim=1)  # (B,)
 
@@ -46,20 +62,8 @@ class HandDominanceModule(nn.Module):
         if swap_idx.numel() == 0:
             return x
 
-        # Swap only the samples that need it: index-slice instead of torch.where
-        # avoids allocating full (B, T, D) tensors for the whole batch.
-        # LH ↔ RH position (non-overlapping slices — no aliasing)
-        tmp = x[swap_idx, :, LH_START:POSE_START].clone()
-        x[swap_idx, :, LH_START:POSE_START] = x[swap_idx, :, RH_START:FACE_START]
-        x[swap_idx, :, RH_START:FACE_START] = tmp
-
-        # LH ↔ RH velocity (same offsets shifted by COORD_FEAT)
-        tmp = x[swap_idx, :, COORD_FEAT + LH_START : COORD_FEAT + POSE_START].clone()
-        x[swap_idx, :, COORD_FEAT + LH_START : COORD_FEAT + POSE_START] = x[
-            swap_idx, :, COORD_FEAT + RH_START : COORD_FEAT + FACE_START
-        ]
-        x[swap_idx, :, COORD_FEAT + RH_START : COORD_FEAT + FACE_START] = tmp
-
+        # Single gather across the feature dimension — no tmp clone needed.
+        x[swap_idx] = x[swap_idx][:, :, self.swap_perm]
         return x
 
 
