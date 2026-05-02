@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from .conformer import ConformerBlock, SinusoidalPositionalEncoding
-from .normalization import RobustNormalization
+from .normalization import RobustNormalization, WristNormalization
 from ..config import (
     POSE_START,
     COORDS_PER_LM,
@@ -74,6 +74,7 @@ class AnatomicalConformer(nn.Module):
             pose_start_idx=POSE_START, n_coords=COORDS_PER_LM
         )
         self.hand_dominance = HandDominanceModule()
+        self.wrist_norm = WristNormalization()
 
         # Position stream — per-part projections
         self.lh_proj = nn.Linear(21 * COORDS_PER_LM, d_model // 4)
@@ -113,7 +114,8 @@ class AnatomicalConformer(nn.Module):
         B, T, _ = x.shape
 
         x = self.robust_norm(x)
-        x = self.hand_dominance(x)  # reorder so dominant hand is always in LH slot
+        x = self.hand_dominance(x)   # reorder so dominant hand is always in LH slot
+        x = self.wrist_norm(x)       # landmark 0 = location, landmarks 1-20 = shape
 
         # Split position and velocity halves
         pos = x[:, :, :COORD_FEAT]

@@ -242,6 +242,10 @@ def main():
     parser.add_argument(
         "--num-workers", type=int, default=4, help="DataLoader worker processes"
     )
+    parser.add_argument("--d-model", type=int, default=256, help="Conformer model width")
+    parser.add_argument("--n-heads", type=int, default=4, help="Attention heads")
+    parser.add_argument("--n-layers", type=int, default=4, help="Conformer layers")
+    parser.add_argument("--dropout", type=float, default=0.2, help="Dropout rate")
     parser.add_argument(
         "--lmdb-path",
         default=None,
@@ -265,7 +269,11 @@ def main():
         NUM_CLASSES = len(json.load(f))
 
     model = AnatomicalConformer(
-        num_classes=NUM_CLASSES, d_model=512, n_heads=8, n_layers=8, dropout=0.1
+        num_classes=NUM_CLASSES,
+        d_model=args.d_model,
+        n_heads=args.n_heads,
+        n_layers=args.n_layers,
+        dropout=args.dropout,
     ).to(device)
 
     print("Building data loaders...")
@@ -354,16 +362,16 @@ def main():
             print(f"\nEarly stopping Phase 1 at epoch {epoch_idx}")
             break
 
-    print("\nPhase 2: Fine-tuning (Gentle Augmentation)")
+    print("\nPhase 2: Cosine Warmdown (Heavy Augmentation Maintained)")
     print("-" * 80)
 
     # Load the best Phase 1 checkpoint from THIS run (not a stale file).
     if p1_saved:
         model.load_state_dict(torch.load(p1_ckpt, weights_only=True))
 
-    # Fresh Phase 2 scheduler — separate from Phase 1 so early stopping doesn't
-    # leave Phase 2 at the wrong point in the LR cycle.
-    steps_p2 = math.ceil(len(train_loader) / 2) * NUM_EPOCHS_PHASE2
+    # CosineAnnealing warmdown from 1e-4 → 1e-6 over Phase 2.
+    # accumulation_steps matches Phase 1 so T_max counts the same unit.
+    steps_p2 = math.ceil(len(train_loader) / 4) * NUM_EPOCHS_PHASE2
     for pg in optimizer.param_groups:
         pg["initial_lr"] = pg["lr"] = 1e-4
     scheduler_p2 = optim.lr_scheduler.CosineAnnealingLR(
@@ -379,9 +387,9 @@ def main():
             optimizer,
             criterion,
             scaler,
-            accumulation_steps=2,
-            use_mixup=False,
-            heavy_augment=False,
+            accumulation_steps=4,
+            use_mixup=True,
+            heavy_augment=True,
             scheduler=scheduler_p2,
             epoch=p2_epoch,
             total_epochs=NUM_EPOCHS_PHASE2,
@@ -390,7 +398,8 @@ def main():
         print(
             f"P2 Epoch {p2_epoch + 1:3d}/{NUM_EPOCHS_PHASE2} | "
             f"Train Loss: {t_loss:.4f} | Train Acc: {t_acc:.4f} | "
-            f"Val Acc: {v_acc:.4f} | LR: {optimizer.param_groups[0]['lr']:.2e}"
+            f"Val Acc: {v_acc:.4f} | LR: {optimizer.param_groups[0]['lr']:.2e}",
+            flush=True,
         )
         if v_acc > best_acc:
             best_acc = v_acc
