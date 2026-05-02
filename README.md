@@ -47,14 +47,16 @@ Phase 1 training is fully unsupervised — uses all available datasets including
 End-to-end supervised classification without VQ-VAE pre-training. Designed for Kaggle/RunPod training.
 
 ```
-Parquet → frame_stacked_data → (T, D_pos) positions
-  → velocity computed as frame-delta of positions
-  → concat [pos | vel] → (T, 2·D_pos)
+Parquet → frame_stacked_data → (T, D_pos) positions [x, y, z]
+  → Δ1 velocity as frame-delta of positions
+  → concat [pos | vel_Δ1] → (T, 2·D_pos)
   → RobustNormalization (nose→shoulder fallback, in-model)
   → HandDominanceModule (reorder by wrist motion energy)
   → WristNormalization (lm0=location, lm1-20=shape)
-  → Per-part projections: lh, rh, pose, face (pos + vel streams)
-  → Feature fusion (pos+vel → d_model)
+  → Δ2, Δ5 velocity computed from body-relative positions (in-model)
+  → Per-part position projections: lh, rh, pose, eyebrow, mouth → d_model
+  → Per-part velocity projections: lh, rh, pose, face (Δ1∥Δ2∥Δ5) → d_model
+  → Feature fusion (2·d_model → d_model)
   → Sinusoidal PE + CLS token prepend
   → Conformer blocks (FFN→Attention→DepthwiseConv→FFN) × n_layers
   → CLS token → sign head (250 classes)
@@ -67,12 +69,12 @@ Parquet → frame_stacked_data → (T, D_pos) positions
 - Dominance-aware mixup: pairs same-dominant-hand samples so HandDominanceModule receives unambiguous mixed tensors
 
 **Training:**
-- Phase 1: 80 epochs, heavy augmentation (flip, noise, time-stretch, rotation, finger dropout), dominance-aware mixup, gradient accumulation ×4, OneCycleLR
-- Phase 2: 20 epochs, cosine warmdown (heavy augmentation maintained), gradient accumulation ×4
+- Phase 1: 100 epochs, heavy augmentation (flip, noise, time-stretch, rotation, finger dropout), dominance-aware mixup, gradient accumulation ×4, OneCycleLR
+- Phase 2: 20 epochs, cosine warmdown (heavy augmentation maintained), gradient accumulation ×4; GRL continues Ganin ramp from Phase 1 endpoint (~max_lambda throughout)
 - Evaluation: 5-pass test-time augmentation (TTA) for final reporting; deterministic eval for checkpoint selection
 - Loss: FocalLoss (α=0.25, γ=2.0, label smoothing=0.1) + GRL adversarial cross-entropy
 
-**Model size:** ~6.5M parameters (d_model=256, n_layers=4, n_heads=4)
+**Model size:** ~7M parameters (d_model=256, n_layers=4, n_heads=4)
 
 ---
 
@@ -223,11 +225,11 @@ PYTHONPATH=research/models uv run python -m cnn_transformer.train \
 #   --n-layers 4            conformer block count
 #   --drop-path-max 0.1     stochastic depth max rate
 #   --grl-lambda 0.1        GRL signer-adversarial weight (0=disable)
-#   --phase1-epochs 80
+#   --phase1-epochs 100
 #   --phase2-epochs 20
 ```
 
-**Note:** Changing face landmark selection in `config.py` (e.g. `FACE_LANDMARK_INDICES`) invalidates the LMDB cache. Delete and rebuild: `rm -rf /tmp/asl.lmdb && python -m cnn_transformer.data.build_lmdb ...`
+**Note:** Any change to `config.py` that affects `ALL_COLUMNS` (face landmark selection, `INCLUDE_DEPTH`, `INCLUDE_FACE`) invalidates the LMDB cache — `CACHE_VERSION` is an MD5 of `ALL_COLUMNS` so stale archives are never silently reused. Delete and rebuild: `rm -rf /tmp/asl.lmdb && python -m cnn_transformer.data.build_lmdb ...`
 
 ---
 
@@ -237,7 +239,7 @@ PYTHONPATH=research/models uv run python -m cnn_transformer.train \
 
 **Hand dominance** (`HandDominanceModule` in VQ-VAE, planned for AnatomicalConformer): detects the dominant hand from wrist velocity and always places it in the first channel, making the model hand-agnostic by construction.
 
-**Velocity is body-relative**: velocities are computed as frame differences of nose-subtracted positions, giving `world_vel − body_translation`. This means relative hand-to-body motion is already encoded without additional computation.
+**Multi-scale velocity**: three temporal scales (Δ1/Δ2/Δ5) are fed to the velocity projections. Δ1 is computed in the dataset as frame differences of raw coordinates. Δ2 and Δ5 are computed inside `AnatomicalConformer.forward()` from body-relative positions (post nose-subtraction), so they capture motion relative to the body. All three scales are concatenated per body part before projection, giving the velocity stream the same `d_model` budget as the position stream.
 
 **Multi-scale temporal encoding**: the same sequence is encoded at chunk sizes 4, 8, and 16 to capture fine finger motion, coarse arm motion, and global temporal structure simultaneously.
 

@@ -73,15 +73,16 @@ Parquet → LandmarkProcessor → (T, N, 3)
 
 End-to-end supervised classification without VQ-VAE pre-training. Designed for Kaggle training.
 
-- Per-body-part projection: separate `nn.Linear` for LH, RH, pose, face landmarks
-- Velocity stream projected separately and fused with position features
+- Input coordinates: x, y, z per landmark (`INCLUDE_DEPTH=True`)
+- Per-body-part projection: separate `nn.Linear` for LH, RH, pose; face is split into `eyebrow_proj` (grammatical: questions/negation) and `mouth_proj` (phonological: mouthing), each at `d_model//8` — same total budget as a single face projection
+- Multi-scale velocity stream (Δ1/Δ2/Δ5): Δ1 computed in dataset from raw coords; Δ2 and Δ5 computed inside `forward()` from body-relative positions (after nose subtraction). All three scales concatenated per part and projected to `d_model//4`. Position and velocity get equal `d_model` budget before fusion.
 - Conformer blocks (depthwise conv + self-attention) + CLS token for classification
 - `RobustNormalization` in-model (nose → shoulder fallback)
 - `WristNormalization`: landmark 0 = location (nose-relative), landmarks 1–20 = shape (wrist-relative)
-- Two-phase training: Phase 1 (80 epochs, heavy aug, mixup) → Phase 2 (20 epochs, cosine warmdown, heavy aug maintained)
+- Two-phase training: Phase 1 (100 epochs default, heavy aug, mixup) → Phase 2 (20 epochs, cosine warmdown, heavy aug maintained)
 - Test-time augmentation (5-pass TTA) at evaluation
 - Stochastic depth (`drop_path_max=0.1`): linearly increasing per-block skip probability (block 0 = 0, last = drop_path_max). Controlled via `--drop-path-max` CLI arg.
-- GRL signer-invariance (`--grl-lambda 0.1`): `SignerDiscriminator` on CLS token, gradient reversed so feature extractor is forced to discard signer identity. Ganin schedule ramps λ from 0 → max over training. Requires `participant_id` in train.csv; auto-disables when not present. Adversarial loss uses same mixup weighting as sign loss. Discriminator accuracy is logged each epoch alongside chance level (`1/n_signers`) to verify the feature extractor is successfully confusing the discriminator.
+- GRL signer-invariance (`--grl-lambda 0.1`): `SignerDiscriminator` on CLS token, gradient reversed so feature extractor is forced to discard signer identity. Ganin schedule ramps λ from 0 → max over Phase 1; Phase 2 continues the ramp from Phase 1's endpoint (stays at ~max_lambda). Requires `participant_id` in train.csv; auto-disables when not present. Adversarial loss uses same mixup weighting as sign loss. Discriminator accuracy is logged each epoch alongside chance level (`1/n_signers`) to verify the feature extractor is successfully confusing the discriminator.
 
 ## Key Modules
 
@@ -162,7 +163,7 @@ kaggle competitions download -c asl-fingerspelling       # Fingerspelling
 
 **Normalization fallback chain** (`RobustPreprocessor`, `RobustNormalization`): nose → shoulder center → hip center. Subtracts the origin to make coordinates body-relative. Falls back when nose landmark is missing.
 
-**Velocity is body-relative by construction**: velocities in `ASLDataset` are computed as frame differences of already-normalized positions (nose-subtracted per frame). The resulting velocity is `world_vel[t] − body_translation[t]`, i.e., relative to body movement.
+**Multi-scale velocity** (`AnatomicalConformer`): three temporal scales are fed to the velocity projections. Δ1 is computed in `ASLDataset` as frame differences of raw (pre-normalization) coordinates. Δ2 and Δ5 are computed inside `AnatomicalConformer.forward()` from body-relative positions (after `RobustNormalization` subtracts the nose), so they capture velocity relative to body movement. All three scales are concatenated per body part before projection.
 
 **Hand dominance** (`HandDominanceModule`): detects dominant hand from wrist velocity; reorders left/right channels so dominant hand is always in the first (LH) slot before projection. Implemented in both `AnatomicalConformer` and the VQ-VAE pipeline. Swap triggers when right-hand energy exceeds left-hand energy — left-handed signers naturally already have dominant hand in the LH slot.
 
