@@ -100,14 +100,18 @@ class AnatomicalConformer(nn.Module):
         self.face_vel_proj = nn.Linear(N_FACE * _V, d_model // 4)
 
         # Geometry stream — explicit joint angles + fingertip distances per hand.
-        # 15 joint-angle cosines + 10 fingertip pairwise distances = 25 per hand.
-        # Equal budget across both hands: 2 × d_model//8 = d_model//4.
-        self.lh_geo_proj = nn.Linear(25, d_model // 8)
-        self.rh_geo_proj = nn.Linear(25, d_model // 8)
+        # 15 joint-angle cosines + 10 fingertip pairwise distances
+        #   + 3 palm-normal components (3D only — encodes palm orientation)
+        # = 28 (INCLUDE_DEPTH) or 25 (2D) per hand; projected 2 × d_model//8 = d_model//4.
+        # Plus 2 hand-nose distance scalars → d_model//8.
+        _n_geo = 25 + (3 if COORDS_PER_LM == 3 else 0)
+        self.lh_geo_proj = nn.Linear(_n_geo, d_model // 8)
+        self.rh_geo_proj = nn.Linear(_n_geo, d_model // 8)
+        self.dist_proj = nn.Linear(2, d_model // 8)
 
-        # Feature fusion: (d_model pos + d_model vel + d_model//4 geo) → d_model
+        # Feature fusion: pos(d_model) + vel(d_model) + geo(d_model//4) + dist(d_model//8) → d_model
         self.feat_fuse = nn.Sequential(
-            nn.Linear(2 * d_model + d_model // 4, d_model),
+            nn.Linear(2 * d_model + d_model // 4 + d_model // 8, d_model),
             nn.LayerNorm(d_model),
             nn.GELU(),
         )
@@ -136,11 +140,13 @@ class AnatomicalConformer(nn.Module):
         Compute rotation-invariant hand shape descriptors in the wrist frame.
 
         hand: (B, T, 21, c) — lm 0 = wrist at origin (zeros), lm 1-20 wrist-relative.
-        Returns: (B, T, 25) = 15 joint-angle cosines + 10 fingertip pairwise distances.
-
-        Joint angles capture finger curl (impossible to infer reliably from raw XYZ).
-        Fingertip distances capture hand openness and inter-finger configuration.
-        Both are invariant to wrist rotation and signer hand scale.
+        Returns: (B, T, 28) in 3D or (B, T, 25) in 2D.
+          15 joint-angle cosines: 3 per finger (at MCP, PIP, DIP joints)
+          10 fingertip pairwise distances: hand openness and inter-finger spread
+           3 palm-normal components (3D only): unit vector perpendicular to palm,
+             encodes orientation (curl vs. toward-camera vs. left/right) that raw
+             XYZ buries and joint angles cannot distinguish.
+        All features are invariant to wrist rotation and signer hand scale.
         """
         angles = []
         for chain in (
@@ -163,7 +169,17 @@ class AnatomicalConformer(nn.Module):
             (tips[:, :, i] - tips[:, :, j]).norm(dim=-1)
             for i in range(5) for j in range(i + 1, 5)
         ]
-        return torch.stack(angles + dists, dim=-1)  # (B, T, 25)
+        features = torch.stack(angles + dists, dim=-1)  # (B, T, 25)
+
+        if hand.shape[-1] == 3:
+            # Palm normal: cross product of (wrist→index_MCP) × (wrist→pinky_MCP).
+            # Unit normal encodes which way the palm faces — the one distinction
+            # that joint angles and raw XYZ both fail to capture reliably.
+            n = torch.linalg.cross(hand[:, :, 5], hand[:, :, 17])  # (B, T, 3)
+            n_unit = n / (n.norm(dim=-1, keepdim=True) + 1e-6)
+            features = torch.cat([features, n_unit], dim=-1)        # (B, T, 28)
+
+        return features
 
     def forward(self, x, mask, grl_lambda: float = 0.0):
         B, T, _ = x.shape
@@ -185,6 +201,12 @@ class AnatomicalConformer(nn.Module):
             self.lh_geo_proj(self._hand_geometry(lh_hand)),
             self.rh_geo_proj(self._hand_geometry(rh_hand)),
         ], dim=-1)  # (B, T, d_model // 4)
+
+        # Hand-nose distances: dominant and non-dominant wrist to nose (origin).
+        # Encodes when hands are in the face region — gates relevance of face NMMs.
+        lh_dist = pos[:, :, LH_START:LH_START + c].norm(dim=-1, keepdim=True)  # (B, T, 1)
+        rh_dist = pos[:, :, RH_START:RH_START + c].norm(dim=-1, keepdim=True)  # (B, T, 1)
+        dist_feat = self.dist_proj(torch.cat([lh_dist, rh_dist], dim=-1))       # (B, T, d_model // 8)
 
         # Compute additional velocity scales from body-relative positions.
         # Divided by their time delta so all three scales share the same unit
@@ -215,7 +237,7 @@ class AnatomicalConformer(nn.Module):
         fc_v = self.face_vel_proj(_vcat(slice(FACE_START, None)))
         vel_feat = torch.cat([lh_v, ps_v, rh_v, fc_v], dim=-1)  # (B, T, d_model)
 
-        x = self.feat_fuse(torch.cat([pos_feat, vel_feat, geo_feat], dim=-1))
+        x = self.feat_fuse(torch.cat([pos_feat, vel_feat, geo_feat, dist_feat], dim=-1))
 
         # Sequence modeling
         x = self.pos_enc(x)
