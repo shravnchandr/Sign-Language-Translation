@@ -52,6 +52,7 @@ def train_epoch(
 ):
     model.train()
     train_loss, correct, total = 0, 0, 0
+    disc_correct, disc_total = 0, 0
     optimizer.zero_grad()
 
     # Ganin et al. 2016 schedule: ramps from ~0 at epoch 0 to grl_lambda by mid-training.
@@ -128,6 +129,8 @@ def train_epoch(
                     else:
                         adv_loss = F.cross_entropy(signer_logits[valid], signer_ids[valid])
                     loss = sign_loss + grl_lam * adv_loss
+                    disc_correct += (signer_logits[valid].argmax(dim=1) == signer_ids[valid]).sum().item()
+                    disc_total += valid.sum().item()
                 else:
                     loss = sign_loss
             else:
@@ -151,7 +154,10 @@ def train_epoch(
         total += y_a.size(0)
 
         if idx % 20 == 0:
-            pbar.set_postfix({"loss": f"{batch_loss:.4f}", "acc": f"{batch_correct / y_a.size(0):.4f}"})
+            postfix = {"loss": f"{batch_loss:.4f}", "acc": f"{batch_correct / y_a.size(0):.4f}"}
+            if disc_total > 0:
+                postfix["disc_acc"] = f"{disc_correct / disc_total:.4f}"
+            pbar.set_postfix(postfix)
 
     if len(data_loader) % accumulation_steps != 0:
         scaler.unscale_(optimizer)
@@ -162,7 +168,8 @@ def train_epoch(
         if scheduler is not None:
             scheduler.step()
 
-    return train_loss / len(data_loader), correct / total
+    disc_acc = disc_correct / disc_total if disc_total > 0 else None
+    return train_loss / len(data_loader), correct / total, disc_acc
 
 
 @torch.no_grad()
@@ -389,7 +396,7 @@ def main():
 
     for epoch_idx in range(NUM_EPOCHS_PHASE1):
         t_epoch = time.perf_counter()
-        t_loss, t_acc = train_epoch(
+        t_loss, t_acc, disc_acc = train_epoch(
             model,
             train_loader,
             optimizer,
@@ -407,11 +414,13 @@ def main():
         v_loss, v_acc = evaluate_epoch(model, test_loader, criterion)
         epoch_secs = time.perf_counter() - t_epoch
         p1_epochs_run += 1
+        disc_str = f" | Disc Acc: {disc_acc:.4f} (chance: {1/n_signers:.4f})" if disc_acc is not None else ""
         print(
             f"Epoch {epoch_idx + 1:3d}/{NUM_EPOCHS_PHASE1} | "
             f"Train Loss: {t_loss:.4f} | Train Acc: {t_acc:.4f} | "
             f"Val Acc: {v_acc:.4f} | LR: {optimizer.param_groups[0]['lr']:.2e} | "
             f"Time: {_fmt_time(epoch_secs)}"
+            + disc_str
         )
         if v_acc > best_acc:
             best_acc = v_acc
@@ -454,7 +463,7 @@ def main():
 
     for p2_epoch in range(NUM_EPOCHS_PHASE2):
         t_epoch = time.perf_counter()
-        t_loss, t_acc = train_epoch(
+        t_loss, t_acc, disc_acc = train_epoch(
             model,
             train_loader,
             optimizer,
@@ -471,11 +480,13 @@ def main():
         )
         v_loss, v_acc = evaluate_epoch(model, test_loader, criterion)
         epoch_secs = time.perf_counter() - t_epoch
+        disc_str = f" | Disc Acc: {disc_acc:.4f} (chance: {1/n_signers:.4f})" if disc_acc is not None else ""
         print(
             f"P2 Epoch {p2_epoch + 1:3d}/{NUM_EPOCHS_PHASE2} | "
             f"Train Loss: {t_loss:.4f} | Train Acc: {t_acc:.4f} | "
             f"Val Acc: {v_acc:.4f} | LR: {optimizer.param_groups[0]['lr']:.2e} | "
-            f"Time: {_fmt_time(epoch_secs)}",
+            f"Time: {_fmt_time(epoch_secs)}"
+            + disc_str,
             flush=True,
         )
         if v_acc > best_acc:
