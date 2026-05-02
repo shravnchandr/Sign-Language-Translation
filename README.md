@@ -63,7 +63,7 @@ Parquet → frame_stacked_data → (T, D_pos) positions
 
 **Key regularisation:**
 - Stochastic depth: linearly increasing block-skip probability (0 → `drop_path_max=0.1`)
-- GRL signer-invariance: adversarial discriminator on CLS token forces features to discard signer identity; λ ramped via Ganin schedule
+- GRL signer-invariance: adversarial discriminator on CLS token forces features to discard signer identity; λ ramped via Ganin schedule; discriminator accuracy logged each epoch alongside chance level (`1/n_signers`)
 - Dominance-aware mixup: pairs same-dominant-hand samples so HandDominanceModule receives unambiguous mixed tensors
 
 **Training:**
