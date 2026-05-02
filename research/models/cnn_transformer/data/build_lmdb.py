@@ -26,6 +26,7 @@ from pathlib import Path
 import lmdb
 import pandas as pd
 import torch
+from tqdm import tqdm
 
 from ._cache_keys import lmdb_key as _lmdb_key, lmdb_length_key as _lmdb_length_key
 from .preprocessing import frame_stacked_data
@@ -52,39 +53,36 @@ def build_lmdb(
 
     written = skipped = errors = 0
 
-    for batch_start in range(0, n, _WRITE_BATCH):
-        batch = df.iloc[batch_start : batch_start + _WRITE_BATCH]
-        with env.begin(write=True) as txn:
-            for _, row in batch.iterrows():
-                key = _lmdb_key(row["path"])
-                length_key = _lmdb_length_key(row["path"])
-                if txn.get(key) is not None:
-                    if txn.get(length_key) is None:
-                        coords = torch.load(
-                            io.BytesIO(bytes(txn.get(key))), weights_only=True
-                        )
-                        txn.put(length_key, str(len(coords)).encode())
-                    skipped += 1
-                    continue
-                full_path = str(data_dir / row["path"])
-                try:
-                    coords = torch.tensor(
-                        frame_stacked_data(full_path), dtype=torch.float32
-                    )
-                    buf = io.BytesIO()
-                    torch.save(coords, buf)
-                    txn.put(key, buf.getvalue())
-                    txn.put(length_key, str(len(coords)).encode())
-                    written += 1
-                except Exception as e:
-                    errors += 1
-                    print(f"  ERROR: skipping {row['path']}: {e}", file=sys.stderr)
-
-        done = batch_start + len(batch)
-        print(
-            f"  {done}/{n}  written={written}  skipped={skipped}  errors={errors}",
-            flush=True,
-        )
+    with tqdm(total=n, desc="Building LMDB", unit="sample") as pbar:
+        for batch_start in range(0, n, _WRITE_BATCH):
+            batch = df.iloc[batch_start : batch_start + _WRITE_BATCH]
+            with env.begin(write=True) as txn:
+                for _, row in batch.iterrows():
+                    key = _lmdb_key(row["path"])
+                    length_key = _lmdb_length_key(row["path"])
+                    if txn.get(key) is not None:
+                        if txn.get(length_key) is None:
+                            coords = torch.load(
+                                io.BytesIO(bytes(txn.get(key))), weights_only=True
+                            )
+                            txn.put(length_key, str(len(coords)).encode())
+                        skipped += 1
+                    else:
+                        full_path = str(data_dir / row["path"])
+                        try:
+                            coords = torch.tensor(
+                                frame_stacked_data(full_path), dtype=torch.float32
+                            )
+                            buf = io.BytesIO()
+                            torch.save(coords, buf)
+                            txn.put(key, buf.getvalue())
+                            txn.put(length_key, str(len(coords)).encode())
+                            written += 1
+                        except Exception as e:
+                            errors += 1
+                            tqdm.write(f"  ERROR: skipping {row['path']}: {e}", file=sys.stderr)
+                    pbar.update(1)
+                    pbar.set_postfix(written=written, skipped=skipped, errors=errors)
 
     env.close()
     print(
