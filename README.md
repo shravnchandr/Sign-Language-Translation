@@ -251,8 +251,3 @@ PYTHONPATH=research/models uv run python -m cnn_transformer.train \
 
 **Signer-independent splits** (`signer_split.py`): train/val/test are split by signer identity to prevent the model from memorizing individual signing styles.
 
-## Code Formatting
-
-```bash
-uv run black <file_or_directory>
-```

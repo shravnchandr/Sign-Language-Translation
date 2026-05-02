@@ -38,8 +38,6 @@ PYTHONPATH=research/models uv run python -m vqvae_seq2seq.scripts.precompute_tok
 PYTHONPATH=research/models uv run python -m vqvae_seq2seq.translation.train_translator \
   --token-dir data/tokens --data-dir data/Isolated_ASL_Recognition --epochs 100
 
-# Format code
-uv run black <file_or_directory>
 ```
 
 ## Architecture
