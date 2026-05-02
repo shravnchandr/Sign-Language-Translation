@@ -119,16 +119,19 @@ research/
 │   │       ├── signer_split.py         # Signer-independent train/val/test split
 │   │       └── vocabulary.py           # Token-to-gloss mapping
 │   ├── cnn_transformer/         # AnatomicalConformer (end-to-end)
-│   │   ├── config.py                   # Landmark layout constants
+│   │   ├── config.py                   # Landmark layout constants, feature dimensions
 │   │   ├── train.py                    # Two-phase training loop
 │   │   ├── model/
 │   │   │   ├── anatomical_conformer.py # Main model
 │   │   │   ├── conformer.py            # ConformerBlock, SinusoidalPositionalEncoding
-│   │   │   └── normalization.py        # RobustNormalization
+│   │   │   ├── normalization.py        # RobustNormalization, WristNormalization
+│   │   │   └── grl.py                  # SignerDiscriminator, ganin_lambda
 │   │   └── data/
-│   │       ├── dataset.py              # ASLDataset, BucketBatchSampler
+│   │       ├── dataset.py              # ASLDataset, BucketBatchSampler, get_data_loaders
 │   │       ├── augmentation.py         # AdvancedAugmentation (7 types), mixup_batch
-│   │       └── preprocessing.py        # frame_stacked_data
+│   │       ├── preprocessing.py        # frame_stacked_data
+│   │       ├── build_lmdb.py           # One-time LMDB archive builder
+│   │       └── _cache_keys.py          # CACHE_VERSION hash, lmdb_key helpers
 │   └── st_gcn/                  # ST-GCN baseline
 │       ├── graph_structure.py          # LandmarkGraph (anatomical adjacency)
 │       ├── st_gcn_layers.py            # GraphConvolution, TemporalConvolution, ST_GCN_Block
@@ -144,8 +147,8 @@ data/
 ├── ASL_Fingerspelling_Recognition/ # Fingerspelling (unlabeled, Phase 1 only)
 └── WLASL_Landmarks/             # WLASL preprocessed landmarks
 
-run_pipeline.sh                  # End-to-end: Phase 1 → pre-tokenize → Phase 2
-vqvae_seq2seq_backup/            # Backup of VQ-VAE package
+run_pipeline_vqvae_seq2seq.sh    # End-to-end VQ-VAE pipeline: Phase 1 → tokenize → Phase 2
+run_pipeline_cnn_transformer.sh  # AnatomicalConformer pipeline: LMDB build → two-phase train
 ```
 
 ---
