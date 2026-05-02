@@ -24,7 +24,7 @@ DATA_DIR="data/Isolated_ASL_Recognition"
 CACHE_DIR="data/cache/cnn_transformer"
 LMDB_PATH="data/cache/cnn_transformer/asl.lmdb"
 CHECKPOINT_DIR="checkpoints/cnn_transformer"
-PHASE1_EPOCHS=80
+PHASE1_EPOCHS=100
 PHASE2_EPOCHS=20
 PATIENCE=20
 BATCH_SIZE=64
@@ -70,6 +70,10 @@ echo "  Allow errors:    $ALLOW_ERRORS"
 echo "========================================"
 
 # ── LMDB build (resumable — always invoked so partial builds get completed) ──
+# Note: CACHE_VERSION is an MD5 of ALL_COLUMNS. Any config change that affects
+# ALL_COLUMNS (INCLUDE_DEPTH, INCLUDE_FACE, FACE_LANDMARK_INDICES) invalidates
+# old keys automatically, but stale data still occupies disk. After such a change,
+# delete the archive first: rm -rf "$LMDB_PATH"
 if [ "$SKIP_LMDB" = false ]; then
     echo ""
     echo "[LMDB] Building / resuming LMDB archive (existing keys are skipped)..."
