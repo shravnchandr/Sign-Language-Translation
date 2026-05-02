@@ -140,11 +140,14 @@ class AnatomicalConformer(nn.Module):
         vel1 = x[:, :, COORD_FEAT:]
 
         # Compute additional velocity scales from body-relative positions.
+        # Divided by their time delta so all three scales share the same unit
+        # (displacement per frame), preventing vel5's larger raw magnitude from
+        # dominating vel_proj gradients and crowding out fine-grained Δ1 signal.
         # Boundary frames stay zero (correct: padded positions are zero).
         vel2 = torch.zeros_like(pos)
-        vel2[:, 2:] = pos[:, 2:] - pos[:, :-2]
+        vel2[:, 2:] = (pos[:, 2:] - pos[:, :-2]) / 2.0
         vel5 = torch.zeros_like(pos)
-        vel5[:, 5:] = pos[:, 5:] - pos[:, :-5]
+        vel5[:, 5:] = (pos[:, 5:] - pos[:, :-5]) / 5.0
 
         # Per-part position features — face split into eyebrow and mouth streams
         _eb = N_FACE_EYEBROW * COORDS_PER_LM  # eyebrow feature width
