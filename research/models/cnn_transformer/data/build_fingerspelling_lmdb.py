@@ -33,7 +33,7 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 
-from ..config import ALL_COLUMNS, COORD_FEAT
+from ..config import ALL_COLUMNS
 
 _WRITE_BATCH = 500  # smaller than ASL build — each entry is larger
 _1TB = 1 << 40  # LMDB uses sparse files; 1 TiB costs nothing extra on disk
@@ -74,10 +74,8 @@ def _process_parquet(args: tuple) -> list[tuple]:
     import numpy as np
     import pandas as pd
     import torch
-    from cnn_transformer.data.build_fingerspelling_lmdb import (
-        _FS_COLS,
-        COORD_FEAT,
-    )
+    from cnn_transformer.data.build_fingerspelling_lmdb import _FS_COLS
+    from cnn_transformer.config import COORD_FEAT
 
     parquet_path, pending = args
     # pending: list of sequence_id ints to process from this parquet

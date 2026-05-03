@@ -9,13 +9,12 @@ Tensor layout matches ASLDataset: (T, 2*COORD_FEAT) = [positions | Δ1 velocitie
 import io
 import json
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import lmdb
 import torch
 from torch.utils.data import Dataset
 
-from ..config import COORD_FEAT
 from .dataset import _open_lmdb_env  # reuse the fork-safe env cache
 
 

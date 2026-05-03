@@ -32,7 +32,6 @@ import torch
 from tqdm import tqdm
 
 from ._cache_keys import lmdb_key as _lmdb_key, lmdb_length_key as _lmdb_length_key
-from .preprocessing import frame_stacked_data
 
 # Commit to LMDB every this many successful writes to cap dirty-page memory.
 _WRITE_BATCH = 2_000

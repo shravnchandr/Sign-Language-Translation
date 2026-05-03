@@ -1,7 +1,6 @@
 import numpy as np
 import torch
 import torch.nn as nn
-from typing import Optional
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
 _SDPA_BACKENDS = [
@@ -167,8 +166,7 @@ class SinusoidalPositionalEncoding(nn.Module):
             d = self.pe.size(1)
             pos = torch.arange(T, device=x.device).unsqueeze(1).float()
             div = torch.exp(
-                torch.arange(0, d, 2, device=x.device).float()
-                * (-np.log(10000.0) / d)
+                torch.arange(0, d, 2, device=x.device).float() * (-np.log(10000.0) / d)
             )
             pe = torch.zeros(T, d, device=x.device)
             pe[:, 0::2] = torch.sin(pos * div)
