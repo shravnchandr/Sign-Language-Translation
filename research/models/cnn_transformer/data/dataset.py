@@ -33,13 +33,25 @@ def _open_lmdb_env(lmdb_path: str):
     Keyed by PID so forked workers never reuse the parent's handle — sharing
     an lmdb.Environment across fork() deadlocks because the internal mutexes
     are tied to the parent's PID.
+
+    Accepts both the traditional directory form (is.lmdb/) and the flat-file
+    form (is.lmdb.mdb) produced by the Kaggle build notebooks.  The flat form
+    avoids Kaggle's subdirectory-skip behaviour during dataset creation.
     """
-    canonical = str(Path(lmdb_path).resolve())
+    p = Path(lmdb_path).resolve()
+    # If given a directory-style path that doesn't exist, try the flat form.
+    if not p.exists():
+        flat = p.parent / (p.name + ".mdb")
+        if flat.is_file():
+            p = flat
+    subdir = p.is_dir()
+    canonical = str(p)
     key = (os.getpid(), canonical)
     env = _LMDB_ENV_CACHE.get(key)
     if env is None:
         env = lmdb.open(
             canonical,
+            subdir=subdir,
             map_size=1 << 40,  # sparse file — matches build_lmdb default
             readonly=True,
             lock=False,
