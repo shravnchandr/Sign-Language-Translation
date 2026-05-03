@@ -78,6 +78,7 @@ class AnatomicalConformer(nn.Module):
         dropout=0.1,
         drop_path_max=0.1,
         n_signers=0,
+        ctc_vocab_size=0,
     ):
         super().__init__()
         # Offsets are computed dynamically from COORDS_PER_LM, so toggling
@@ -146,6 +147,12 @@ class AnatomicalConformer(nn.Module):
         )
         self.signer_disc = (
             SignerDiscriminator(d_model, n_signers) if n_signers > 0 else None
+        )
+        # CTC pre-training head: per-frame projection → vocab + 1 blank.
+        # When present, forward() skips the CLS token and returns (B, T, vocab+1)
+        # instead of sign logits.  Not used during fine-tuning.
+        self.ctc_head = (
+            nn.Linear(d_model, ctc_vocab_size + 1) if ctc_vocab_size > 0 else None
         )
 
     @staticmethod
@@ -282,8 +289,15 @@ class AnatomicalConformer(nn.Module):
 
         x = self.feat_fuse(torch.cat([pos_feat, vel_feat, geo_feat, dist_feat], dim=-1))
 
-        # Sequence modeling
         x = self.pos_enc(x)
+
+        if self.ctc_head is not None:
+            # CTC pre-training: no CLS token; return per-frame logits (B, T, vocab+1)
+            for block in self.blocks:
+                x = block(x, mask)
+            return self.ctc_head(x)
+
+        # Classification: prepend CLS token
         cls = self.cls_token.expand(B, -1, -1)
         x = torch.cat([cls, x], dim=1)
 

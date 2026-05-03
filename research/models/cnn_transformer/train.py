@@ -56,7 +56,11 @@ def train_epoch(
     optimizer.zero_grad()
 
     # Ganin et al. 2016 schedule: ramps from ~0 at epoch 0 to grl_lambda by mid-training.
-    grl_lam = ganin_lambda(epoch, total_epochs, max_lambda=grl_lambda) if grl_lambda > 0.0 else 0.0
+    grl_lam = (
+        ganin_lambda(epoch, total_epochs, max_lambda=grl_lambda)
+        if grl_lambda > 0.0
+        else 0.0
+    )
 
     pbar = tqdm(data_loader, desc=f"Epoch {epoch + 1}/{total_epochs}")
     for idx, (x, mask, y, signer_ids) in enumerate(pbar):
@@ -113,7 +117,9 @@ def train_epoch(
                 logits = model(x, mask)
 
             if use_mixup:
-                sign_loss = lam * criterion(logits, y_a) + (1 - lam) * criterion(logits, y_b)
+                sign_loss = lam * criterion(logits, y_a) + (1 - lam) * criterion(
+                    logits, y_b
+                )
             else:
                 sign_loss = criterion(logits, y_a)
 
@@ -122,14 +128,21 @@ def train_epoch(
                 if valid.any():
                     if use_mixup and mixup_idx is not None:
                         signer_ids_b = signer_ids[mixup_idx]
-                        adv_loss = (
-                            lam * F.cross_entropy(signer_logits[valid], signer_ids[valid]) +
-                            (1 - lam) * F.cross_entropy(signer_logits[valid], signer_ids_b[valid])
+                        adv_loss = lam * F.cross_entropy(
+                            signer_logits[valid], signer_ids[valid]
+                        ) + (1 - lam) * F.cross_entropy(
+                            signer_logits[valid], signer_ids_b[valid]
                         )
                     else:
-                        adv_loss = F.cross_entropy(signer_logits[valid], signer_ids[valid])
+                        adv_loss = F.cross_entropy(
+                            signer_logits[valid], signer_ids[valid]
+                        )
                     loss = sign_loss + grl_lam * adv_loss
-                    disc_correct += (signer_logits[valid].argmax(dim=1) == signer_ids[valid]).sum().item()
+                    disc_correct += (
+                        (signer_logits[valid].argmax(dim=1) == signer_ids[valid])
+                        .sum()
+                        .item()
+                    )
                     disc_total += valid.sum().item()
                 else:
                     loss = sign_loss
@@ -154,7 +167,10 @@ def train_epoch(
         total += y_a.size(0)
 
         if idx % 20 == 0:
-            postfix = {"loss": f"{batch_loss:.4f}", "acc": f"{batch_correct / y_a.size(0):.4f}"}
+            postfix = {
+                "loss": f"{batch_loss:.4f}",
+                "acc": f"{batch_correct / y_a.size(0):.4f}",
+            }
             if disc_total > 0:
                 postfix["disc_acc"] = f"{disc_correct / disc_total:.4f}"
             pbar.set_postfix(postfix)
@@ -193,14 +209,19 @@ def predict_with_tta(model, x, mask, n_augmentations=5):
                 # Batch-vectorized: same stretch factor for whole batch this pass.
                 x_aug = F.interpolate(
                     x_aug.permute(0, 2, 1),
-                    size=new_len, mode="linear", align_corners=False,
+                    size=new_len,
+                    mode="linear",
+                    align_corners=False,
                 ).permute(0, 2, 1)
                 x_aug = F.pad(x_aug, (0, 0, 0, T_tta - new_len))
                 mask_aug = (
                     F.interpolate(
                         mask_aug.float().unsqueeze(1),
-                        size=new_len, mode="linear", align_corners=False,
-                    ).squeeze(1) > 0.5
+                        size=new_len,
+                        mode="linear",
+                        align_corners=False,
+                    ).squeeze(1)
+                    > 0.5
                 )
                 mask_aug = F.pad(mask_aug, (0, T_tta - new_len))
         if np.random.random() > 0.5:
@@ -279,7 +300,9 @@ def main():
     parser.add_argument(
         "--num-workers", type=int, default=4, help="DataLoader worker processes"
     )
-    parser.add_argument("--d-model", type=int, default=256, help="Conformer model width")
+    parser.add_argument(
+        "--d-model", type=int, default=256, help="Conformer model width"
+    )
     parser.add_argument("--n-heads", type=int, default=4, help="Attention heads")
     parser.add_argument("--n-layers", type=int, default=4, help="Conformer layers")
     parser.add_argument("--dropout", type=float, default=0.2, help="Dropout rate")
@@ -294,13 +317,19 @@ def main():
         type=float,
         default=0.1,
         help="Max GRL adversarial weight for signer-invariance (0 = disabled). "
-             "Ramped from 0 via Ganin schedule.",
+        "Ramped from 0 via Ganin schedule.",
     )
     parser.add_argument(
         "--lmdb-path",
         default=None,
         help="Path to LMDB archive (recommended on RunPod). "
-             "Build with: python -m cnn_transformer.data.build_lmdb",
+        "Build with: python -m cnn_transformer.data.build_lmdb",
+    )
+    parser.add_argument(
+        "--pretrained-backbone",
+        default=None,
+        help="Path to backbone_best.pth from pretrain_fingerspelling.py. "
+        "Backbone weights are loaded with strict=False before training.",
     )
     args = parser.parse_args()
 
@@ -338,8 +367,19 @@ def main():
         n_signers=n_signers if grl_active else 0,
     ).to(device)
 
+    if args.pretrained_backbone:
+        ckpt = torch.load(args.pretrained_backbone, map_location="cpu", weights_only=True)
+        missing, unexpected = model.load_state_dict(ckpt, strict=False)
+        print(f"Loaded pre-trained backbone from {args.pretrained_backbone}")
+        if missing:
+            print(f"  Missing keys (expected — new head/cls_token): {len(missing)}")
+        if unexpected:
+            print(f"  Unexpected keys: {unexpected}")
+
     print(f"Num classes : {NUM_CLASSES}")
-    print(f"Num signers : {n_signers} ({'GRL active' if grl_active else 'GRL disabled'})")
+    print(
+        f"Num signers : {n_signers} ({'GRL active' if grl_active else 'GRL disabled'})"
+    )
     print(f"Model params: {sum(p.numel() for p in model.parameters()):,}")
 
     criterion = FocalLoss()
@@ -385,7 +425,7 @@ def main():
 
     best_acc = -float("inf")
     patience = 0
-    p1_saved = False   # guards against loading a checkpoint from a previous run
+    p1_saved = False  # guards against loading a checkpoint from a previous run
 
     print("\nPhase 1: Exploration (Heavy Augmentation)")
     print("-" * 80)
@@ -414,13 +454,16 @@ def main():
         v_loss, v_acc = evaluate_epoch(model, test_loader, criterion)
         epoch_secs = time.perf_counter() - t_epoch
         p1_epochs_run += 1
-        disc_str = f" | Disc Acc: {disc_acc:.4f} (chance: {1/n_signers:.4f})" if disc_acc is not None else ""
+        disc_str = (
+            f" | Disc Acc: {disc_acc:.4f}"
+            if disc_acc is not None
+            else ""
+        )
         print(
             f"Epoch {epoch_idx + 1:3d}/{NUM_EPOCHS_PHASE1} | "
             f"Train Loss: {t_loss:.4f} | Train Acc: {t_acc:.4f} | "
             f"Val Acc: {v_acc:.4f} | LR: {optimizer.param_groups[0]['lr']:.2e} | "
-            f"Time: {_fmt_time(epoch_secs)}"
-            + disc_str
+            f"Time: {_fmt_time(epoch_secs)}" + disc_str
         )
         if v_acc > best_acc:
             best_acc = v_acc
@@ -482,13 +525,16 @@ def main():
         )
         v_loss, v_acc = evaluate_epoch(model, test_loader, criterion)
         epoch_secs = time.perf_counter() - t_epoch
-        disc_str = f" | Disc Acc: {disc_acc:.4f} (chance: {1/n_signers:.4f})" if disc_acc is not None else ""
+        disc_str = (
+            f" | Disc Acc: {disc_acc:.4f}"
+            if disc_acc is not None
+            else ""
+        )
         print(
             f"P2 Epoch {p2_epoch + 1:3d}/{NUM_EPOCHS_PHASE2} | "
             f"Train Loss: {t_loss:.4f} | Train Acc: {t_acc:.4f} | "
             f"Val Acc: {v_acc:.4f} | LR: {optimizer.param_groups[0]['lr']:.2e} | "
-            f"Time: {_fmt_time(epoch_secs)}"
-            + disc_str,
+            f"Time: {_fmt_time(epoch_secs)}" + disc_str,
             flush=True,
         )
         if v_acc > best_acc:
@@ -509,8 +555,12 @@ def main():
     _, tta_acc = evaluate_epoch_tta(model, test_loader, criterion)
     print(f"Best val accuracy (deterministic): {best_acc:.4f}")
     print(f"Best val accuracy (TTA):           {tta_acc:.4f}")
-    print(f"Phase 1 time : {_fmt_time(p1_total)} ({p1_epochs_run} epochs, avg {_fmt_time(p1_total / max(p1_epochs_run, 1))}/epoch)")
-    print(f"Phase 2 time : {_fmt_time(p2_total)} ({NUM_EPOCHS_PHASE2} epochs, avg {_fmt_time(p2_total / max(NUM_EPOCHS_PHASE2, 1))}/epoch)")
+    print(
+        f"Phase 1 time : {_fmt_time(p1_total)} ({p1_epochs_run} epochs, avg {_fmt_time(p1_total / max(p1_epochs_run, 1))}/epoch)"
+    )
+    print(
+        f"Phase 2 time : {_fmt_time(p2_total)} ({NUM_EPOCHS_PHASE2} epochs, avg {_fmt_time(p2_total / max(NUM_EPOCHS_PHASE2, 1))}/epoch)"
+    )
     print(f"Total time   : {_fmt_time(total_time)}")
 
 
