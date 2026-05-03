@@ -30,7 +30,7 @@ CACHE_DIR="data/cache/cnn_transformer"
 LMDB_PATH="data/asl-is-lmdb/is.lmdb.mdb"
 CHECKPOINT_DIR="checkpoints/cnn_transformer"
 PHASE1_EPOCHS=100
-PHASE2_EPOCHS=20
+PHASE2_EPOCHS=0
 PATIENCE=20
 BATCH_SIZE=64
 NUM_WORKERS=4
@@ -45,7 +45,8 @@ FS_DATA_DIR="data/asl-fs-lmdb"       # downloaded from shravnchandr/asl-fs-lmdb
 FS_LMDB_PATH="data/asl-fs-lmdb/fs.lmdb.mdb"
 FS_LMDB_CSV="data/asl-fs-lmdb/train.csv"
 PRETRAIN_CHECKPOINT_DIR="checkpoints/pretrain_fs"
-PRETRAIN_EPOCHS=40
+PRETRAIN_EPOCHS=50
+PRETRAIN_PATIENCE=10
 PRETRAINED_BACKBONE=""
 SKIP_PRETRAIN=false
 SKIP_FS_LMDB=true  # FS LMDB pre-built; set false only when building from raw parquets
@@ -73,6 +74,7 @@ while [[ $# -gt 0 ]]; do
         --fs-lmdb-csv)             FS_LMDB_CSV="$2";             shift 2 ;;
         --pretrain-checkpoint-dir) PRETRAIN_CHECKPOINT_DIR="$2"; shift 2 ;;
         --pretrain-epochs)         PRETRAIN_EPOCHS="$2";         shift 2 ;;
+        --pretrain-patience)       PRETRAIN_PATIENCE="$2";       shift 2 ;;
         --pretrained-backbone)     PRETRAINED_BACKBONE="$2";     shift 2 ;;
         --skip-pretrain)           SKIP_PRETRAIN=true;           shift ;;
         --skip-fs-lmdb)            SKIP_FS_LMDB=true;            shift ;;
@@ -148,6 +150,7 @@ if [ "$SKIP_PRETRAIN" = false ]; then
         --lmdb-csv   "$FS_LMDB_CSV" \
         --out-dir    "$PRETRAIN_CHECKPOINT_DIR" \
         --epochs     "$PRETRAIN_EPOCHS" \
+        --patience   "$PRETRAIN_PATIENCE" \
         --num-workers "$NUM_WORKERS"
 
     PRETRAINED_BACKBONE="$PRETRAIN_CHECKPOINT_DIR/backbone_best.pth"

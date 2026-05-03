@@ -120,7 +120,10 @@ def train(args):
 
     # ── Training loop ─────────────────────────────────────────────────────────
     best_val_loss = float("inf")
-    t_start = time.time()
+    patience = 0
+
+    print("\nCTC Pre-training")
+    print("-" * 80)
 
     def _optimizer_step(pbar: tqdm) -> None:
         """Unscale → clip → step → update. Only advances scheduler when the
@@ -136,6 +139,7 @@ def train(args):
         pbar.set_postfix(lr=f"{scheduler.get_last_lr()[0]:.1e}", refresh=False)
 
     for epoch in range(args.epochs):
+        t_epoch = time.perf_counter()
         model.train()
         train_loss = torch.tensor(0.0, device=device)
         optimizer.zero_grad(set_to_none=True)
@@ -194,21 +198,29 @@ def train(args):
 
         avg_train = (train_loss / max(len(train_loader), 1)).item()
         avg_val = (val_loss / max(n_val, 1)).item()
+        epoch_secs = time.perf_counter() - t_epoch
         print(
             f"Epoch {epoch+1:3d}/{args.epochs} | "
-            f"train {avg_train:.4f} | val {avg_val:.4f} | "
-            f"LR {scheduler.get_last_lr()[0]:.2e} | "
-            f"{_fmt_time(time.time() - t_start)}"
+            f"Train Loss: {avg_train:.4f} | Val Loss: {avg_val:.4f} | "
+            f"LR: {scheduler.get_last_lr()[0]:.2e} | "
+            f"Time: {_fmt_time(epoch_secs)}"
         )
 
         if avg_val < best_val_loss:
             best_val_loss = avg_val
+            patience = 0
             backbone_sd = {
                 k: v for k, v in model.state_dict().items() if _is_backbone_key(k)
             }
             torch.save(backbone_sd, out_dir / "backbone_best.pth")
-            print(f"  Saved backbone (val {avg_val:.4f})")
+            print(f"  → Saved backbone (val {avg_val:.4f})")
+        else:
+            patience += 1
+            if patience >= args.patience:
+                print(f"\nEarly stopping at epoch {epoch+1} (patience={args.patience})")
+                break
 
+    print("-" * 80)
     print(f"\nPre-training complete. Best val loss: {best_val_loss:.4f}")
     print(f"Backbone → {out_dir}/backbone_best.pth")
 
@@ -235,6 +247,7 @@ def main():
     p.add_argument("--drop-path-max", type=float, default=0.05)
     # Training
     p.add_argument("--epochs", type=int, default=40)
+    p.add_argument("--patience", type=int, default=10, help="Early stopping patience on val loss")
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--accum-steps", type=int, default=4)
     p.add_argument("--lr", type=float, default=3e-4)
