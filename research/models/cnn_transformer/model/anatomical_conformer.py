@@ -69,7 +69,16 @@ class HandDominanceModule(nn.Module):
 
 
 class AnatomicalConformer(nn.Module):
-    def __init__(self, num_classes, d_model=512, n_heads=8, n_layers=6, dropout=0.1, drop_path_max=0.1, n_signers=0):
+    def __init__(
+        self,
+        num_classes,
+        d_model=512,
+        n_heads=8,
+        n_layers=6,
+        dropout=0.1,
+        drop_path_max=0.1,
+        n_signers=0,
+    ):
         super().__init__()
         # Offsets are computed dynamically from COORDS_PER_LM, so toggling
         # INCLUDE_DEPTH is safe. Toggling INCLUDE_FACE is NOT safe — face_proj
@@ -123,7 +132,10 @@ class AnatomicalConformer(nn.Module):
         # Forces each layer to be independently useful (can't rely on later layers to rescue).
         drop_rates = [drop_path_max * i / max(n_layers - 1, 1) for i in range(n_layers)]
         self.blocks = nn.ModuleList(
-            [ConformerBlock(d_model, n_heads, dropout=dropout, drop_path_rate=r) for r in drop_rates]
+            [
+                ConformerBlock(d_model, n_heads, dropout=dropout, drop_path_rate=r)
+                for r in drop_rates
+            ]
         )
 
         self.head = nn.Sequential(
@@ -132,7 +144,9 @@ class AnatomicalConformer(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(d_model, num_classes),
         )
-        self.signer_disc = SignerDiscriminator(d_model, n_signers) if n_signers > 0 else None
+        self.signer_disc = (
+            SignerDiscriminator(d_model, n_signers) if n_signers > 0 else None
+        )
 
     @staticmethod
     def _hand_geometry(hand: torch.Tensor) -> torch.Tensor:
@@ -150,13 +164,13 @@ class AnatomicalConformer(nn.Module):
         """
         angles = []
         for chain in (
-            (0, 1, 2, 3, 4),     # thumb:  wrist, CMC, MCP, IP, tip
-            (0, 5, 6, 7, 8),     # index:  wrist, MCP, PIP, DIP, tip
+            (0, 1, 2, 3, 4),  # thumb:  wrist, CMC, MCP, IP, tip
+            (0, 5, 6, 7, 8),  # index:  wrist, MCP, PIP, DIP, tip
             (0, 9, 10, 11, 12),  # middle
-            (0, 13, 14, 15, 16), # ring
-            (0, 17, 18, 19, 20), # pinky
+            (0, 13, 14, 15, 16),  # ring
+            (0, 17, 18, 19, 20),  # pinky
         ):
-            for i in range(3):   # angle at each of the 3 interior joints
+            for i in range(3):  # angle at each of the 3 interior joints
                 a = hand[:, :, chain[i]]
                 b = hand[:, :, chain[i + 1]]
                 c = hand[:, :, chain[i + 2]]
@@ -165,10 +179,11 @@ class AnatomicalConformer(nn.Module):
                 angles.append(cos_a.clamp(-1.0, 1.0))  # (B, T)
 
         tips = hand[:, :, [4, 8, 12, 16, 20]]  # (B, T, 5, c)
-        hand_scale = hand[:, :, 5].norm(dim=-1) + 1e-6  # (B, T) wrist-to-index-MCP
+        hand_scale = hand[:, :, [5, 9, 13, 17]].norm(dim=-1).mean(dim=-1) + 1e-6  # (B, T) mean MCP distance
         dists = [
             (tips[:, :, i] - tips[:, :, j]).norm(dim=-1) / hand_scale
-            for i in range(5) for j in range(i + 1, 5)
+            for i in range(5)
+            for j in range(i + 1, 5)
         ]
         features = torch.stack(angles + dists, dim=-1)  # (B, T, 25)
 
@@ -178,15 +193,15 @@ class AnatomicalConformer(nn.Module):
             # that joint angles and raw XYZ both fail to capture reliably.
             n = torch.linalg.cross(hand[:, :, 5], hand[:, :, 17])  # (B, T, 3)
             n_unit = n / (n.norm(dim=-1, keepdim=True) + 1e-6)
-            features = torch.cat([features, n_unit], dim=-1)        # (B, T, 28)
+            features = torch.cat([features, n_unit], dim=-1)  # (B, T, 28)
 
         return features
 
     def forward(self, x, mask, grl_lambda: float = 0.0):
         B, T, _ = x.shape
 
-        x = self.hand_dominance(x)   # reorder so dominant hand is always in LH slot
-        x = self.wrist_norm(x)       # landmark 0 = location, landmarks 1-20 = shape
+        x = self.hand_dominance(x)  # reorder so dominant hand is always in LH slot
+        x = self.wrist_norm(x)  # landmark 0 = location, landmarks 1-20 = shape
 
         # Split position and delta-1 velocity halves (dataset layout: [pos | vel1])
         pos = x[:, :, :COORD_FEAT]
@@ -199,27 +214,42 @@ class AnatomicalConformer(nn.Module):
         # avoids scale noise from shoulder movement within a sign.
         lshoulder = pos[:, :, POSE_START + 11 * c : POSE_START + 12 * c]
         rshoulder = pos[:, :, POSE_START + 12 * c : POSE_START + 13 * c]
-        shoulder_w = (lshoulder - rshoulder).norm(dim=-1)                         # (B, T)
-        mean_sw = (shoulder_w * mask.float()).sum(1) / mask.float().sum(1).clamp(min=1)  # (B,)
+        shoulder_w = (lshoulder - rshoulder).norm(dim=-1)  # (B, T)
+        mean_sw = (shoulder_w * mask.float()).sum(1) / mask.float().sum(1).clamp(
+            min=1
+        )  # (B,)
         scale = mean_sw.clamp(min=1e-3).view(B, 1, 1)
-        pos  = pos  / scale
+        pos = pos / scale
         vel1 = vel1 / scale
 
         # Geometry stream — computed from wrist-relative fingers (after WristNorm).
         # Wrist itself is at (0, 0, 0) in this frame; concatenate as lm 0.
         zeros = torch.zeros(B, T, 1, c, device=x.device, dtype=x.dtype)
-        lh_hand = torch.cat([zeros, pos[:, :, LH_START + c:POSE_START].reshape(B, T, 20, c)], dim=2)
-        rh_hand = torch.cat([zeros, pos[:, :, RH_START + c:FACE_START].reshape(B, T, 20, c)], dim=2)
-        geo_feat = torch.cat([
-            self.lh_geo_proj(self._hand_geometry(lh_hand)),
-            self.rh_geo_proj(self._hand_geometry(rh_hand)),
-        ], dim=-1)  # (B, T, d_model // 4)
+        lh_hand = torch.cat(
+            [zeros, pos[:, :, LH_START + c : POSE_START].reshape(B, T, 20, c)], dim=2
+        )
+        rh_hand = torch.cat(
+            [zeros, pos[:, :, RH_START + c : FACE_START].reshape(B, T, 20, c)], dim=2
+        )
+        geo_feat = torch.cat(
+            [
+                self.lh_geo_proj(self._hand_geometry(lh_hand)),
+                self.rh_geo_proj(self._hand_geometry(rh_hand)),
+            ],
+            dim=-1,
+        )  # (B, T, d_model // 4)
 
         # Hand-nose distances: dominant and non-dominant wrist to nose (origin).
         # Encodes when hands are in the face region — gates relevance of face NMMs.
-        lh_dist = pos[:, :, LH_START:LH_START + c].norm(dim=-1, keepdim=True)  # (B, T, 1)
-        rh_dist = pos[:, :, RH_START:RH_START + c].norm(dim=-1, keepdim=True)  # (B, T, 1)
-        dist_feat = self.dist_proj(torch.cat([lh_dist, rh_dist], dim=-1))       # (B, T, d_model // 8)
+        lh_dist = pos[:, :, LH_START : LH_START + c].norm(
+            dim=-1, keepdim=True
+        )  # (B, T, 1)
+        rh_dist = pos[:, :, RH_START : RH_START + c].norm(
+            dim=-1, keepdim=True
+        )  # (B, T, 1)
+        dist_feat = self.dist_proj(
+            torch.cat([lh_dist, rh_dist], dim=-1)
+        )  # (B, T, d_model // 8)
 
         # Compute additional velocity scales from body-relative positions.
         # Divided by their time delta so all three scales share the same unit
@@ -236,8 +266,8 @@ class AnatomicalConformer(nn.Module):
         lh = self.lh_proj(pos[:, :, LH_START:POSE_START])
         ps = self.pose_proj(pos[:, :, POSE_START:RH_START])
         rh = self.rh_proj(pos[:, :, RH_START:FACE_START])
-        eb = self.eyebrow_proj(pos[:, :, FACE_START:FACE_START + _eb])
-        mo = self.mouth_proj(pos[:, :, FACE_START + _eb:])
+        eb = self.eyebrow_proj(pos[:, :, FACE_START : FACE_START + _eb])
+        mo = self.mouth_proj(pos[:, :, FACE_START + _eb :])
         pos_feat = torch.cat([lh, ps, rh, eb, mo], dim=-1)  # (B, T, d_model)
 
         # Per-part multi-scale velocity features (Δ1∥Δ2∥Δ5 concatenated per part)
