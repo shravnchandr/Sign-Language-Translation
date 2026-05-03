@@ -158,4 +158,19 @@ class SinusoidalPositionalEncoding(nn.Module):
         self.register_buffer("pe", pe)  # (max_len, d_model)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.dropout(x + self.pe[: x.size(1)])
+        T = x.size(1)
+        if T <= self.pe.size(0):
+            pe = self.pe[:T]
+        else:
+            # Generate extended PE on the fly — avoids crash on long sequences
+            # without mutating the buffer (thread-safe).
+            d = self.pe.size(1)
+            pos = torch.arange(T, device=x.device).unsqueeze(1).float()
+            div = torch.exp(
+                torch.arange(0, d, 2, device=x.device).float()
+                * (-np.log(10000.0) / d)
+            )
+            pe = torch.zeros(T, d, device=x.device)
+            pe[:, 0::2] = torch.sin(pos * div)
+            pe[:, 1::2] = torch.cos(pos * div[: d // 2])
+        return self.dropout(x + pe)

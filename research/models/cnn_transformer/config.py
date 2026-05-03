@@ -79,9 +79,13 @@ FACE_LANDMARK_INDICES = {
     # Nose/eyes/oval encode head geometry (signer identity), not sign content.
 }
 
+# Eyebrows MUST come before mouth so the FACE_START : FACE_START+N_FACE_EYEBROW
+# slice in anatomical_conformer.py maps to the correct anatomical group.
+# Explicitly ordered here so a future dict reordering can't silently corrupt it.
+_EYEBROW_KEYS = {"left_eyebrow", "right_eyebrow"}
 SELECTED_FACE_INDICES = []
-for feature_indices in FACE_LANDMARK_INDICES.values():
-    SELECTED_FACE_INDICES.extend(feature_indices)
+for _key in ("left_eyebrow", "right_eyebrow", "mouth_outer", "mouth_inner"):
+    SELECTED_FACE_INDICES.extend(FACE_LANDMARK_INDICES[_key])
 FACE_LANDMARK_SET = frozenset(SELECTED_FACE_INDICES)  # O(1) membership test
 
 

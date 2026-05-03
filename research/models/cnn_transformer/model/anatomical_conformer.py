@@ -279,8 +279,14 @@ class AnatomicalConformer(nn.Module):
         vel5 = torch.zeros_like(pos)
         vel5[:, 5:] = (pos[:, 5:] - pos[:, :-5]) / 5.0
 
-        # Per-part position features — face split into eyebrow and mouth streams
+        # Per-part position features — face split into eyebrow and mouth streams.
+        # Slice correctness depends on eyebrows being first in SELECTED_FACE_INDICES;
+        # config.py enforces this ordering explicitly.
         _eb = N_FACE_EYEBROW * COORDS_PER_LM  # eyebrow feature width
+        assert self.eyebrow_proj.in_features == _eb, (
+            f"eyebrow_proj expects {self.eyebrow_proj.in_features} features "
+            f"but SELECTED_FACE_INDICES gives {_eb} — check config.py ordering"
+        )
         lh = self.lh_proj(pos[:, :, LH_START:POSE_START])
         ps = self.pose_proj(pos[:, :, POSE_START:RH_START])
         rh = self.rh_proj(pos[:, :, RH_START:FACE_START])

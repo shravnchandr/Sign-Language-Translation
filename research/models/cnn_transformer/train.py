@@ -25,16 +25,26 @@ if device.type == "cuda":
 
 
 class FocalLoss(nn.Module):
-    def __init__(self, alpha=0.25, gamma=2.0, label_smoothing=0.1):
+    def __init__(self, gamma=2.0, label_smoothing=0.1, class_weights=None):
         super().__init__()
-        self.alpha, self.gamma, self.label_smoothing = alpha, gamma, label_smoothing
+        self.gamma = gamma
+        self.label_smoothing = label_smoothing
+        # Per-class weights handle imbalance; stored as a buffer so .to(device) works.
+        if class_weights is not None:
+            self.register_buffer("class_weights", class_weights)
+        else:
+            self.class_weights = None
 
     def forward(self, logits, targets):
         ce_loss = nn.functional.cross_entropy(
-            logits, targets, reduction="none", label_smoothing=self.label_smoothing
+            logits,
+            targets,
+            weight=self.class_weights,
+            reduction="none",
+            label_smoothing=self.label_smoothing,
         )
-        loss = self.alpha * (1 - torch.exp(-ce_loss)) ** self.gamma * ce_loss
-        return loss.mean()
+        pt = torch.exp(-ce_loss)
+        return ((1 - pt) ** self.gamma * ce_loss).mean()
 
 
 def train_epoch(
@@ -192,11 +202,13 @@ def train_epoch(
 
 @torch.no_grad()
 def predict_with_tta(model, x, mask, n_augmentations=5):
-    """Average logits over the original input plus independently augmented copies."""
-    # RobustNormalization normalizes x in-place inside model(); preserve the
-    # pre-normalization tensor so each TTA pass starts from the same raw input.
+    """Average logits over the original input plus independently augmented copies.
+
+    Accumulates a running sum rather than a list to avoid holding n_augmentations
+    full batches of logits in VRAM simultaneously.
+    """
     x_orig = x.clone()
-    predictions = [model(x, mask)]
+    logit_sum = model(x, mask)
     for _ in range(n_augmentations - 1):
         x_aug = x_orig.clone()
         mask_aug = mask.clone()
@@ -208,7 +220,6 @@ def predict_with_tta(model, x, mask, n_augmentations=5):
             B_tta, T_tta, D_tta = x_aug.shape
             new_len = min(int(T_tta * np.random.uniform(0.9, 1.1)), T_tta)
             if new_len < T_tta:
-                # Batch-vectorized: same stretch factor for whole batch this pass.
                 x_aug = F.interpolate(
                     x_aug.permute(0, 2, 1),
                     size=new_len,
@@ -232,8 +243,8 @@ def predict_with_tta(model, x, mask, n_augmentations=5):
             x_aug = AdvancedAugmentation.random_scale(
                 x_aug, min_scale=0.95, max_scale=1.05
             )
-        predictions.append(model(x_aug, mask_aug))
-    return torch.stack(predictions).mean(dim=0)
+        logit_sum = logit_sum + model(x_aug, mask_aug)
+    return logit_sum / n_augmentations
 
 
 @torch.no_grad()
@@ -400,7 +411,16 @@ def main():
     )
     print(f"Model params: {sum(p.numel() for p in model.parameters()):,}")
 
-    criterion = FocalLoss()
+    # Per-class weights: inverse frequency, normalised so mean weight == 1.
+    with open(sign_map_file) as f:
+        sign2idx = json.load(f)
+    _label_df = pd.read_csv(os.path.join(args.data_dir, "train.csv"))
+    _label_df["label"] = _label_df["sign"].map(sign2idx)
+    _counts = _label_df["label"].value_counts().sort_index()
+    _weights = (1.0 / _counts.clip(lower=1).values).astype("float32")
+    _weights = _weights / _weights.mean()
+    class_weights = torch.tensor(_weights).to(device)
+    criterion = FocalLoss(class_weights=class_weights)
     # Exclude 1-D params (LayerNorm scale/bias, standalone biases) from weight decay —
     # applying L2 to these harms convergence without regularisation benefit.
     decay_params = [
