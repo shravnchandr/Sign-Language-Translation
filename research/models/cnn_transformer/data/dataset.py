@@ -49,10 +49,18 @@ def _open_lmdb_env(lmdb_path: str):
     key = (os.getpid(), canonical)
     env = _LMDB_ENV_CACHE.get(key)
     if env is None:
+        if subdir:
+            # Directory-mode LMDB: 1 TiB sparse file is safe (no actual allocation).
+            map_size = 1 << 40
+        else:
+            # Flat-file read: mmap only what exists. A 1 TiB mmap on a flat file
+            # over network-attached storage can hang at open time. File size +
+            # 256 MB headroom is always sufficient for a readonly open.
+            map_size = max(os.path.getsize(canonical) + (1 << 28), 1 << 30)
         env = lmdb.open(
             canonical,
             subdir=subdir,
-            map_size=1 << 40,  # sparse file — matches build_lmdb default
+            map_size=map_size,
             readonly=True,
             lock=False,
             readahead=False,

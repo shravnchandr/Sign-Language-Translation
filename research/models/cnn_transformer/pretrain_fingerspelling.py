@@ -27,6 +27,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 from sklearn.model_selection import GroupShuffleSplit
+from tqdm import tqdm
 from torch.utils.data import DataLoader, Subset
 
 from .data.fingerspelling_dataset import (
@@ -121,44 +122,62 @@ def train(args):
     best_val_loss = float("inf")
     t_start = time.time()
 
+    def _optimizer_step(pbar: tqdm) -> None:
+        """Unscale → clip → step → update. Only advances scheduler when the
+        optimizer actually updated weights (GradScaler may skip on NaN/Inf)."""
+        scaler.unscale_(optimizer)
+        nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        scale_before = scaler.get_scale()
+        scaler.step(optimizer)
+        scaler.update()
+        optimizer.zero_grad(set_to_none=True)
+        if scaler.get_scale() == scale_before:
+            scheduler.step()
+        pbar.set_postfix(lr=f"{scheduler.get_last_lr()[0]:.1e}", refresh=False)
+
     for epoch in range(args.epochs):
         model.train()
-        train_loss = 0.0
+        train_loss = torch.tensor(0.0, device=device)
         optimizer.zero_grad(set_to_none=True)
 
-        for step, (coords, mask, targets, input_lengths, target_lengths) in enumerate(
-            train_loader
-        ):
-            coords = coords.to(device)
-            mask = mask.to(device)
-            targets = targets.to(device)
-            input_lengths = input_lengths.to(device)
-            target_lengths = target_lengths.to(device)
+        with tqdm(train_loader, desc=f"Epoch {epoch+1:3d}/{args.epochs} [train]",
+                  leave=False) as pbar:
+            for step, (coords, mask, targets, input_lengths, target_lengths) in enumerate(pbar):
+                coords = coords.to(device)
+                mask = mask.to(device)
+                targets = targets.to(device)
+                input_lengths = input_lengths.to(device)
+                target_lengths = target_lengths.to(device)
 
-            with torch.amp.autocast(
-                device_type=device.type, enabled=(device.type == "cuda")
-            ):
-                logits = model(coords, mask)  # (B, T, vocab+1)
-                log_probs = logits.log_softmax(-1).permute(1, 0, 2)  # (T, B, C)
+                with torch.amp.autocast(
+                    device_type=device.type, enabled=(device.type == "cuda")
+                ):
+                    logits = model(coords, mask)  # (B, T, vocab+1)
+
+                # CTC loss in FP32 — FP16 underflows with long sequences
+                log_probs = logits.float().log_softmax(-1).permute(1, 0, 2)  # (T, B, C)
                 loss = criterion(log_probs, targets, input_lengths, target_lengths)
                 loss = loss / args.accum_steps
 
-            scaler.scale(loss).backward()
-            train_loss += loss.item() * args.accum_steps
+                scaler.scale(loss).backward()
+                train_loss += loss.detach() * args.accum_steps
 
-            if (step + 1) % args.accum_steps == 0:
-                scaler.unscale_(optimizer)
-                nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                scaler.step(optimizer)
-                scaler.update()
-                optimizer.zero_grad(set_to_none=True)
-                scheduler.step()
+                if (step + 1) % args.accum_steps == 0:
+                    _optimizer_step(pbar)
+
+        # Flush any remainder gradients from the last incomplete accumulation window
+        remainder = len(train_loader) % args.accum_steps
+        if remainder:
+            _optimizer_step(tqdm([], leave=False))
 
         # ── Validation ────────────────────────────────────────────────────────
         model.eval()
-        val_loss, n_val = 0.0, 0
+        val_loss = torch.tensor(0.0, device=device)
+        n_val = 0
         with torch.no_grad():
-            for coords, mask, targets, input_lengths, target_lengths in val_loader:
+            for coords, mask, targets, input_lengths, target_lengths in tqdm(
+                val_loader, desc=f"Epoch {epoch+1:3d}/{args.epochs} [val]", leave=False
+            ):
                 coords = coords.to(device)
                 mask = mask.to(device)
                 targets = targets.to(device)
@@ -168,13 +187,13 @@ def train(args):
                     device_type=device.type, enabled=(device.type == "cuda")
                 ):
                     logits = model(coords, mask)
-                    log_probs = logits.log_softmax(-1).permute(1, 0, 2)
-                    loss = criterion(log_probs, targets, input_lengths, target_lengths)
-                val_loss += loss.item()
+                log_probs = logits.float().log_softmax(-1).permute(1, 0, 2)
+                loss = criterion(log_probs, targets, input_lengths, target_lengths)
+                val_loss += loss.detach()
                 n_val += 1
 
-        avg_train = train_loss / max(len(train_loader), 1)
-        avg_val = val_loss / max(n_val, 1)
+        avg_train = (train_loss / max(len(train_loader), 1)).item()
+        avg_val = (val_loss / max(n_val, 1)).item()
         print(
             f"Epoch {epoch+1:3d}/{args.epochs} | "
             f"train {avg_train:.4f} | val {avg_val:.4f} | "
