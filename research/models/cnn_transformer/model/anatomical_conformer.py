@@ -165,8 +165,9 @@ class AnatomicalConformer(nn.Module):
                 angles.append(cos_a.clamp(-1.0, 1.0))  # (B, T)
 
         tips = hand[:, :, [4, 8, 12, 16, 20]]  # (B, T, 5, c)
+        hand_scale = hand[:, :, 5].norm(dim=-1) + 1e-6  # (B, T) wrist-to-index-MCP
         dists = [
-            (tips[:, :, i] - tips[:, :, j]).norm(dim=-1)
+            (tips[:, :, i] - tips[:, :, j]).norm(dim=-1) / hand_scale
             for i in range(5) for j in range(i + 1, 5)
         ]
         features = torch.stack(angles + dists, dim=-1)  # (B, T, 25)
