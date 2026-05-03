@@ -20,6 +20,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 use_amp = device.type == "cuda"
 if device.type == "cuda":
     torch.backends.cudnn.benchmark = True
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
 
 
 class FocalLoss(nn.Module):
@@ -331,6 +333,13 @@ def main():
         help="Path to backbone_best.pth from pretrain_fingerspelling.py. "
         "Backbone weights are loaded with strict=False before training.",
     )
+    parser.add_argument(
+        "--compile",
+        action="store_true",
+        help="Apply torch.compile(model, fullgraph=False) before training. "
+        "Requires PyTorch >= 2.10 on Python 3.14. Graph breaks are allowed "
+        "so the GRL custom backward does not block compilation.",
+    )
     args = parser.parse_args()
 
     os.makedirs(args.checkpoint_dir, exist_ok=True)
@@ -377,6 +386,13 @@ def main():
             print(f"  Missing keys (expected — new head/cls_token): {len(missing)}")
         if unexpected:
             print(f"  Unexpected keys: {unexpected}")
+
+    if args.compile:
+        try:
+            model = torch.compile(model, fullgraph=False)
+            print("torch.compile enabled (fullgraph=False)")
+        except Exception as e:
+            print(f"torch.compile failed, falling back to eager mode: {e}")
 
     print(f"Num classes : {NUM_CLASSES}")
     print(

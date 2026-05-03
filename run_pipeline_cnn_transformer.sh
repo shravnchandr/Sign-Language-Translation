@@ -32,9 +32,10 @@ PATIENCE=20
 BATCH_SIZE=64
 NUM_WORKERS=4
 SKIP_LMDB=false
-MAP_SIZE_GB=100
+MAP_SIZE_GB=""   # empty = 1 TiB default (sparse file, no disk cost)
 ALLOW_ERRORS=false
 LMDB_WORKERS=4
+COMPILE=false
 
 # Fingerspelling pre-training
 FS_DATA_DIR="data/ASL_Fingerspelling_Recognition"
@@ -44,7 +45,7 @@ PRETRAIN_CHECKPOINT_DIR="checkpoints/pretrain_fs"
 PRETRAIN_EPOCHS=40
 PRETRAINED_BACKBONE=""
 SKIP_PRETRAIN=false
-FS_MAP_SIZE_GB=50
+FS_MAP_SIZE_GB=""  # empty = 1 TiB default
 
 # ── Parse args ───────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -70,6 +71,7 @@ while [[ $# -gt 0 ]]; do
         --pretrained-backbone)     PRETRAINED_BACKBONE="$2";     shift 2 ;;
         --skip-pretrain)           SKIP_PRETRAIN=true;           shift ;;
         --fs-map-size-gb)          FS_MAP_SIZE_GB="$2";          shift 2 ;;
+        --compile)                 COMPILE=true;                  shift ;;
         *) echo "Unknown argument: $1"; exit 1 ;;
     esac
 done
@@ -92,8 +94,9 @@ echo "  Phase 2 epochs:     $PHASE2_EPOCHS"
 echo "  Patience:           $PATIENCE"
 echo "  Batch size:         $BATCH_SIZE"
 echo "  Num workers:        $NUM_WORKERS"
-echo "  LMDB map size:      ${MAP_SIZE_GB} GB"
+echo "  LMDB map size:      ${MAP_SIZE_GB:-1 TiB (default)}"
 echo "  Allow errors:       $ALLOW_ERRORS"
+echo "  torch.compile:      $COMPILE"
 echo ""
 if [ "$SKIP_PRETRAIN" = false ]; then
     echo "  [Pre-training]"
@@ -102,7 +105,7 @@ if [ "$SKIP_PRETRAIN" = false ]; then
     echo "  FS LMDB CSV:        $FS_LMDB_CSV"
     echo "  Pretrain ckpt dir:  $PRETRAIN_CHECKPOINT_DIR"
     echo "  Pretrain epochs:    $PRETRAIN_EPOCHS"
-    echo "  FS LMDB map size:   ${FS_MAP_SIZE_GB} GB"
+    echo "  FS LMDB map size:   ${FS_MAP_SIZE_GB:-1 TiB (default)}"
 elif [ -n "$PRETRAINED_BACKBONE" ]; then
     echo "  Pretrained backbone: $PRETRAINED_BACKBONE"
 else
@@ -116,11 +119,11 @@ if [ "$SKIP_PRETRAIN" = false ]; then
     echo "[FS LMDB] Building / resuming fingerspelling LMDB..."
     mkdir -p "$(dirname "$FS_LMDB_PATH")" "$(dirname "$FS_LMDB_CSV")"
     uv run python -m cnn_transformer.data.build_fingerspelling_lmdb \
-        --data-dir    "$FS_DATA_DIR" \
-        --lmdb-path   "$FS_LMDB_PATH" \
-        --out-csv     "$FS_LMDB_CSV" \
-        --map-size-gb "$FS_MAP_SIZE_GB" \
-        $( [ -n "$LMDB_WORKERS" ] && echo "--num-workers $LMDB_WORKERS" ) \
+        --data-dir  "$FS_DATA_DIR" \
+        --lmdb-path "$FS_LMDB_PATH" \
+        --out-csv   "$FS_LMDB_CSV" \
+        $( [ -n "$FS_MAP_SIZE_GB" ] && echo "--map-size-gb $FS_MAP_SIZE_GB" ) \
+        $( [ -n "$LMDB_WORKERS" ]   && echo "--num-workers $LMDB_WORKERS" ) \
         $( [ "$ALLOW_ERRORS" = true ] && echo "--allow-errors" )
 
     # ── Stage 0b: CTC pre-training ───────────────────────────────────────────
@@ -145,9 +148,9 @@ if [ "$SKIP_LMDB" = false ]; then
     echo ""
     echo "[LMDB] Building / resuming ASL LMDB archive (existing keys are skipped)..."
     uv run python -m cnn_transformer.data.build_lmdb \
-        --data-dir "$DATA_DIR" \
+        --data-dir  "$DATA_DIR" \
         --lmdb-path "$LMDB_PATH" \
-        --map-size-gb "$MAP_SIZE_GB" \
+        $( [ -n "$MAP_SIZE_GB" ]   && echo "--map-size-gb $MAP_SIZE_GB" ) \
         $( [ -n "$LMDB_WORKERS" ] && echo "--num-workers $LMDB_WORKERS" ) \
         $( [ "$ALLOW_ERRORS" = true ] && echo "--allow-errors" )
 else
@@ -168,7 +171,8 @@ uv run python -m cnn_transformer.train \
     --patience "$PATIENCE" \
     --batch-size "$BATCH_SIZE" \
     --num-workers "$NUM_WORKERS" \
-    ${PRETRAINED_BACKBONE:+--pretrained-backbone "$PRETRAINED_BACKBONE"}
+    ${PRETRAINED_BACKBONE:+--pretrained-backbone "$PRETRAINED_BACKBONE"} \
+    $( [ "$COMPILE" = true ] && echo "--compile" )
 
 echo ""
 echo "========================================"

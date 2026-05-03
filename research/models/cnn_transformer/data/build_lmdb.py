@@ -58,10 +58,13 @@ def _process_sample(args: tuple) -> tuple:
         return path, None, None, str(e)
 
 
+_1TB = 1 << 40  # LMDB uses sparse files; 1 TiB costs nothing extra on disk
+
+
 def build_lmdb(
     data_dir: str,
     lmdb_path: str,
-    map_size_gb: int = 100,
+    map_size: int = _1TB,
     allow_errors: bool = False,
     num_workers: int | None = None,
 ) -> None:
@@ -77,7 +80,7 @@ def build_lmdb(
     paths = df["path"].tolist()
     print(f"Building LMDB: {n} samples → {lmdb_path}  (workers={num_workers})")
 
-    env = lmdb.open(str(lmdb_path), map_size=map_size_gb * 1024**3)
+    env = lmdb.open(str(lmdb_path), map_size=map_size)
 
     written = skipped = errors = 0
 
@@ -161,8 +164,10 @@ def main():
     parser.add_argument(
         "--map-size-gb",
         type=int,
-        default=100,
-        help="LMDB virtual address space ceiling in GB (default 100)",
+        default=None,
+        help="LMDB virtual address space in GB. Default: 1 TiB (sparse file, "
+        "costs nothing extra on disk). Override only if your filesystem does "
+        "not support sparse files.",
     )
     parser.add_argument(
         "--num-workers",
@@ -176,10 +181,11 @@ def main():
         help="Exit 0 even if some samples fail (useful for known-bad parquets)",
     )
     args = parser.parse_args()
+    map_size = (args.map_size_gb * 1024**3) if args.map_size_gb else _1TB
     build_lmdb(
         args.data_dir,
         args.lmdb_path,
-        args.map_size_gb,
+        map_size,
         args.allow_errors,
         args.num_workers,
     )

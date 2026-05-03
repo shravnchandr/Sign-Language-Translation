@@ -39,7 +39,12 @@ def _open_lmdb_env(lmdb_path: str):
     env = _LMDB_ENV_CACHE.get(key)
     if env is None:
         env = lmdb.open(
-            canonical, readonly=True, lock=False, readahead=False, meminit=False
+            canonical,
+            map_size=1 << 40,  # sparse file — matches build_lmdb default
+            readonly=True,
+            lock=False,
+            readahead=False,
+            meminit=False,
         )
         _LMDB_ENV_CACHE[key] = env
     return env

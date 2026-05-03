@@ -36,6 +36,7 @@ from tqdm import tqdm
 from ..config import ALL_COLUMNS, COORD_FEAT
 
 _WRITE_BATCH = 500  # smaller than ASL build — each entry is larger
+_1TB = 1 << 40  # LMDB uses sparse files; 1 TiB costs nothing extra on disk
 
 # ---------------------------------------------------------------------------
 # Column mapping  (module-level so workers can import it)
@@ -154,7 +155,7 @@ def build(
     data_dir: Path,
     lmdb_path: Path,
     out_csv: Path,
-    map_size_gb: int = 50,
+    map_size: int = _1TB,
     allow_errors: bool = False,
     num_workers: int | None = None,
 ) -> None:
@@ -171,7 +172,7 @@ def build(
 
     lmdb_path.mkdir(parents=True, exist_ok=True)
     out_csv.parent.mkdir(parents=True, exist_ok=True)
-    env = lmdb.open(str(lmdb_path), map_size=map_size_gb * 1024**3)
+    env = lmdb.open(str(lmdb_path), map_size=map_size)
 
     written = skipped = errors = 0
 
@@ -296,8 +297,9 @@ def main():
     p.add_argument(
         "--map-size-gb",
         type=int,
-        default=50,
-        help="LMDB virtual address space in GB (default 50)",
+        default=None,
+        help="LMDB virtual address space in GB. Default: 1 TiB (sparse file, "
+        "costs nothing extra on disk).",
     )
     p.add_argument(
         "--num-workers",
@@ -309,11 +311,12 @@ def main():
         "--allow-errors", action="store_true", help="Exit 0 even if some sequences fail"
     )
     args = p.parse_args()
+    map_size = (args.map_size_gb * 1024**3) if args.map_size_gb else _1TB
     build(
         Path(args.data_dir),
         Path(args.lmdb_path),
         Path(args.out_csv),
-        args.map_size_gb,
+        map_size,
         args.allow_errors,
         args.num_workers,
     )
