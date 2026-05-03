@@ -8,12 +8,15 @@
 # Usage:
 #   bash run_pipeline_cnn_transformer.sh
 #   bash run_pipeline_cnn_transformer.sh --skip-pretrain               # skip FS LMDB + pre-training
+#   bash run_pipeline_cnn_transformer.sh --skip-fs-lmdb                # skip FS LMDB build but still pre-train
 #   bash run_pipeline_cnn_transformer.sh --pretrained-backbone checkpoints/pretrain_fs/backbone_best.pth
 #   bash run_pipeline_cnn_transformer.sh --phase1-epochs 10 --phase2-epochs 5  # quick test
-#   bash run_pipeline_cnn_transformer.sh --data-dir /mnt/data/asl-signs
-#   bash run_pipeline_cnn_transformer.sh --skip-lmdb                   # skip ASL LMDB build
 #   bash run_pipeline_cnn_transformer.sh --map-size-gb 200
 #   bash run_pipeline_cnn_transformer.sh --allow-errors
+#
+# Recommended (downloaded LMDB datasets, skip all local builds):
+#   bash run_pipeline_cnn_transformer.sh --skip-pretrain
+#   bash run_pipeline_cnn_transformer.sh --skip-fs-lmdb --pretrain-epochs 40  # pre-train from downloaded FS LMDB
 
 set -e
 
@@ -22,30 +25,31 @@ export PYTORCH_ALLOC_CONF=expandable_segments:True
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # ── Defaults ────────────────────────────────────────────────────────────────
-DATA_DIR="data/Isolated_ASL_Recognition"
+DATA_DIR="data/asl-is-lmdb"          # downloaded from shravnchandr/asl-is-lmdb
 CACHE_DIR="data/cache/cnn_transformer"
-LMDB_PATH="data/cache/cnn_transformer/asl.lmdb"
+LMDB_PATH="data/asl-is-lmdb/is.lmdb.mdb"
 CHECKPOINT_DIR="checkpoints/cnn_transformer"
 PHASE1_EPOCHS=100
 PHASE2_EPOCHS=20
 PATIENCE=20
 BATCH_SIZE=64
 NUM_WORKERS=4
-SKIP_LMDB=false
+SKIP_LMDB=true   # LMDB pre-built; set false only when building from raw parquets
 MAP_SIZE_GB=""   # empty = 1 TiB default (sparse file, no disk cost)
 ALLOW_ERRORS=false
 LMDB_WORKERS=4
 COMPILE=false
 
 # Fingerspelling pre-training
-FS_DATA_DIR="data/ASL_Fingerspelling_Recognition"
-FS_LMDB_PATH="data/cache/fingerspelling/fs.lmdb"
-FS_LMDB_CSV="data/cache/fingerspelling/train.csv"
+FS_DATA_DIR="data/asl-fs-lmdb"       # downloaded from shravnchandr/asl-fs-lmdb
+FS_LMDB_PATH="data/asl-fs-lmdb/fs.lmdb.mdb"
+FS_LMDB_CSV="data/asl-fs-lmdb/train.csv"
 PRETRAIN_CHECKPOINT_DIR="checkpoints/pretrain_fs"
 PRETRAIN_EPOCHS=40
 PRETRAINED_BACKBONE=""
 SKIP_PRETRAIN=false
-FS_MAP_SIZE_GB=""  # empty = 1 TiB default
+SKIP_FS_LMDB=true  # FS LMDB pre-built; set false only when building from raw parquets
+FS_MAP_SIZE_GB=""   # empty = 1 TiB default
 
 # ── Parse args ───────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -60,6 +64,7 @@ while [[ $# -gt 0 ]]; do
         --batch-size)              BATCH_SIZE="$2";              shift 2 ;;
         --num-workers)             NUM_WORKERS="$2";             shift 2 ;;
         --skip-lmdb)               SKIP_LMDB=true;               shift ;;
+        --build-lmdb)              SKIP_LMDB=false;              shift ;;
         --map-size-gb)             MAP_SIZE_GB="$2";             shift 2 ;;
         --allow-errors)            ALLOW_ERRORS=true;            shift ;;
         --lmdb-workers)            LMDB_WORKERS="$2";            shift 2 ;;
@@ -70,6 +75,8 @@ while [[ $# -gt 0 ]]; do
         --pretrain-epochs)         PRETRAIN_EPOCHS="$2";         shift 2 ;;
         --pretrained-backbone)     PRETRAINED_BACKBONE="$2";     shift 2 ;;
         --skip-pretrain)           SKIP_PRETRAIN=true;           shift ;;
+        --skip-fs-lmdb)            SKIP_FS_LMDB=true;            shift ;;
+        --build-fs-lmdb)           SKIP_FS_LMDB=false;           shift ;;
         --fs-map-size-gb)          FS_MAP_SIZE_GB="$2";          shift 2 ;;
         --compile)                 COMPILE=true;                  shift ;;
         *) echo "Unknown argument: $1"; exit 1 ;;
@@ -115,16 +122,21 @@ echo "========================================"
 
 # ── Stage 0a: Fingerspelling LMDB ────────────────────────────────────────────
 if [ "$SKIP_PRETRAIN" = false ]; then
-    echo ""
-    echo "[FS LMDB] Building / resuming fingerspelling LMDB..."
-    mkdir -p "$(dirname "$FS_LMDB_PATH")" "$(dirname "$FS_LMDB_CSV")"
-    uv run python -m cnn_transformer.data.build_fingerspelling_lmdb \
-        --data-dir  "$FS_DATA_DIR" \
-        --lmdb-path "$FS_LMDB_PATH" \
-        --out-csv   "$FS_LMDB_CSV" \
-        $( [ -n "$FS_MAP_SIZE_GB" ] && echo "--map-size-gb $FS_MAP_SIZE_GB" ) \
-        $( [ -n "$LMDB_WORKERS" ]   && echo "--num-workers $LMDB_WORKERS" ) \
-        $( [ "$ALLOW_ERRORS" = true ] && echo "--allow-errors" )
+    if [ "$SKIP_FS_LMDB" = false ]; then
+        echo ""
+        echo "[FS LMDB] Building / resuming fingerspelling LMDB..."
+        mkdir -p "$(dirname "$FS_LMDB_PATH")" "$(dirname "$FS_LMDB_CSV")"
+        uv run python -m cnn_transformer.data.build_fingerspelling_lmdb \
+            --data-dir  "$FS_DATA_DIR" \
+            --lmdb-path "$FS_LMDB_PATH" \
+            --out-csv   "$FS_LMDB_CSV" \
+            $( [ -n "$FS_MAP_SIZE_GB" ] && echo "--map-size-gb $FS_MAP_SIZE_GB" ) \
+            $( [ -n "$LMDB_WORKERS" ]   && echo "--num-workers $LMDB_WORKERS" ) \
+            $( [ "$ALLOW_ERRORS" = true ] && echo "--allow-errors" )
+    else
+        echo ""
+        echo "[FS LMDB] Skipped (--skip-fs-lmdb). Using pre-built LMDB at $FS_LMDB_PATH."
+    fi
 
     # ── Stage 0b: CTC pre-training ───────────────────────────────────────────
     echo ""

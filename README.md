@@ -146,8 +146,10 @@ research/
 └── tools/                       # Data visualization and conversion utilities
 
 data/
-├── Isolated_ASL_Recognition/    # Google ASL Signs — 94k samples, 250 signs (labeled)
-├── ASL_Fingerspelling_Recognition/ # Fingerspelling (unlabeled, Phase 1 only)
+├── asl-is-lmdb/                 # ASL Signs LMDB dataset (recommended — download below)
+├── asl-fs-lmdb/                 # Fingerspelling LMDB dataset (recommended — download below)
+├── Isolated_ASL_Recognition/    # Raw ASL Signs parquets (only needed to rebuild LMDB)
+├── ASL_Fingerspelling_Recognition/ # Raw Fingerspelling parquets (189 GB, rarely needed)
 └── WLASL_Landmarks/             # WLASL preprocessed landmarks
 
 run_pipeline_vqvae_seq2seq.sh    # End-to-end VQ-VAE pipeline: Phase 1 → tokenize → Phase 2
@@ -168,9 +170,18 @@ uv sync
 
 ## Data
 
+**Recommended — download pre-built LMDB datasets (no parquet parsing needed):**
+
 ```bash
-kaggle competitions download -c asl-signs               # Google ASL Signs (labeled)
-kaggle competitions download -c asl-fingerspelling       # Fingerspelling (unlabeled pre-training)
+kaggle datasets download shravnchandr/asl-is-lmdb -p data/asl-is-lmdb --unzip
+kaggle datasets download shravnchandr/asl-fs-lmdb -p data/asl-fs-lmdb --unzip
+```
+
+**Raw competition data (only needed to rebuild LMDBs or run the VQ-VAE pipeline):**
+
+```bash
+kaggle competitions download -c asl-signs               # Google ASL Signs (~5 GB)
+kaggle competitions download -c asl-fingerspelling       # Fingerspelling (~189 GB)
 ```
 
 Extract to `data/Isolated_ASL_Recognition/` and `data/ASL_Fingerspelling_Recognition/` respectively.
@@ -215,22 +226,24 @@ PYTHONPATH=research/models uv run python -m vqvae_seq2seq.translation.train_tran
 ### AnatomicalConformer (RunPod / local)
 
 ```bash
-# Full pipeline (FS LMDB → CTC pre-train → ASL LMDB → fine-tune)
-bash run_pipeline_cnn_transformer.sh
-
-# Already have the ASL LMDB — skip rebuilding it
-bash run_pipeline_cnn_transformer.sh --skip-lmdb
-
-# Skip fingerspelling pre-training entirely
+# Recommended: downloaded LMDB datasets, skip pre-training
 bash run_pipeline_cnn_transformer.sh --skip-pretrain
 
-# Re-use an existing backbone checkpoint, skip pre-training
-bash run_pipeline_cnn_transformer.sh --skip-lmdb \
+# With CTC pre-training using downloaded FS LMDB (no 189 GB download needed)
+bash run_pipeline_cnn_transformer.sh
+
+# Re-use an existing backbone checkpoint
+bash run_pipeline_cnn_transformer.sh \
   --pretrained-backbone checkpoints/pretrain_fs/backbone_best.pth
 
 # Quick smoke test
-bash run_pipeline_cnn_transformer.sh --skip-lmdb \
-  --pretrain-epochs 2 --phase1-epochs 2 --phase2-epochs 1
+bash run_pipeline_cnn_transformer.sh --skip-pretrain \
+  --phase1-epochs 2 --phase2-epochs 1
+
+# Build LMDBs locally from raw parquets (if you have the competition data)
+bash run_pipeline_cnn_transformer.sh --build-lmdb --build-fs-lmdb \
+  --data-dir data/Isolated_ASL_Recognition \
+  --fs-data-dir data/ASL_Fingerspelling_Recognition
 ```
 
 **Key pipeline flags:**
@@ -238,10 +251,14 @@ bash run_pipeline_cnn_transformer.sh --skip-lmdb \
 | Flag | Default | Purpose |
 |------|---------|---------|
 | `--skip-pretrain` | false | Skip FS LMDB build + CTC pre-training |
+| `--skip-fs-lmdb` | true | Skip FS LMDB build but still run CTC pre-training |
+| `--build-fs-lmdb` | — | Build FS LMDB from raw parquets (overrides `--skip-fs-lmdb`) |
 | `--pretrained-backbone <path>` | — | Use existing backbone; implies `--skip-pretrain` |
 | `--pretrain-epochs` | 40 | CTC pre-training epochs |
-| `--fs-data-dir` | `data/ASL_Fingerspelling_Recognition` | Fingerspelling dataset root |
-| `--skip-lmdb` | false | Skip ASL LMDB build (use pre-built) |
+| `--fs-data-dir` | `data/asl-fs-lmdb` | Fingerspelling dataset root |
+| `--skip-lmdb` | true | Skip ASL LMDB build (use pre-built) |
+| `--build-lmdb` | — | Build ASL LMDB from raw parquets (overrides `--skip-lmdb`) |
+| `--data-dir` | `data/asl-is-lmdb` | ASL Signs dataset root |
 | `--phase1-epochs` | 100 | Fine-tuning Phase 1 epochs |
 | `--phase2-epochs` | 20 | Fine-tuning Phase 2 epochs |
 

@@ -270,7 +270,7 @@ def main():
     )
     parser.add_argument(
         "--data-dir",
-        default="data/Isolated_ASL_Recognition",
+        default="data/asl-is-lmdb",
         help="Directory containing train.csv and sign_to_prediction_index_map.json",
     )
     parser.add_argument(
@@ -323,9 +323,9 @@ def main():
     )
     parser.add_argument(
         "--lmdb-path",
-        default=None,
-        help="Path to LMDB archive (recommended on RunPod). "
-        "Build with: python -m cnn_transformer.data.build_lmdb",
+        default="data/asl-is-lmdb/is.lmdb.mdb",
+        help="Path to LMDB archive. Download from shravnchandr/asl-is-lmdb or "
+        "build locally with: python -m cnn_transformer.data.build_lmdb",
     )
     parser.add_argument(
         "--pretrained-backbone",

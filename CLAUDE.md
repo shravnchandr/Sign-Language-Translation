@@ -152,20 +152,25 @@ End-to-end supervised classification. Optional CTC pre-training on ASL Fingerspe
 ## Data
 
 ### Datasets (under `data/`)
-- `data/Isolated_ASL_Recognition/` — Google ASL Signs (94k videos, 250 signs) — primary labeled dataset
-- `data/ASL_Fingerspelling_Recognition/` — Large fingerspelling dataset (unlabeled pre-training)
+
+**Pre-built LMDB datasets (recommended — download from Kaggle):**
+- `data/asl-is-lmdb/` — `is.lmdb.mdb` + `train.csv` + `sign_to_prediction_index_map.json`
+- `data/asl-fs-lmdb/` — `fs.lmdb.mdb` + `train.csv` + `character_to_prediction_index.json`
+
+```bash
+kaggle datasets download shravnchandr/asl-is-lmdb -p data/asl-is-lmdb --unzip
+kaggle datasets download shravnchandr/asl-fs-lmdb -p data/asl-fs-lmdb --unzip
+```
+
+**Raw competition data (only needed to rebuild LMDBs or for VQ-VAE pipeline):**
+- `data/Isolated_ASL_Recognition/` — Google ASL Signs (94k parquets, 250 signs)
+- `data/ASL_Fingerspelling_Recognition/` — Fingerspelling parquets (189 GB)
 - `data/WLASL_Landmarks/` — WLASL landmarks after MediaPipe preprocessing
 
 ### Parquet Format
 Columns: `frame`, `type`, `landmark_index`, `x`, `y`, `z`
 - `type`: `'pose'` (33), `'left_hand'` (21), `'right_hand'` (21), `'face'` (478) — 553 total per frame
-- Coordinates normalized to [0, 1] by MediaPipe; further normalized body-relative at runtime
-
-### Download
-```bash
-kaggle competitions download -c asl-signs               # Google ASL Signs
-kaggle competitions download -c asl-fingerspelling       # Fingerspelling
-```
+- Coordinates normalized to [0, 1] by MediaPipe; further normalized body-relative at LMDB build time
 
 ## Key Patterns
 
@@ -191,4 +196,4 @@ kaggle competitions download -c asl-fingerspelling       # Fingerspelling
 
 **Per-sample augmentation** (`cnn_transformer/train.py`): each sample in a batch gets an independent augmentation decision. Vectorized for flip/noise/rotation; per-sample loop for time_stretch/finger_dropout.
 
-**Label mapping**: 250 ASL signs indexed 0–249. Mapping lives in `data/Isolated_ASL_Recognition/sign_to_prediction_index_map.json`.
+**Label mapping**: 250 ASL signs indexed 0–249. Mapping lives in `data/asl-is-lmdb/sign_to_prediction_index_map.json` (downloaded with the LMDB dataset).

@@ -12,9 +12,9 @@ when running train.py.
 
 Usage (from project root):
   PYTHONPATH=research/models uv run python -m cnn_transformer.pretrain_fingerspelling \\
-      --data-dir   data/ASL_Fingerspelling_Recognition \\
-      --lmdb-path  data/cache/fingerspelling/fs.lmdb \\
-      --lmdb-csv   data/cache/fingerspelling/train.csv \\
+      --data-dir   data/asl-fs-lmdb \\
+      --lmdb-path  data/asl-fs-lmdb/fs.lmdb.mdb \\
+      --lmdb-csv   data/asl-fs-lmdb/train.csv \\
       --out-dir    checkpoints/pretrain_fs
 """
 

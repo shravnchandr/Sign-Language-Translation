@@ -9,9 +9,9 @@ try:
     _HERE = os.path.dirname(os.path.abspath(__file__))
     # config.py lives at research/models/cnn_transformer/ — go up 3 levels to project root
     _PROJECT_ROOT = os.path.abspath(os.path.join(_HERE, "..", "..", ".."))
-    _LOCAL_BASE = os.path.join(_PROJECT_ROOT, "data", "Isolated_ASL_Recognition")
+    _LOCAL_BASE = os.path.join(_PROJECT_ROOT, "data", "asl-is-lmdb")
 except NameError:
-    _LOCAL_BASE = "/kaggle/input/competitions/asl-signs"
+    _LOCAL_BASE = "/kaggle/input/asl-is-lmdb"
 
 BASE_PATH = os.environ.get("KAGGLE_INPUT_DIR", _LOCAL_BASE)
 TRAIN_FILE = os.path.join(BASE_PATH, "train.csv")
