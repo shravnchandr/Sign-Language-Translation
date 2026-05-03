@@ -55,7 +55,7 @@ def train_epoch(
     model.train()
     train_loss, correct, total = 0, 0, 0
     disc_correct, disc_total = 0, 0
-    optimizer.zero_grad()
+    optimizer.zero_grad(set_to_none=True)
 
     # Ganin et al. 2016 schedule: ramps from ~0 at epoch 0 to grl_lambda by mid-training.
     grl_lam = (
@@ -158,7 +158,7 @@ def train_epoch(
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scaler.step(optimizer)
             scaler.update()
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
             if scheduler is not None:
                 scheduler.step()
 
@@ -182,7 +182,7 @@ def train_epoch(
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         scaler.step(optimizer)
         scaler.update()
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)
         if scheduler is not None:
             scheduler.step()
 

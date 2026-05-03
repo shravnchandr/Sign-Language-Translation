@@ -124,7 +124,7 @@ def train(args):
     for epoch in range(args.epochs):
         model.train()
         train_loss = 0.0
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)
 
         for step, (coords, mask, targets, input_lengths, target_lengths) in enumerate(
             train_loader
@@ -151,7 +151,7 @@ def train(args):
                 nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 scaler.step(optimizer)
                 scaler.update()
-                optimizer.zero_grad()
+                optimizer.zero_grad(set_to_none=True)
                 scheduler.step()
 
         # ── Validation ────────────────────────────────────────────────────────

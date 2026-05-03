@@ -48,7 +48,15 @@ class HandDominanceModule(nn.Module):
             )
         self.register_buffer("swap_perm", perm)  # moves to correct device with model
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Returns (x, dom_ratio).
+
+        dom_ratio: (B,) in [0, 1] — rh_energy / total_energy.
+          ≈ 0   → left hand naturally dominant (no swap)
+          ≈ 1   → right hand dominant (swap performed)
+          ≈ 0.5 → both hands equally active (symmetric two-handed sign)
+        Passed to dist_proj so the model can weight hand streams by ambiguity.
+        """
         # x: (B, T, 2*COORD_FEAT) — caller owns x (already cloned upstream)
         lh_wrist_vel = x[
             :, :, COORD_FEAT + LH_START : COORD_FEAT + LH_START + COORDS_PER_LM
@@ -59,13 +67,13 @@ class HandDominanceModule(nn.Module):
         lh_energy = (lh_wrist_vel**2).sum(dim=-1).mean(dim=1)  # (B,)
         rh_energy = (rh_wrist_vel**2).sum(dim=-1).mean(dim=1)  # (B,)
 
-        swap_idx = torch.where(rh_energy > lh_energy)[0]
-        if swap_idx.numel() == 0:
-            return x
+        dom_ratio = rh_energy / (lh_energy + rh_energy + 1e-6)  # (B,)
 
-        # Single gather across the feature dimension — no tmp clone needed.
-        x[swap_idx] = x[swap_idx][:, :, self.swap_perm]
-        return x
+        swap_idx = torch.where(rh_energy > lh_energy)[0]
+        if swap_idx.numel() > 0:
+            x[swap_idx] = x[swap_idx][:, :, self.swap_perm]
+
+        return x, dom_ratio
 
 
 class AnatomicalConformer(nn.Module):
@@ -117,7 +125,7 @@ class AnatomicalConformer(nn.Module):
         _n_geo = 25 + (3 if COORDS_PER_LM == 3 else 0)
         self.lh_geo_proj = nn.Linear(_n_geo, d_model // 8)
         self.rh_geo_proj = nn.Linear(_n_geo, d_model // 8)
-        self.dist_proj = nn.Linear(2, d_model // 8)
+        self.dist_proj = nn.Linear(3, d_model // 8)  # lh_dist, rh_dist, dom_ratio
 
         # Feature fusion: pos(d_model) + vel(d_model) + geo(d_model//4) + dist(d_model//8) → d_model
         self.feat_fuse = nn.Sequential(
@@ -209,7 +217,7 @@ class AnatomicalConformer(nn.Module):
     def forward(self, x, mask, grl_lambda: float = 0.0):
         B, T, _ = x.shape
 
-        x = self.hand_dominance(x)  # reorder so dominant hand is always in LH slot
+        x, dom_ratio = self.hand_dominance(x)  # reorder; dom_ratio (B,) = rh_energy/total
         x = self.wrist_norm(x)  # landmark 0 = location, landmarks 1-20 = shape
 
         # Split position and delta-1 velocity halves (dataset layout: [pos | vel1])
@@ -256,8 +264,9 @@ class AnatomicalConformer(nn.Module):
         rh_dist = pos[:, :, RH_START : RH_START + c].norm(
             dim=-1, keepdim=True
         )  # (B, T, 1)
+        dom_ratio_feat = dom_ratio[:, None, None].expand(B, T, 1)  # (B, T, 1)
         dist_feat = self.dist_proj(
-            torch.cat([lh_dist, rh_dist], dim=-1)
+            torch.cat([lh_dist, rh_dist, dom_ratio_feat], dim=-1)
         )  # (B, T, d_model // 8)
 
         # Compute additional velocity scales from body-relative positions.
