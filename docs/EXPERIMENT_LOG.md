@@ -92,17 +92,84 @@ Tracking every training run, the config used, and the result. Goal: 250-class AS
 
 ## Changes Applied After Run 002
 
-*(pending — to be filled in before Run 003)*
+### Architecture
+| Change | Rationale |
+|--------|-----------|
+| Multi-scale velocity: Δ1/Δ2/Δ5 per part | Δ2/Δ5 computed inside forward() from body-relative positions, divided by time delta to normalize units |
+| Equal velocity budget: vel_proj upgraded d_model//8 → d_model//4 per part | Velocity and position now get symmetric d_model budget before fusion |
+| Face split: eyebrow_proj (d_model//8) + mouth_proj (d_model//8) | Grammatical and phonological face streams specialize independently |
+| INCLUDE_DEPTH=True | Add z-coordinates for palm orientation signal |
+| GRL Phase 2 fix: continues Ganin ramp from Phase 1 endpoint | Previously reset λ to 0 at Phase 2 start |
+
+### Training / Tooling
+| Change | Rationale |
+|--------|-----------|
+| Discriminator accuracy logging | Verify GRL is actively confusing discriminator (disc_acc near 1/n_signers = chance) |
+| Parallel LMDB build (ProcessPoolExecutor) | ~12× faster build (~20 min vs 2+ hrs) |
 
 ---
 
-## Run 003 — Pending (next RunPod run)
-**Config changes under consideration:**
-- Confirm GRL active (disc_acc logging now in place — verify discriminator converges to near chance)
-- Multi-Scale Velocity (idea 2A): delta=1, delta=2, delta=5 velocity channels
-- Cross-part attention (idea 1B): hand↔pose spatial relationship
+## Run 003 — Multi-Scale Velocity + Equal Budget + Face Split + Depth
+**Date:** 2026-05-03  
+**Hardware:** RunPod — NVIDIA A40  
+**Config:**
+- d_model=256, n_layers=4, n_heads=4, dropout=0.2, params=~6.5M
+- drop_path_max=0.1, grl_lambda=0.1, INCLUDE_DEPTH=True
+- Face landmarks: 56 (eyebrows 16 + mouth 40), split into two projections
+- Multi-scale velocity: Δ1 (dataset) + Δ2/Δ5 (in-model, /2 and /5 normalised)
+- Phase 1: 100 epochs (OneCycleLR, accumulation×4), Phase 2: 20 epochs
 
-**Expected val accuracy:** TBD
+**Timing:**
+- Throughput: ~12–13 it/s
+- Phase 1: 1h 41m 26s (100 epochs, avg 1m 00s/epoch)
+- Phase 2: 17m 51s (20 epochs, avg 0m 53s/epoch)
+- Total:   1h 59m 18s
+
+**Result:**
+- Best val acc (deterministic): **0.7432** (Phase 1 epoch ~90)
+- Best val acc (TTA):           **0.7468**
+- Train acc at convergence:     ~0.41
+- Disc acc at convergence:      ~0.120 vs 0.0556 chance (18 signers)
+
+**Analysis:**
+- Slight regression vs Run 002 (0.7432 vs 0.7555). Most likely cause: expanded feature set (depth + more velocity + face split) requires more gradient steps to converge than 100 epochs allows; d_model=512 produced similar results suggesting information ceiling, not capacity.
+- GRL confirmed active: disc acc ~12% ≈ 2× chance — feature extractor is confusing discriminator but not fully suppressing signer signal.
+- Phase 2 made no improvement: Phase 2 best was 0.7390, below Phase 1's 0.7432. Root cause: Phase 2 force-resets LR to 1e-4 regardless of Phase 1 end (~2e-9) — 5 orders of magnitude jump that undoes Phase 1 fine-tuning.
+- Val acc plateaued ~0.742–0.743 from epoch 85+; model fully converged.
+- Key insight from capacity ablation (d_model=512 ≈ d_model=256): the ~26% error rate reflects an **information ceiling** — the features don't make all 250-sign distinctions accessible, not insufficient model capacity. The core gaps are palm orientation (monocular z is noisy) and explicit hand shape (raw XYZ buries fine-grained joint angle differences).
+
+---
+
+## Changes Applied After Run 003
+
+### Architecture
+| Change | Rationale |
+|--------|-----------|
+| Geometry stream: `_hand_geometry()` | 15 joint-angle cosines (3 per finger at MCP/PIP/DIP) + 10 fingertip pairwise distances per hand = 25 explicit hand-shape features. Invariant to wrist rotation and signer hand scale. Projected via lh_geo_proj / rh_geo_proj each d_model//8 = d_model//4 total. |
+| `feat_fuse` input: 2·d_model + d_model//4 | Adds geometry budget without reducing position/velocity allocation |
+
+### Normalization fix
+| Change | Rationale |
+|--------|-----------|
+| `normalize_values` in preprocessing: nose→shoulder→hip→0 fallback | Previously fillna(0) silently used origin=0 for missing nose; `RobustNormalization` in model always fell to shoulder branch (nose appeared missing post-preprocessing). Single consistent path now. |
+| `RobustNormalization` removed from model | Normalization done once at LMDB build time; no per-forward-pass cost |
+| `_NORM_VERSION = "v2_fallback"` in `_cache_keys.py` | Auto-invalidates old LMDB on next build |
+
+### Training
+| Change | Rationale |
+|--------|-----------|
+| Phase 2 removed | Phase 2 never improved on Phase 1 best across two runs; LR reset to 1e-4 is the root cause. Single-phase OneCycleLR is sufficient. |
+
+---
+
+## Run 004 — Geometry Stream + Normalization Fix (next RunPod run)
+**Config changes vs Run 003:**
+- Geometry stream added (joint angles + fingertip distances)
+- Proper preprocessing normalization (nose→shoulder→hip fallback)
+- LMDB rebuild required (CACHE_VERSION changed)
+- Phase 2 dropped; single-phase 100 epochs
+
+**Expected val accuracy:** TBD — geometry features add explicit hand-shape signal that raw XYZ buries; expect improvement over 0.7432 if the information ceiling was partly a representation issue.
 
 ---
 
@@ -111,19 +178,21 @@ Tracking every training run, the config used, and the result. Goal: 250-class AS
 ### High priority
 | ID | Idea | Expected impact | Notes |
 |----|------|----------------|-------|
-| 2A | Multi-Scale Velocity (delta=2, delta=5) | Medium | No LMDB rebuild needed; concat 3× vel channels; refactor vel_proj |
+| 4A | Pre-training on fingerspelling data | High | Leverage unlabeled data for better hand-shape representations; fingerspelling has 30 distinct hand configs forcing fine-grained learning |
 
 ### Medium priority
 | ID | Idea | Expected impact | Notes |
 |----|------|----------------|-------|
-| 2B | Distance features (fingertip pairs) | Medium | Invariant to translation/rotation by construction |
-| 1B | Cross-part attention (hand↔pose) | Medium-high | Spatial relationship between hand position and body |
+| 1B | Cross-part attention (hand↔pose) | Medium | Spatial relationship between hand position and body |
+| 4B | INCLUDE_DEPTH ablation | Low-medium | Confirm whether z helps or hurts; noisy monocular depth vs. palm orientation signal |
 
 ### Low priority / explored
 | ID | Idea | Status | Notes |
 |----|------|--------|-------|
-| 1A | GCN stem | Skipped | Added complexity; conformer already captures spatial structure via conv |
-| 3B | STN (Spatial Transformer) | Skipped | WristNorm covers same invariance more cheaply |
+| 2A | Multi-Scale Velocity (Δ2/Δ5) | Done (Run 003) | Implemented; contributed to run but converged slightly lower — may need more epochs |
+| 2B | Fingertip distance features | Done (Run 004 prep) | Implemented as part of geometry stream |
+| 1A | GCN stem | Skipped | Per-part projections already encode topology; GCN adds minor edge-level priors |
+| 3B | STN (Spatial Transformer) | Skipped | WristNorm + geometry stream covers same invariance more cheaply |
 
 ---
 

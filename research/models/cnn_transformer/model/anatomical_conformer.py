@@ -190,10 +190,22 @@ class AnatomicalConformer(nn.Module):
         # Split position and delta-1 velocity halves (dataset layout: [pos | vel1])
         pos = x[:, :, :COORD_FEAT]
         vel1 = x[:, :, COORD_FEAT:]
+        c = COORDS_PER_LM
+
+        # Shoulder-width normalization: scale all positional and velocity features by
+        # the mean inter-shoulder distance over valid frames. Makes the model invariant
+        # to camera distance and signer body size. Per-sequence mean (not per-frame)
+        # avoids scale noise from shoulder movement within a sign.
+        lshoulder = pos[:, :, POSE_START + 11 * c : POSE_START + 12 * c]
+        rshoulder = pos[:, :, POSE_START + 12 * c : POSE_START + 13 * c]
+        shoulder_w = (lshoulder - rshoulder).norm(dim=-1)                         # (B, T)
+        mean_sw = (shoulder_w * mask.float()).sum(1) / mask.float().sum(1).clamp(min=1)  # (B,)
+        scale = mean_sw.clamp(min=1e-3).view(B, 1, 1)
+        pos  = pos  / scale
+        vel1 = vel1 / scale
 
         # Geometry stream — computed from wrist-relative fingers (after WristNorm).
         # Wrist itself is at (0, 0, 0) in this frame; concatenate as lm 0.
-        c = COORDS_PER_LM
         zeros = torch.zeros(B, T, 1, c, device=x.device, dtype=x.dtype)
         lh_hand = torch.cat([zeros, pos[:, :, LH_START + c:POSE_START].reshape(B, T, 20, c)], dim=2)
         rh_hand = torch.cat([zeros, pos[:, :, RH_START + c:FACE_START].reshape(B, T, 20, c)], dim=2)
