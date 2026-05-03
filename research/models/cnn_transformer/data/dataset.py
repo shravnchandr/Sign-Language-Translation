@@ -101,15 +101,23 @@ class ASLDataset(Dataset):
         self.lmdb_path: Optional[str] = None
         if lmdb_path and _LMDB_AVAILABLE:
             lmdb_dir = Path(lmdb_path)
-            if lmdb_dir.exists() and (lmdb_dir / "data.mdb").exists():
+            if lmdb_dir.is_file():
+                # Flat-file form (is.lmdb.mdb) from Kaggle build notebooks.
                 self.lmdb_path = str(lmdb_dir.resolve())
-            elif lmdb_dir.exists():
-                import warnings
+            elif lmdb_dir.is_dir() and (lmdb_dir / "data.mdb").exists():
+                self.lmdb_path = str(lmdb_dir.resolve())
+            else:
+                # Auto-discover flat form when given directory-style path.
+                flat = lmdb_dir.parent / (lmdb_dir.name + ".mdb")
+                if flat.is_file():
+                    self.lmdb_path = str(flat.resolve())
+                elif lmdb_dir.exists():
+                    import warnings
 
-                warnings.warn(
-                    f"LMDB directory {lmdb_path} exists but data.mdb is missing "
-                    "(empty or interrupted build). Falling back to .pt / parquet cache."
-                )
+                    warnings.warn(
+                        f"LMDB at {lmdb_path} exists but data.mdb is missing "
+                        "(empty or interrupted build). Falling back to .pt / parquet cache."
+                    )
 
         self.lengths = self._load_or_compute_lengths()
 
