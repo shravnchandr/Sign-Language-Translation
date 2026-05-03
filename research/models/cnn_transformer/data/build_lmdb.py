@@ -18,6 +18,7 @@ Keys are versioned (_CACHE_VERSION prefix) so rebuilding after a config
 change (e.g. new face landmark set) produces new keys and never silently
 reuses stale tensors.
 """
+
 import argparse
 import io
 import os
@@ -153,7 +154,9 @@ def build_lmdb(
 
 def main():
     parser = argparse.ArgumentParser(description="Build LMDB cache for ASL dataset")
-    parser.add_argument("--data-dir", required=True, help="Directory containing train.csv")
+    parser.add_argument(
+        "--data-dir", required=True, help="Directory containing train.csv"
+    )
     parser.add_argument("--lmdb-path", required=True, help="Output LMDB directory path")
     parser.add_argument(
         "--map-size-gb",
@@ -174,7 +177,11 @@ def main():
     )
     args = parser.parse_args()
     build_lmdb(
-        args.data_dir, args.lmdb_path, args.map_size_gb, args.allow_errors, args.num_workers
+        args.data_dir,
+        args.lmdb_path,
+        args.map_size_gb,
+        args.allow_errors,
+        args.num_workers,
     )
 
 

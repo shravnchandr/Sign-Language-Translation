@@ -24,8 +24,8 @@ def normalize_values(dataframe: pd.DataFrame) -> pd.DataFrame:
         return dataframe[mask].set_index("frame")[axes].reindex(all_frames)
 
     nose = pose_lm(0)
-    shoulder = (pose_lm(11) + pose_lm(12)) / 2.0   # mid-point of left/right shoulder
-    hip = (pose_lm(23) + pose_lm(24)) / 2.0         # mid-point of left/right hip
+    shoulder = (pose_lm(11) + pose_lm(12)) / 2.0  # mid-point of left/right shoulder
+    hip = (pose_lm(23) + pose_lm(24)) / 2.0  # mid-point of left/right hip
 
     # combine_first: prefer nose; where nose is NaN, use shoulder; then hip; then 0.
     origin = nose.combine_first(shoulder).combine_first(hip).fillna(0.0)

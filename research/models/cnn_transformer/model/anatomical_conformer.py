@@ -186,7 +186,9 @@ class AnatomicalConformer(nn.Module):
                 angles.append(cos_a.clamp(-1.0, 1.0))  # (B, T)
 
         tips = hand[:, :, [4, 8, 12, 16, 20]]  # (B, T, 5, c)
-        hand_scale = hand[:, :, [5, 9, 13, 17]].norm(dim=-1).mean(dim=-1) + 1e-6  # (B, T) mean MCP distance
+        hand_scale = (
+            hand[:, :, [5, 9, 13, 17]].norm(dim=-1).mean(dim=-1) + 1e-6
+        )  # (B, T) mean MCP distance
         dists = [
             (tips[:, :, i] - tips[:, :, j]).norm(dim=-1) / hand_scale
             for i in range(5)

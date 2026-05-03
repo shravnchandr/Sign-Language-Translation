@@ -21,16 +21,16 @@ class WristNormalization(nn.Module):
         c = COORDS_PER_LM
         for hs in (LH_START, RH_START):
             # Position half: subtract wrist (lm 0) from fingers (lm 1-20)
-            wrist = x[:, :, hs : hs + c]                              # (B, T, c)
+            wrist = x[:, :, hs : hs + c]  # (B, T, c)
             fingers = x[:, :, hs + c : hs + 21 * c].reshape(B, T, 20, c)
-            x[:, :, hs + c : hs + 21 * c] = (
-                (fingers - wrist.unsqueeze(2)).reshape(B, T, 20 * c)
+            x[:, :, hs + c : hs + 21 * c] = (fingers - wrist.unsqueeze(2)).reshape(
+                B, T, 20 * c
             )
             # Velocity half: same subtraction offset by COORD_FEAT
             vs = COORD_FEAT + hs
             wrist_v = x[:, :, vs : vs + c]
             fingers_v = x[:, :, vs + c : vs + 21 * c].reshape(B, T, 20, c)
-            x[:, :, vs + c : vs + 21 * c] = (
-                (fingers_v - wrist_v.unsqueeze(2)).reshape(B, T, 20 * c)
+            x[:, :, vs + c : vs + 21 * c] = (fingers_v - wrist_v.unsqueeze(2)).reshape(
+                B, T, 20 * c
             )
         return x

@@ -71,7 +71,7 @@ Parquet → LandmarkProcessor → (T, N, 3)
 
 ### Approach 2 — AnatomicalConformer (`research/models/cnn_transformer/`)
 
-End-to-end supervised classification without VQ-VAE pre-training. Designed for Kaggle training.
+End-to-end supervised classification. Optional CTC pre-training on ASL Fingerspelling initialises the backbone before fine-tuning on the 250-class task. Designed for Kaggle training.
 
 - Input coordinates: x, y, z per landmark (`INCLUDE_DEPTH=True`)
 - Per-body-part projection: separate `nn.Linear` for LH, RH, pose; face is split into `eyebrow_proj` (grammatical: questions/negation) and `mouth_proj` (phonological: mouthing), each at `d_model//8` — same total budget as a single face projection
@@ -80,6 +80,7 @@ End-to-end supervised classification without VQ-VAE pre-training. Designed for K
 - Feature fusion: pos (`d_model`) + vel (`d_model`) + geo (`d_model//4`) → `feat_fuse` → `d_model`
 - Conformer blocks (depthwise conv + self-attention) + CLS token for classification
 - Body-relative normalization done once at LMDB build time (`normalize_values`: nose → shoulder → hip → 0 fallback). `WristNormalization` applied in-model: landmark 0 = location (nose-relative), landmarks 1–20 = shape (wrist-relative).
+- **Optional fingerspelling CTC pre-training** (`pretrain_fingerspelling.py`): trains the backbone on `ASL_Fingerspelling_Recognition` using `nn.CTCLoss` (60-token char vocab + blank). CTC mode skips the CLS token and returns per-frame logits `(B, T, vocab+1)`. Signer-independent split via `GroupShuffleSplit` on `participant_id`. Saves `backbone_best.pth` (all keys except `head.`, `ctc_head.`, `signer_disc.`, `cls_token`). Loaded at fine-tuning start via `--pretrained-backbone` with `strict=False`.
 - Single-phase training: Phase 1 (100 epochs default, heavy aug, mixup, OneCycleLR)
 - Test-time augmentation (5-pass TTA) at evaluation
 - Stochastic depth (`drop_path_max=0.1`): linearly increasing per-block skip probability (block 0 = 0, last = drop_path_max). Controlled via `--drop-path-max` CLI arg.
@@ -120,7 +121,10 @@ End-to-end supervised classification without VQ-VAE pre-training. Designed for K
 | `data/augmentation.py` | `AdvancedAugmentation` (7 types), `mixup_batch` |
 | `data/preprocessing.py` | `frame_stacked_data` — parquet → numpy array |
 | `data/build_lmdb.py` | One-time LMDB archive builder (parallelised — `os.cpu_count()` workers by default) |
+| `data/build_fingerspelling_lmdb.py` | Fingerspelling LMDB builder — parquet-file-level parallelism (one worker per ~1 GB file) |
+| `data/fingerspelling_dataset.py` | `FingerspellingDataset`, `collate_ctc`, `load_char_map` — CTC pre-training data pipeline |
 | `data/_cache_keys.py` | `CACHE_VERSION` hash, `lmdb_key`/`lmdb_length_key` helpers |
+| `pretrain_fingerspelling.py` | CTC pre-training loop — saves `backbone_best.pth` for fine-tuning |
 | `train.py` | Two-phase training loop with TTA evaluation |
 
 ## Known Bugs

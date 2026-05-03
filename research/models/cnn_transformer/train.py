@@ -368,7 +368,9 @@ def main():
     ).to(device)
 
     if args.pretrained_backbone:
-        ckpt = torch.load(args.pretrained_backbone, map_location="cpu", weights_only=True)
+        ckpt = torch.load(
+            args.pretrained_backbone, map_location="cpu", weights_only=True
+        )
         missing, unexpected = model.load_state_dict(ckpt, strict=False)
         print(f"Loaded pre-trained backbone from {args.pretrained_backbone}")
         if missing:
@@ -454,11 +456,7 @@ def main():
         v_loss, v_acc = evaluate_epoch(model, test_loader, criterion)
         epoch_secs = time.perf_counter() - t_epoch
         p1_epochs_run += 1
-        disc_str = (
-            f" | Disc Acc: {disc_acc:.4f}"
-            if disc_acc is not None
-            else ""
-        )
+        disc_str = f" | Disc Acc: {disc_acc:.4f}" if disc_acc is not None else ""
         print(
             f"Epoch {epoch_idx + 1:3d}/{NUM_EPOCHS_PHASE1} | "
             f"Train Loss: {t_loss:.4f} | Train Acc: {t_acc:.4f} | "
@@ -525,11 +523,7 @@ def main():
         )
         v_loss, v_acc = evaluate_epoch(model, test_loader, criterion)
         epoch_secs = time.perf_counter() - t_epoch
-        disc_str = (
-            f" | Disc Acc: {disc_acc:.4f}"
-            if disc_acc is not None
-            else ""
-        )
+        disc_str = f" | Disc Acc: {disc_acc:.4f}" if disc_acc is not None else ""
         print(
             f"P2 Epoch {p2_epoch + 1:3d}/{NUM_EPOCHS_PHASE2} | "
             f"Train Loss: {t_loss:.4f} | Train Acc: {t_acc:.4f} | "

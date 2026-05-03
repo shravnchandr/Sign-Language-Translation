@@ -5,6 +5,7 @@ pre-training of AnatomicalConformer.
 Reads from the LMDB built by build_fingerspelling_lmdb.py.
 Tensor layout matches ASLDataset: (T, 2*COORD_FEAT) = [positions | Δ1 velocities].
 """
+
 import io
 import json
 from pathlib import Path
@@ -37,14 +38,14 @@ class FingerspellingDataset(Dataset):
     ):
         import pandas as pd
 
-        self.lmdb_path   = str(Path(lmdb_path).resolve())
+        self.lmdb_path = str(Path(lmdb_path).resolve())
         self.char_to_idx = char_to_idx
-        self.max_frames  = max_frames
+        self.max_frames = max_frames
 
         df = pd.read_csv(csv_path)
-        self.sequence_ids   = df["sequence_id"].tolist()
+        self.sequence_ids = df["sequence_id"].tolist()
         self.participant_ids = df["participant_id"].tolist()
-        self.phrases        = df["phrase"].tolist()
+        self.phrases = df["phrase"].tolist()
 
     # ------------------------------------------------------------------
     # LMDB access (lazy, fork-safe — each worker opens its own handle)
@@ -76,21 +77,21 @@ class FingerspellingDataset(Dataset):
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, List[int]]:
         sid = self.sequence_ids[idx]
-        coords = self._load_coords(sid)        # (T, COORD_FEAT)
+        coords = self._load_coords(sid)  # (T, COORD_FEAT)
 
         # Temporal downsampling to max_frames (same as ASLDataset)
         if coords.shape[0] > self.max_frames:
-            idxs   = torch.linspace(0, coords.shape[0] - 1, self.max_frames).long()
+            idxs = torch.linspace(0, coords.shape[0] - 1, self.max_frames).long()
             coords = coords[idxs]
 
         T = coords.shape[0]
 
         # Δ1 velocity (computed after downsampling so it's consistent)
-        vel      = torch.zeros_like(coords)
-        vel[1:]  = coords[1:] - coords[:-1]
-        coords   = torch.cat([coords, vel], dim=-1)  # (T, 2*COORD_FEAT)
+        vel = torch.zeros_like(coords)
+        vel[1:] = coords[1:] - coords[:-1]
+        coords = torch.cat([coords, vel], dim=-1)  # (T, 2*COORD_FEAT)
 
-        mask         = torch.ones(T, dtype=torch.bool)
+        mask = torch.ones(T, dtype=torch.bool)
         char_indices = self._encode_phrase(self.phrases[idx])
         return coords, mask, char_indices
 
@@ -98,6 +99,7 @@ class FingerspellingDataset(Dataset):
 # ---------------------------------------------------------------------------
 # Collate function for DataLoader
 # ---------------------------------------------------------------------------
+
 
 def collate_ctc(
     batch: List[Tuple[torch.Tensor, torch.Tensor, List[int]]],
@@ -113,28 +115,27 @@ def collate_ctc(
       target_lengths: (B,)  phrase character counts
     """
     coords_list, mask_list, targets_list = zip(*batch)
-    B      = len(coords_list)
-    T_max  = max(c.shape[0] for c in coords_list)
-    D      = coords_list[0].shape[1]
+    B = len(coords_list)
+    T_max = max(c.shape[0] for c in coords_list)
+    D = coords_list[0].shape[1]
 
     padded = torch.zeros(B, T_max, D)
-    masks  = torch.zeros(B, T_max, dtype=torch.bool)
+    masks = torch.zeros(B, T_max, dtype=torch.bool)
     for i, (c, m) in enumerate(zip(coords_list, mask_list)):
         T = c.shape[0]
         padded[i, :T] = c
-        masks[i, :T]  = m
+        masks[i, :T] = m
 
-    input_lengths  = masks.sum(dim=1).long()
+    input_lengths = masks.sum(dim=1).long()
     target_lengths = torch.tensor([len(t) for t in targets_list], dtype=torch.long)
-    targets        = torch.cat(
-        [torch.tensor(t, dtype=torch.long) for t in targets_list]
-    )
+    targets = torch.cat([torch.tensor(t, dtype=torch.long) for t in targets_list])
     return padded, masks, targets, input_lengths, target_lengths
 
 
 # ---------------------------------------------------------------------------
 # Helper: load char map and return (char_to_idx, blank_idx)
 # ---------------------------------------------------------------------------
+
 
 def load_char_map(data_dir: str) -> Tuple[Dict[str, int], int]:
     char_map_path = Path(data_dir) / "character_to_prediction_index.json"

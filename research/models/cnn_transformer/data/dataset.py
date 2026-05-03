@@ -10,10 +10,15 @@ from typing import Dict, List, Optional, Tuple
 from sklearn.model_selection import GroupShuffleSplit, train_test_split
 from .augmentation import augment_sample
 from .preprocessing import frame_stacked_data
-from ._cache_keys import CACHE_VERSION, lmdb_key as _lmdb_key, lmdb_length_key as _lmdb_length_key
+from ._cache_keys import (
+    CACHE_VERSION,
+    lmdb_key as _lmdb_key,
+    lmdb_length_key as _lmdb_length_key,
+)
 
 try:
     import lmdb
+
     _LMDB_AVAILABLE = True
 except ImportError:
     _LMDB_AVAILABLE = False
@@ -33,7 +38,9 @@ def _open_lmdb_env(lmdb_path: str):
     key = (os.getpid(), canonical)
     env = _LMDB_ENV_CACHE.get(key)
     if env is None:
-        env = lmdb.open(canonical, readonly=True, lock=False, readahead=False, meminit=False)
+        env = lmdb.open(
+            canonical, readonly=True, lock=False, readahead=False, meminit=False
+        )
         _LMDB_ENV_CACHE[key] = env
     return env
 
@@ -81,6 +88,7 @@ class ASLDataset(Dataset):
                 self.lmdb_path = str(lmdb_dir.resolve())
             elif lmdb_dir.exists():
                 import warnings
+
                 warnings.warn(
                     f"LMDB directory {lmdb_path} exists but data.mdb is missing "
                     "(empty or interrupted build). Falling back to .pt / parquet cache."
@@ -99,7 +107,10 @@ class ASLDataset(Dataset):
             return _open_lmdb_env(self.lmdb_path)
         except lmdb.Error as exc:
             import warnings
-            warnings.warn(f"Could not open LMDB at {self.lmdb_path}: {exc}. Falling back.")
+
+            warnings.warn(
+                f"Could not open LMDB at {self.lmdb_path}: {exc}. Falling back."
+            )
             self.lmdb_path = None
             return None
 
@@ -165,7 +176,8 @@ class ASLDataset(Dataset):
         """Return per-sample sequence lengths, loading from sidecar JSON if available."""
         lengths_file = (
             (self.cache_dir / f"_lengths_{_CACHE_VERSION}.json")
-            if self.cache_dir else None
+            if self.cache_dir
+            else None
         )
         if lengths_file is not None and lengths_file.exists():
             with open(lengths_file) as f:
@@ -232,7 +244,12 @@ def collate_batch(batch):
         T = seq.shape[0]
         padded[i, :T] = seq
         mask[i, :T] = True
-    return padded, mask, torch.tensor(labels), torch.tensor(signer_ids, dtype=torch.long)
+    return (
+        padded,
+        mask,
+        torch.tensor(labels),
+        torch.tensor(signer_ids, dtype=torch.long),
+    )
 
 
 class BucketBatchSampler(Sampler):
@@ -307,7 +324,9 @@ def get_data_loaders(
         test_df = df.iloc[test_idx]
         # Build a stable int mapping from training signers only.
         # Test signers will get signer_id=-1 (unused during evaluation).
-        unique_signers = sorted(train_df["participant_id"].astype(str).unique().tolist())
+        unique_signers = sorted(
+            train_df["participant_id"].astype(str).unique().tolist()
+        )
         signer_to_id = {pid: i for i, pid in enumerate(unique_signers)}
         n_signers = len(signer_to_id)
         print(
@@ -324,18 +343,26 @@ def get_data_loaders(
     test_cache = str(Path(cache_dir) / "test") if cache_dir else None
 
     train_dataset = ASLDataset(
-        train_df, data_dir, cache_dir=train_cache, lmdb_path=lmdb_path,
-        max_frames=max_frames, augment=True, signer_to_id=signer_to_id,
+        train_df,
+        data_dir,
+        cache_dir=train_cache,
+        lmdb_path=lmdb_path,
+        max_frames=max_frames,
+        augment=True,
+        signer_to_id=signer_to_id,
     )
     test_dataset = ASLDataset(
-        test_df, data_dir, cache_dir=test_cache, lmdb_path=lmdb_path,
-        max_frames=max_frames, augment=False, signer_to_id=signer_to_id,
+        test_df,
+        data_dir,
+        cache_dir=test_cache,
+        lmdb_path=lmdb_path,
+        max_frames=max_frames,
+        augment=False,
+        signer_to_id=signer_to_id,
     )
 
     worker_kwargs = (
-        dict(persistent_workers=True, prefetch_factor=2)
-        if num_workers > 0
-        else {}
+        dict(persistent_workers=True, prefetch_factor=2) if num_workers > 0 else {}
     )
     train_loader = DataLoader(
         train_dataset,

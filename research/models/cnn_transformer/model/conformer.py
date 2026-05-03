@@ -4,7 +4,11 @@ import torch.nn as nn
 from typing import Optional
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
-_SDPA_BACKENDS = [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]
+_SDPA_BACKENDS = [
+    SDPBackend.FLASH_ATTENTION,
+    SDPBackend.EFFICIENT_ATTENTION,
+    SDPBackend.MATH,
+]
 
 
 class Swish(nn.Module):
@@ -62,7 +66,9 @@ class ConformerConvModule(nn.Module):
 class ConformerBlock(nn.Module):
     """Combines Conv-style local modeling with Transformer global modeling."""
 
-    def __init__(self, d_model, n_heads, kernel_size=31, dropout=0.1, drop_path_rate=0.0):
+    def __init__(
+        self, d_model, n_heads, kernel_size=31, dropout=0.1, drop_path_rate=0.0
+    ):
         super().__init__()
         self.drop_path_rate = drop_path_rate
         self.ff1 = nn.Sequential(
@@ -109,7 +115,9 @@ class ConformerBlock(nn.Module):
         # need_weights=False enables F.scaled_dot_product_attention (SDPA) dispatch;
         # sdpa_kernel selects Flash → MemEfficient → Math in priority order.
         with sdpa_kernel(_SDPA_BACKENDS):
-            x, _ = self.attn(x, x, x, key_padding_mask=key_padding_mask, need_weights=False)
+            x, _ = self.attn(
+                x, x, x, key_padding_mask=key_padding_mask, need_weights=False
+            )
         x = x + residual
 
         # 3. Convolution Module

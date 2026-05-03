@@ -44,7 +44,7 @@ Phase 1 training is fully unsupervised — uses all available datasets including
 
 ### Approach 2 — AnatomicalConformer (`research/models/cnn_transformer/`)
 
-End-to-end supervised classification without VQ-VAE pre-training. Designed for Kaggle/RunPod training.
+End-to-end supervised classification with optional CTC pre-training on ASL Fingerspelling. Designed for Kaggle/RunPod training.
 
 ```
 Parquet → frame_stacked_data → (T, D_pos) positions [x, y, z]
@@ -120,6 +120,7 @@ research/
 │   │       └── vocabulary.py           # Token-to-gloss mapping
 │   ├── cnn_transformer/         # AnatomicalConformer (end-to-end)
 │   │   ├── config.py                   # Landmark layout constants, feature dimensions
+│   │   ├── pretrain_fingerspelling.py  # CTC pre-training on ASL Fingerspelling
 │   │   ├── train.py                    # Two-phase training loop
 │   │   ├── model/
 │   │   │   ├── anatomical_conformer.py # Main model
@@ -131,6 +132,8 @@ research/
 │   │       ├── augmentation.py         # AdvancedAugmentation (7 types), mixup_batch
 │   │       ├── preprocessing.py        # frame_stacked_data
 │   │       ├── build_lmdb.py           # One-time LMDB archive builder
+│   │       ├── build_fingerspelling_lmdb.py  # Fingerspelling LMDB builder (parquet-file parallelism)
+│   │       ├── fingerspelling_dataset.py     # FingerspellingDataset, collate_ctc, load_char_map
 │   │       └── _cache_keys.py          # CACHE_VERSION hash, lmdb_key helpers
 │   └── st_gcn/                  # ST-GCN baseline
 │       ├── graph_structure.py          # LandmarkGraph (anatomical adjacency)
@@ -212,26 +215,35 @@ PYTHONPATH=research/models uv run python -m vqvae_seq2seq.translation.train_tran
 ### AnatomicalConformer (RunPod / local)
 
 ```bash
-# Recommended: build LMDB cache once (~20 min with default workers, then instant)
-PYTHONPATH=research/models uv run python -m cnn_transformer.data.build_lmdb \
-  --data-dir data/Isolated_ASL_Recognition \
-  --lmdb-path /tmp/asl.lmdb \
-  --num-workers 8   # default: os.cpu_count()
+# Full pipeline (FS LMDB → CTC pre-train → ASL LMDB → fine-tune)
+bash run_pipeline_cnn_transformer.sh
 
-# Train (default: d_model=256, n_layers=4, n_heads=4, drop_path_max=0.1, grl_lambda=0.1)
-PYTHONPATH=research/models uv run python -m cnn_transformer.train \
-  --data-dir data/Isolated_ASL_Recognition \
-  --lmdb-path /tmp/asl.lmdb \
-  --checkpoint-dir checkpoints/cnn_transformer
+# Already have the ASL LMDB — skip rebuilding it
+bash run_pipeline_cnn_transformer.sh --skip-lmdb
 
-# Key CLI args
-#   --d-model 256           model width
-#   --n-layers 4            conformer block count
-#   --drop-path-max 0.1     stochastic depth max rate
-#   --grl-lambda 0.1        GRL signer-adversarial weight (0=disable)
-#   --phase1-epochs 100
-#   --phase2-epochs 20
+# Skip fingerspelling pre-training entirely
+bash run_pipeline_cnn_transformer.sh --skip-pretrain
+
+# Re-use an existing backbone checkpoint, skip pre-training
+bash run_pipeline_cnn_transformer.sh --skip-lmdb \
+  --pretrained-backbone checkpoints/pretrain_fs/backbone_best.pth
+
+# Quick smoke test
+bash run_pipeline_cnn_transformer.sh --skip-lmdb \
+  --pretrain-epochs 2 --phase1-epochs 2 --phase2-epochs 1
 ```
+
+**Key pipeline flags:**
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--skip-pretrain` | false | Skip FS LMDB build + CTC pre-training |
+| `--pretrained-backbone <path>` | — | Use existing backbone; implies `--skip-pretrain` |
+| `--pretrain-epochs` | 40 | CTC pre-training epochs |
+| `--fs-data-dir` | `data/ASL_Fingerspelling_Recognition` | Fingerspelling dataset root |
+| `--skip-lmdb` | false | Skip ASL LMDB build (use pre-built) |
+| `--phase1-epochs` | 100 | Fine-tuning Phase 1 epochs |
+| `--phase2-epochs` | 20 | Fine-tuning Phase 2 epochs |
 
 **Note:** Any change to `config.py` that affects `ALL_COLUMNS` (face landmark selection, `INCLUDE_DEPTH`, `INCLUDE_FACE`) invalidates the LMDB cache — `CACHE_VERSION` is an MD5 of `ALL_COLUMNS` so stale archives are never silently reused. Delete and rebuild: `rm -rf /tmp/asl.lmdb && python -m cnn_transformer.data.build_lmdb ...`
 

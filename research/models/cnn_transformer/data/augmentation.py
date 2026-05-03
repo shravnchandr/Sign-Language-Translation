@@ -89,11 +89,17 @@ class AdvancedAugmentation:
         # x.permute(0,2,1) is already (B, D, T) — no reshape needed
         x_stretched = F.interpolate(
             x.permute(0, 2, 1), size=new_len, mode="linear", align_corners=False
-        ).permute(0, 2, 1)  # (B, new_len, D)
+        ).permute(
+            0, 2, 1
+        )  # (B, new_len, D)
         mask_stretched = (
             F.interpolate(
-                mask.float().unsqueeze(1), size=new_len, mode="linear", align_corners=False
-            ).squeeze(1) > 0.5
+                mask.float().unsqueeze(1),
+                size=new_len,
+                mode="linear",
+                align_corners=False,
+            ).squeeze(1)
+            > 0.5
         ).bool()
         if new_len < T:
             x_stretched = F.pad(x_stretched, (0, 0, 0, T - new_len))
@@ -121,14 +127,18 @@ class AdvancedAugmentation:
         B, T, D = x.shape
         angles = torch.tensor(
             np.radians(np.random.uniform(-max_angle, max_angle, B)),
-            dtype=x.dtype, device=x.device,
+            dtype=x.dtype,
+            device=x.device,
         )  # (B,)
         cos_a, sin_a = torch.cos(angles), torch.sin(angles)
         # (B, 2, 2) rotation matrices, broadcast over T and K (landmark pairs)
-        rot = torch.stack([
-            torch.stack([ cos_a, -sin_a], dim=-1),
-            torch.stack([ sin_a,  cos_a], dim=-1),
-        ], dim=-2)  # (B, 2, 2)
+        rot = torch.stack(
+            [
+                torch.stack([cos_a, -sin_a], dim=-1),
+                torch.stack([sin_a, cos_a], dim=-1),
+            ],
+            dim=-2,
+        )  # (B, 2, 2)
         # Reshape to expose (x,y) pairs: (B, T, K, C) where K = D // COORDS_PER_LM
         x_lm = x.reshape(B, T, D // COORDS_PER_LM, COORDS_PER_LM)
         xy = x_lm[..., :2]  # (B, T, K, 2) — covers all pairs when COORDS_PER_LM==2
@@ -166,8 +176,12 @@ def mixup_batch(x, y, mask, alpha=0.2):
     # (after mixup), so mixing a lh-dominant sample with a rh-dominant sample
     # produces ambiguous hand slot assignments. Pair same-dominance samples only.
     B, device = x.size(0), x.device
-    lh_wrist_vel = x[:, :, COORD_FEAT + LH_START : COORD_FEAT + LH_START + COORDS_PER_LM]
-    rh_wrist_vel = x[:, :, COORD_FEAT + RH_START : COORD_FEAT + RH_START + COORDS_PER_LM]
+    lh_wrist_vel = x[
+        :, :, COORD_FEAT + LH_START : COORD_FEAT + LH_START + COORDS_PER_LM
+    ]
+    rh_wrist_vel = x[
+        :, :, COORD_FEAT + RH_START : COORD_FEAT + RH_START + COORDS_PER_LM
+    ]
     rh_dominant = (rh_wrist_vel**2).sum(-1).mean(1) > (lh_wrist_vel**2).sum(-1).mean(1)
 
     rh_idx = torch.where(rh_dominant)[0]

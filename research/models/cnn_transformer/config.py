@@ -113,9 +113,8 @@ N_LH, N_POSE, N_RH = 21, 33, 21
 N_FACE = len(SELECTED_FACE_INDICES)
 # Eyebrows (grammatical: questions/negation) and mouth (phonological: mouthing)
 # are split so the model can learn them with separate projections.
-N_FACE_EYEBROW = (
-    len(FACE_LANDMARK_INDICES["left_eyebrow"])
-    + len(FACE_LANDMARK_INDICES["right_eyebrow"])
+N_FACE_EYEBROW = len(FACE_LANDMARK_INDICES["left_eyebrow"]) + len(
+    FACE_LANDMARK_INDICES["right_eyebrow"]
 )
 N_FACE_MOUTH = N_FACE - N_FACE_EYEBROW
 

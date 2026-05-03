@@ -17,6 +17,7 @@ Usage (from project root):
       --lmdb-csv   data/cache/fingerspelling/train.csv \\
       --out-dir    checkpoints/pretrain_fs
 """
+
 import argparse
 import math
 import time
@@ -71,23 +72,29 @@ def train(args):
     gss = GroupShuffleSplit(n_splits=1, test_size=0.1, random_state=42)
     train_idx, val_idx = next(gss.split(meta, groups=meta["participant_id"]))
     train_ds = Subset(full_ds, train_idx.tolist())
-    val_ds   = Subset(full_ds, val_idx.tolist())
+    val_ds = Subset(full_ds, val_idx.tolist())
 
     train_loader = DataLoader(
-        train_ds, batch_size=args.batch_size, shuffle=True,
-        num_workers=args.num_workers, collate_fn=collate_ctc,
+        train_ds,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=args.num_workers,
+        collate_fn=collate_ctc,
         pin_memory=(device.type == "cuda"),
     )
     val_loader = DataLoader(
-        val_ds, batch_size=args.batch_size, shuffle=False,
-        num_workers=args.num_workers, collate_fn=collate_ctc,
+        val_ds,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+        collate_fn=collate_ctc,
         pin_memory=(device.type == "cuda"),
     )
     print(f"Train: {len(train_ds):,}  Val: {len(val_ds):,}")
 
     # ── Model ─────────────────────────────────────────────────────────────────
     model = AnatomicalConformer(
-        num_classes=250,          # unused in CTC mode
+        num_classes=250,  # unused in CTC mode
         d_model=args.d_model,
         n_heads=args.n_heads,
         n_layers=args.n_layers,
@@ -100,13 +107,13 @@ def train(args):
     print(f"Model: {n_params:,} params")
 
     criterion = nn.CTCLoss(blank=blank_idx, reduction="mean", zero_infinity=True)
-    optimizer = torch.optim.AdamW(
-        model.parameters(), lr=args.lr, weight_decay=1e-2
-    )
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-2)
     total_steps = math.ceil(len(train_loader) / args.accum_steps) * args.epochs
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
-        optimizer, max_lr=args.lr,
-        total_steps=max(total_steps, 1), pct_start=0.1,
+        optimizer,
+        max_lr=args.lr,
+        total_steps=max(total_steps, 1),
+        pct_start=0.1,
     )
     scaler = torch.amp.GradScaler(enabled=(device.type == "cuda"))
 
@@ -122,17 +129,19 @@ def train(args):
         for step, (coords, mask, targets, input_lengths, target_lengths) in enumerate(
             train_loader
         ):
-            coords         = coords.to(device)
-            mask           = mask.to(device)
-            targets        = targets.to(device)
-            input_lengths  = input_lengths.to(device)
+            coords = coords.to(device)
+            mask = mask.to(device)
+            targets = targets.to(device)
+            input_lengths = input_lengths.to(device)
             target_lengths = target_lengths.to(device)
 
-            with torch.amp.autocast(device_type=device.type, enabled=(device.type == "cuda")):
-                logits    = model(coords, mask)                             # (B, T, vocab+1)
-                log_probs = logits.log_softmax(-1).permute(1, 0, 2)        # (T, B, C)
-                loss      = criterion(log_probs, targets, input_lengths, target_lengths)
-                loss      = loss / args.accum_steps
+            with torch.amp.autocast(
+                device_type=device.type, enabled=(device.type == "cuda")
+            ):
+                logits = model(coords, mask)  # (B, T, vocab+1)
+                log_probs = logits.log_softmax(-1).permute(1, 0, 2)  # (T, B, C)
+                loss = criterion(log_probs, targets, input_lengths, target_lengths)
+                loss = loss / args.accum_steps
 
             scaler.scale(loss).backward()
             train_loss += loss.item() * args.accum_steps
@@ -150,24 +159,22 @@ def train(args):
         val_loss, n_val = 0.0, 0
         with torch.no_grad():
             for coords, mask, targets, input_lengths, target_lengths in val_loader:
-                coords         = coords.to(device)
-                mask           = mask.to(device)
-                targets        = targets.to(device)
-                input_lengths  = input_lengths.to(device)
+                coords = coords.to(device)
+                mask = mask.to(device)
+                targets = targets.to(device)
+                input_lengths = input_lengths.to(device)
                 target_lengths = target_lengths.to(device)
                 with torch.amp.autocast(
                     device_type=device.type, enabled=(device.type == "cuda")
                 ):
-                    logits    = model(coords, mask)
+                    logits = model(coords, mask)
                     log_probs = logits.log_softmax(-1).permute(1, 0, 2)
-                    loss      = criterion(
-                        log_probs, targets, input_lengths, target_lengths
-                    )
+                    loss = criterion(log_probs, targets, input_lengths, target_lengths)
                 val_loss += loss.item()
-                n_val    += 1
+                n_val += 1
 
         avg_train = train_loss / max(len(train_loader), 1)
-        avg_val   = val_loss   / max(n_val, 1)
+        avg_val = val_loss / max(n_val, 1)
         print(
             f"Epoch {epoch+1:3d}/{args.epochs} | "
             f"train {avg_train:.4f} | val {avg_val:.4f} | "
@@ -178,9 +185,7 @@ def train(args):
         if avg_val < best_val_loss:
             best_val_loss = avg_val
             backbone_sd = {
-                k: v
-                for k, v in model.state_dict().items()
-                if _is_backbone_key(k)
+                k: v for k, v in model.state_dict().items() if _is_backbone_key(k)
             }
             torch.save(backbone_sd, out_dir / "backbone_best.pth")
             print(f"  Saved backbone (val {avg_val:.4f})")
@@ -190,29 +195,32 @@ def train(args):
 
 
 def main():
-    p = argparse.ArgumentParser(
-        description="CTC pre-training on ASL Fingerspelling"
+    p = argparse.ArgumentParser(description="CTC pre-training on ASL Fingerspelling")
+    p.add_argument(
+        "--data-dir",
+        required=True,
+        help="data/ASL_Fingerspelling_Recognition (for char map)",
     )
-    p.add_argument("--data-dir",   required=True,
-                   help="data/ASL_Fingerspelling_Recognition (for char map)")
-    p.add_argument("--lmdb-path",  required=True,
-                   help="data/cache/fingerspelling/fs.lmdb")
-    p.add_argument("--lmdb-csv",   required=True,
-                   help="data/cache/fingerspelling/train.csv")
-    p.add_argument("--out-dir",    default="checkpoints/pretrain_fs")
+    p.add_argument(
+        "--lmdb-path", required=True, help="data/cache/fingerspelling/fs.lmdb"
+    )
+    p.add_argument(
+        "--lmdb-csv", required=True, help="data/cache/fingerspelling/train.csv"
+    )
+    p.add_argument("--out-dir", default="checkpoints/pretrain_fs")
     # Model (must match fine-tuning config)
-    p.add_argument("--d-model",       type=int,   default=256)
-    p.add_argument("--n-layers",      type=int,   default=4)
-    p.add_argument("--n-heads",       type=int,   default=4)
-    p.add_argument("--dropout",       type=float, default=0.1)
+    p.add_argument("--d-model", type=int, default=256)
+    p.add_argument("--n-layers", type=int, default=4)
+    p.add_argument("--n-heads", type=int, default=4)
+    p.add_argument("--dropout", type=float, default=0.1)
     p.add_argument("--drop-path-max", type=float, default=0.05)
     # Training
-    p.add_argument("--epochs",      type=int,   default=40)
-    p.add_argument("--batch-size",  type=int,   default=32)
-    p.add_argument("--accum-steps", type=int,   default=4)
-    p.add_argument("--lr",          type=float, default=3e-4)
-    p.add_argument("--max-frames",  type=int,   default=384)
-    p.add_argument("--num-workers", type=int,   default=4)
+    p.add_argument("--epochs", type=int, default=40)
+    p.add_argument("--batch-size", type=int, default=32)
+    p.add_argument("--accum-steps", type=int, default=4)
+    p.add_argument("--lr", type=float, default=3e-4)
+    p.add_argument("--max-frames", type=int, default=384)
+    p.add_argument("--num-workers", type=int, default=4)
     args = p.parse_args()
     train(args)
 
