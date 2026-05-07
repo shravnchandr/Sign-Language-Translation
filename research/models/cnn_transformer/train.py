@@ -352,6 +352,21 @@ def main():
         "Requires PyTorch >= 2.10 on Python 3.14. Graph breaks are allowed "
         "so the GRL custom backward does not block compilation.",
     )
+    parser.add_argument(
+        "--backbone-warmup-epochs",
+        type=int,
+        default=5,
+        help="When --pretrained-backbone is set: freeze backbone for this many epochs, "
+        "training only new head params (cls_token, head, geo projections, feat_fuse). "
+        "After unfreezing, backbone trains at backbone-lr-ratio × head LR. "
+        "0 = disabled.",
+    )
+    parser.add_argument(
+        "--backbone-lr-ratio",
+        type=float,
+        default=0.1,
+        help="Backbone LR as a fraction of head LR after warmup unfreezes (default 0.1 = 10× lower).",
+    )
     args = parser.parse_args()
 
     os.makedirs(args.checkpoint_dir, exist_ok=True)
@@ -422,39 +437,24 @@ def main():
     _weights = _weights / _weights.mean()
     class_weights = torch.tensor(_weights).to(device)
     criterion = FocalLoss(class_weights=class_weights)
-    # Exclude 1-D params (LayerNorm scale/bias, standalone biases) from weight decay —
-    # applying L2 to these harms convergence without regularisation benefit.
-    decay_params = [
-        p
-        for n, p in model.named_parameters()
-        if p.requires_grad and p.ndim > 1 and not n.endswith(".bias")
-    ]
-    nodecay_params = [
-        p
-        for n, p in model.named_parameters()
-        if p.requires_grad and (p.ndim <= 1 or n.endswith(".bias"))
-    ]
-    optimizer = optim.AdamW(
-        [
-            {"params": decay_params, "weight_decay": 0.05},
-            {"params": nodecay_params, "weight_decay": 0.0},
-        ],
-        lr=1e-4,
+    # Head params: new layers not present in the pre-trained backbone.
+    # Backbone params: everything else (conformer blocks, projections, PE).
+    # Used to freeze backbone during warmup and set differential LR after.
+    _HEAD_PREFIXES = (
+        "head.", "cls_token", "signer_disc.",
+        "lh_geo_proj.", "rh_geo_proj.", "feat_fuse.",
     )
-    scaler = GradScaler(enabled=use_amp)
 
-    # Phase 1 scheduler: only created when Phase 1 will actually run.
-    # OneCycleLR rejects total_steps=0, so --phase1-epochs 0 would crash.
-    if NUM_EPOCHS_PHASE1 > 0:
-        steps_p1 = math.ceil(len(train_loader) / 4) * NUM_EPOCHS_PHASE1
-        scheduler = optim.lr_scheduler.OneCycleLR(
-            optimizer,
-            max_lr=5e-4,
-            total_steps=steps_p1,
-            pct_start=0.1,
-        )
-    else:
-        scheduler = None
+    def _is_head(name: str) -> bool:
+        return any(name.startswith(p) for p in _HEAD_PREFIXES)
+
+    warmup_epochs = (
+        min(args.backbone_warmup_epochs, NUM_EPOCHS_PHASE1)
+        if args.pretrained_backbone else 0
+    )
+    MAX_LR = 5e-4
+
+    scaler = GradScaler(enabled=use_amp)
 
     def _fmt_time(seconds: float) -> str:
         s = int(seconds)
@@ -464,7 +464,7 @@ def main():
 
     best_acc = -float("inf")
     patience = 0
-    p1_saved = False  # guards against loading a checkpoint from a previous run
+    p1_saved = False
 
     print("\nPhase 1: Exploration (Heavy Augmentation)")
     print("-" * 80)
@@ -473,7 +473,124 @@ def main():
     t_start_p1 = time.perf_counter()
     p1_epochs_run = 0
 
-    for epoch_idx in range(NUM_EPOCHS_PHASE1):
+    # ── Backbone warmup: freeze backbone, train new heads only ────────────────
+    if warmup_epochs > 0:
+        print(
+            f"[Warmup] Freezing backbone for {warmup_epochs} epoch(s) — "
+            f"training head params only"
+        )
+        for name, p in model.named_parameters():
+            if not _is_head(name):
+                p.requires_grad_(False)
+
+        wu_decay = [
+            p for n, p in model.named_parameters()
+            if _is_head(n) and p.ndim > 1 and not n.endswith(".bias")
+        ]
+        wu_nodecay = [
+            p for n, p in model.named_parameters()
+            if _is_head(n) and (p.ndim <= 1 or n.endswith(".bias"))
+        ]
+        wu_optimizer = optim.AdamW(
+            [{"params": wu_decay, "weight_decay": 0.05},
+             {"params": wu_nodecay, "weight_decay": 0.0}],
+            lr=1e-4,
+        )
+        wu_steps = math.ceil(len(train_loader) / 4) * warmup_epochs
+        wu_scheduler = optim.lr_scheduler.OneCycleLR(
+            wu_optimizer, max_lr=MAX_LR, total_steps=wu_steps, pct_start=0.3,
+        )
+
+        for epoch_idx in range(warmup_epochs):
+            t_epoch = time.perf_counter()
+            t_loss, t_acc, _ = train_epoch(
+                model, train_loader, wu_optimizer, criterion, scaler,
+                accumulation_steps=4, use_mixup=True, heavy_augment=True,
+                scheduler=wu_scheduler, epoch=epoch_idx,
+                total_epochs=NUM_EPOCHS_PHASE1,
+                grl_lambda=0.0, n_signers=0,
+            )
+            v_loss, v_acc = evaluate_epoch(model, test_loader, criterion)
+            epoch_secs = time.perf_counter() - t_epoch
+            p1_epochs_run += 1
+            print(
+                f"Epoch {epoch_idx + 1:3d}/{NUM_EPOCHS_PHASE1} [warmup] | "
+                f"Train Loss: {t_loss:.4f} | Train Acc: {t_acc:.4f} | "
+                f"Val Acc: {v_acc:.4f} | "
+                f"LR: {wu_optimizer.param_groups[0]['lr']:.2e} | "
+                f"Time: {_fmt_time(epoch_secs)}"
+            )
+            if v_acc > best_acc:
+                best_acc = v_acc
+                torch.save(model.state_dict(), p1_ckpt)
+                p1_saved = True
+                print(f"  → Saved best P1 model ({best_acc:.4f})")
+
+        # Unfreeze backbone; reset patience so early stopping counts from here
+        for p in model.parameters():
+            p.requires_grad_(True)
+        patience = 0
+        print(
+            f"[Warmup] Backbone unfrozen — "
+            f"backbone LR: {MAX_LR * args.backbone_lr_ratio:.1e}  "
+            f"head LR: {MAX_LR:.1e}"
+        )
+
+    # ── Main optimizer: differential LR when backbone was pre-trained ─────────
+    if args.pretrained_backbone:
+        bb_max_lr = MAX_LR * args.backbone_lr_ratio
+        head_decay = [
+            p for n, p in model.named_parameters()
+            if _is_head(n) and p.ndim > 1 and not n.endswith(".bias")
+        ]
+        head_nodecay = [
+            p for n, p in model.named_parameters()
+            if _is_head(n) and (p.ndim <= 1 or n.endswith(".bias"))
+        ]
+        bb_decay = [
+            p for n, p in model.named_parameters()
+            if not _is_head(n) and p.ndim > 1 and not n.endswith(".bias")
+        ]
+        bb_nodecay = [
+            p for n, p in model.named_parameters()
+            if not _is_head(n) and (p.ndim <= 1 or n.endswith(".bias"))
+        ]
+        optimizer = optim.AdamW(
+            [{"params": head_decay, "weight_decay": 0.05},
+             {"params": head_nodecay, "weight_decay": 0.0},
+             {"params": bb_decay, "weight_decay": 0.05},
+             {"params": bb_nodecay, "weight_decay": 0.0}],
+            lr=1e-4,
+        )
+        main_max_lrs = [MAX_LR, MAX_LR, bb_max_lr, bb_max_lr]
+    else:
+        # No pretrained backbone — standard two-group setup (unchanged behaviour)
+        decay_params = [
+            p for n, p in model.named_parameters()
+            if p.requires_grad and p.ndim > 1 and not n.endswith(".bias")
+        ]
+        nodecay_params = [
+            p for n, p in model.named_parameters()
+            if p.requires_grad and (p.ndim <= 1 or n.endswith(".bias"))
+        ]
+        optimizer = optim.AdamW(
+            [{"params": decay_params, "weight_decay": 0.05},
+             {"params": nodecay_params, "weight_decay": 0.0}],
+            lr=1e-4,
+        )
+        main_max_lrs = MAX_LR
+
+    main_epochs = NUM_EPOCHS_PHASE1 - p1_epochs_run
+    if main_epochs > 0:
+        steps_main = math.ceil(len(train_loader) / 4) * main_epochs
+        scheduler = optim.lr_scheduler.OneCycleLR(
+            optimizer, max_lr=main_max_lrs, total_steps=steps_main, pct_start=0.1,
+        )
+    else:
+        scheduler = None
+
+    # ── Main Phase 1 loop ─────────────────────────────────────────────────────
+    for epoch_idx in range(p1_epochs_run, NUM_EPOCHS_PHASE1):
         t_epoch = time.perf_counter()
         t_loss, t_acc, disc_acc = train_epoch(
             model,

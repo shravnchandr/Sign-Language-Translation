@@ -29,8 +29,8 @@ DATA_DIR="data/asl-is-lmdb"          # downloaded from shravnchandr/asl-is-lmdb
 CACHE_DIR="data/cache/cnn_transformer"
 LMDB_PATH="data/asl-is-lmdb/is.lmdb.mdb"
 CHECKPOINT_DIR="checkpoints/cnn_transformer"
-PHASE1_EPOCHS=100
-PHASE2_EPOCHS=0
+PHASE1_EPOCHS=80
+PHASE2_EPOCHS=20
 PATIENCE=20
 BATCH_SIZE=64
 NUM_WORKERS=4
@@ -39,13 +39,15 @@ MAP_SIZE_GB=""   # empty = 1 TiB default (sparse file, no disk cost)
 ALLOW_ERRORS=false
 LMDB_WORKERS=4
 COMPILE=false
+BACKBONE_WARMUP_EPOCHS=5   # epochs to freeze backbone after loading pretrained weights
+BACKBONE_LR_RATIO=0.1       # backbone LR as fraction of head LR after warmup
 
 # Fingerspelling pre-training
 FS_DATA_DIR="data/asl-fs-lmdb"       # downloaded from shravnchandr/asl-fs-lmdb
 FS_LMDB_PATH="data/asl-fs-lmdb/fs.lmdb.mdb"
 FS_LMDB_CSV="data/asl-fs-lmdb/train.csv"
 PRETRAIN_CHECKPOINT_DIR="checkpoints/pretrain_fs"
-PRETRAIN_EPOCHS=50
+PRETRAIN_EPOCHS=40
 PRETRAIN_PATIENCE=10
 PRETRAINED_BACKBONE=""
 SKIP_PRETRAIN=false
@@ -81,6 +83,8 @@ while [[ $# -gt 0 ]]; do
         --build-fs-lmdb)           SKIP_FS_LMDB=false;           shift ;;
         --fs-map-size-gb)          FS_MAP_SIZE_GB="$2";          shift 2 ;;
         --compile)                 COMPILE=true;                  shift ;;
+        --backbone-warmup-epochs)  BACKBONE_WARMUP_EPOCHS="$2";  shift 2 ;;
+        --backbone-lr-ratio)       BACKBONE_LR_RATIO="$2";       shift 2 ;;
         *) echo "Unknown argument: $1"; exit 1 ;;
     esac
 done
@@ -187,6 +191,8 @@ uv run python -m cnn_transformer.train \
     --batch-size "$BATCH_SIZE" \
     --num-workers "$NUM_WORKERS" \
     ${PRETRAINED_BACKBONE:+--pretrained-backbone "$PRETRAINED_BACKBONE"} \
+    --backbone-warmup-epochs "$BACKBONE_WARMUP_EPOCHS" \
+    --backbone-lr-ratio "$BACKBONE_LR_RATIO" \
     $( [ "$COMPILE" = true ] && echo "--compile" )
 
 echo ""
