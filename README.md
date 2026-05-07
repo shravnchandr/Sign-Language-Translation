@@ -1,6 +1,6 @@
 # Isolated Sign Language Recognition
 
-Classifies 250 ASL signs from MediaPipe landmark sequences. Two model architectures are under development: a two-phase Factorized VQ-VAE pipeline and a direct end-to-end AnatomicalConformer.
+Classifies 250 ASL signs from MediaPipe landmark sequences. Two model architectures are under development: a two-phase Factorized VQ-VAE pipeline and a direct end-to-end LandmarkConformer.
 
 ## Architectures
 
@@ -42,7 +42,7 @@ Phase 1 training is fully unsupervised — uses all available datasets including
 
 ---
 
-### Approach 2 — AnatomicalConformer (`research/models/cnn_transformer/`)
+### Approach 2 — LandmarkConformer (`research/models/cnn_transformer/`)
 
 End-to-end supervised classification with optional CTC pre-training on ASL Fingerspelling. Designed for Kaggle/RunPod training.
 
@@ -50,7 +50,7 @@ End-to-end supervised classification with optional CTC pre-training on ASL Finge
 Parquet → build_lmdb.py (normalize_values: nose→shoulder→hip fallback)
   → LMDB (body-relative coordinates, pre-normalized at build time)
   → ASLDataset: Δ1 velocity as frame-delta of raw coordinates
-  → AnatomicalConformer.forward():
+  → LandmarkConformer.forward():
       → HandDominanceModule (reorder by wrist motion energy)
       → WristNormalization (lm0=location, lm1-20=shape)
       → Δ2, Δ5 velocity from body-relative positions
@@ -125,12 +125,12 @@ research/
 │   │       ├── preprocessing.py        # RobustPreprocessor, LandmarkProcessor
 │   │       ├── signer_split.py         # Signer-independent train/val/test split
 │   │       └── vocabulary.py           # Token-to-gloss mapping
-│   ├── cnn_transformer/         # AnatomicalConformer (end-to-end)
+│   ├── cnn_transformer/         # LandmarkConformer (end-to-end)
 │   │   ├── config.py                   # Landmark layout constants, feature dimensions
 │   │   ├── pretrain_fingerspelling.py  # CTC pre-training on ASL Fingerspelling
 │   │   ├── train.py                    # Two-phase training loop
 │   │   ├── model/
-│   │   │   ├── anatomical_conformer.py # Main model
+│   │   │   ├── landmark_conformer.py # Main model
 │   │   │   ├── conformer.py            # ConformerBlock, SinusoidalPositionalEncoding
 │   │   │   ├── normalization.py        # RobustNormalization, WristNormalization
 │   │   │   └── grl.py                  # SignerDiscriminator, ganin_lambda
@@ -160,7 +160,7 @@ data/
 └── WLASL_Landmarks/             # WLASL preprocessed landmarks
 
 run_pipeline_vqvae_seq2seq.sh    # End-to-end VQ-VAE pipeline: Phase 1 → tokenize → Phase 2
-run_pipeline_cnn_transformer.sh  # AnatomicalConformer pipeline: LMDB build → two-phase train
+run_pipeline_cnn_transformer.sh  # LandmarkConformer pipeline: LMDB build → two-phase train
 ```
 
 ---
@@ -230,7 +230,7 @@ PYTHONPATH=research/models uv run python -m vqvae_seq2seq.translation.train_tran
   --epochs 100
 ```
 
-### AnatomicalConformer (RunPod / local)
+### LandmarkConformer (RunPod / local)
 
 ```bash
 # Recommended: downloaded LMDB datasets, skip pre-training
@@ -278,9 +278,9 @@ bash run_pipeline_cnn_transformer.sh --build-lmdb --build-fs-lmdb \
 
 **Robust normalization**: coordinates are made body-relative using a fallback chain — nose → shoulder center → hip center — to handle partially-detected skeletons.
 
-**Hand dominance** (`HandDominanceModule` in both VQ-VAE and AnatomicalConformer): detects the dominant hand from wrist velocity and always places it in the first channel, making the model hand-agnostic by construction. Swap triggers when right-hand energy exceeds left-hand energy — left-handed signers naturally already have dominant hand in the LH slot.
+**Hand dominance** (`HandDominanceModule` in both VQ-VAE and LandmarkConformer): detects the dominant hand from wrist velocity and always places it in the first channel, making the model hand-agnostic by construction. Swap triggers when right-hand energy exceeds left-hand energy — left-handed signers naturally already have dominant hand in the LH slot.
 
-**Multi-scale velocity**: three temporal scales (Δ1/Δ2/Δ5) are fed to the velocity projections. Δ1 is computed in the dataset as frame differences of raw coordinates. Δ2 and Δ5 are computed inside `AnatomicalConformer.forward()` from body-relative positions (post nose-subtraction), so they capture motion relative to the body. All three scales are concatenated per body part before projection, giving the velocity stream the same `d_model` budget as the position stream.
+**Multi-scale velocity**: three temporal scales (Δ1/Δ2/Δ5) are fed to the velocity projections. Δ1 is computed in the dataset as frame differences of raw coordinates. Δ2 and Δ5 are computed inside `LandmarkConformer.forward()` from body-relative positions (post nose-subtraction), so they capture motion relative to the body. All three scales are concatenated per body part before projection, giving the velocity stream the same `d_model` budget as the position stream.
 
 **Multi-scale temporal encoding**: the same sequence is encoded at chunk sizes 4, 8, and 16 to capture fine finger motion, coarse arm motion, and global temporal structure simultaneously.
 

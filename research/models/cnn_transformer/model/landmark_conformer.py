@@ -76,7 +76,7 @@ class HandDominanceModule(nn.Module):
         return x, dom_ratio
 
 
-class AnatomicalConformer(nn.Module):
+class LandmarkConformer(nn.Module):
     def __init__(
         self,
         num_classes,
@@ -92,7 +92,7 @@ class AnatomicalConformer(nn.Module):
         # Offsets are computed dynamically from COORDS_PER_LM, so toggling
         # INCLUDE_DEPTH is safe. Toggling INCLUDE_FACE is NOT safe — face_proj
         # assumes face data is present.
-        assert INCLUDE_FACE, "AnatomicalConformer requires INCLUDE_FACE=True"
+        assert INCLUDE_FACE, "LandmarkConformer requires INCLUDE_FACE=True"
 
         self.hand_dominance = HandDominanceModule()
         self.wrist_norm = WristNormalization()
@@ -217,7 +217,9 @@ class AnatomicalConformer(nn.Module):
     def forward(self, x, mask, grl_lambda: float = 0.0):
         B, T, _ = x.shape
 
-        x, dom_ratio = self.hand_dominance(x)  # reorder; dom_ratio (B,) = rh_energy/total
+        x, dom_ratio = self.hand_dominance(
+            x
+        )  # reorder; dom_ratio (B,) = rh_energy/total
         x = self.wrist_norm(x)  # landmark 0 = location, landmarks 1-20 = shape
 
         # Split position and delta-1 velocity halves (dataset layout: [pos | vel1])

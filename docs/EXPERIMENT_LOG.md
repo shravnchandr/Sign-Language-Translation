@@ -1,4 +1,4 @@
-# Experiment Log — AnatomicalConformer (cnn_transformer)
+# Experiment Log — LandmarkConformer (cnn_transformer)
 
 Tracking every training run, the config used, and the result. Goal: 250-class ASL sign recognition on Google ASL Signs dataset (signer-independent val split).
 
@@ -6,7 +6,7 @@ Tracking every training run, the config used, and the result. Goal: 250-class AS
 
 ---
 
-## Run 001 — Baseline AnatomicalConformer
+## Run 001 — Baseline LandmarkConformer
 **Date:** ~2025-04 (pre-session)  
 **Hardware:** RunPod — NVIDIA A40  
 **Config:** d_model=512, n_layers=6, n_heads=8, dropout=0.1, params=~49M  
@@ -59,7 +59,7 @@ Tracking every training run, the config used, and the result. Goal: 250-class AS
 
 ---
 
-## Run 002 — Regularised AnatomicalConformer
+## Run 002 — Regularised LandmarkConformer
 **Date:** 2026-05-02  
 **Hardware:** RunPod — NVIDIA A40  
 **Config:**

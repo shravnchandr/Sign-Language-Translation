@@ -2,7 +2,7 @@
 Extract MediaPipe Holistic landmarks from ASL video datasets → parquet files.
 
 Supports WLASL and MSASL. Output format matches Google ASL Signs so the
-AnatomicalConformer pipeline can be trained or evaluated on either dataset.
+LandmarkConformer pipeline can be trained or evaluated on either dataset.
 
 Required extras (not in main deps):
     pip install mediapipe opencv-python-headless

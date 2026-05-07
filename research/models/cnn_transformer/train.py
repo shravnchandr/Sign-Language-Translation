@@ -14,7 +14,7 @@ from torch.amp.grad_scaler import GradScaler
 from tqdm import tqdm
 from .data.dataset import get_data_loaders
 from .data.augmentation import AdvancedAugmentation, mixup_batch
-from .model.anatomical_conformer import AnatomicalConformer
+from .model.landmark_conformer import LandmarkConformer
 from .model.grl import ganin_lambda
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -278,7 +278,7 @@ def evaluate_epoch_tta(model, data_loader, criterion):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Train AnatomicalConformer for ASL sign recognition"
+        description="Train LandmarkConformer for ASL sign recognition"
     )
     parser.add_argument(
         "--data-dir",
@@ -393,7 +393,7 @@ def main():
     )
 
     grl_active = args.grl_lambda > 0.0 and n_signers > 0
-    model = AnatomicalConformer(
+    model = LandmarkConformer(
         num_classes=NUM_CLASSES,
         d_model=args.d_model,
         n_heads=args.n_heads,

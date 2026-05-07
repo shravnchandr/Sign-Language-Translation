@@ -1,5 +1,5 @@
 """
-CTC pre-training of AnatomicalConformer on ASL Fingerspelling data.
+CTC pre-training of LandmarkConformer on ASL Fingerspelling data.
 
 Phase 0 of the training pipeline: forces the backbone to learn fine-grained,
 signer-agnostic hand-shape representations (26 letters + digits + symbols)
@@ -35,7 +35,7 @@ from .data.fingerspelling_dataset import (
     collate_ctc,
     load_char_map,
 )
-from .model import AnatomicalConformer
+from .model import LandmarkConformer
 
 # Keys that belong to the backbone (everything that transfers to fine-tuning)
 _NON_BACKBONE_PREFIXES = ("head.", "ctc_head.", "signer_disc.", "cls_token")
@@ -94,7 +94,7 @@ def train(args):
     print(f"Train: {len(train_ds):,}  Val: {len(val_ds):,}")
 
     # ── Model ─────────────────────────────────────────────────────────────────
-    model = AnatomicalConformer(
+    model = LandmarkConformer(
         num_classes=250,  # unused in CTC mode
         d_model=args.d_model,
         n_heads=args.n_heads,
@@ -144,9 +144,16 @@ def train(args):
         train_loss = torch.tensor(0.0, device=device)
         optimizer.zero_grad(set_to_none=True)
 
-        with tqdm(train_loader, desc=f"Epoch {epoch+1:3d}/{args.epochs} [train]",
-                  leave=False) as pbar:
-            for step, (coords, mask, targets, input_lengths, target_lengths) in enumerate(pbar):
+        with tqdm(
+            train_loader, desc=f"Epoch {epoch+1:3d}/{args.epochs} [train]", leave=False
+        ) as pbar:
+            for step, (
+                coords,
+                mask,
+                targets,
+                input_lengths,
+                target_lengths,
+            ) in enumerate(pbar):
                 coords = coords.to(device)
                 mask = mask.to(device)
                 targets = targets.to(device)
@@ -247,7 +254,9 @@ def main():
     p.add_argument("--drop-path-max", type=float, default=0.05)
     # Training
     p.add_argument("--epochs", type=int, default=40)
-    p.add_argument("--patience", type=int, default=10, help="Early stopping patience on val loss")
+    p.add_argument(
+        "--patience", type=int, default=10, help="Early stopping patience on val loss"
+    )
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--accum-steps", type=int, default=4)
     p.add_argument("--lr", type=float, default=3e-4)

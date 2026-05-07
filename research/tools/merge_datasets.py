@@ -1,6 +1,6 @@
 """
 Merge multiple ASL landmark datasets into a single train.csv that the
-AnatomicalConformer training pipeline can consume without code changes.
+LandmarkConformer training pipeline can consume without code changes.
 
 Supported datasets (all optional except Google ASL):
   - Google ASL Signs   (primary, defines the 250-class label space)

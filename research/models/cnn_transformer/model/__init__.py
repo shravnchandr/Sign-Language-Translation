@@ -5,7 +5,7 @@ from .conformer import (
     ConformerBlock,
     SinusoidalPositionalEncoding,
 )
-from .anatomical_conformer import AnatomicalConformer, HandDominanceModule
+from .landmark_conformer import LandmarkConformer, HandDominanceModule
 from .grl import SignerDiscriminator, ganin_lambda
 
 __all__ = [
@@ -14,7 +14,7 @@ __all__ = [
     "ConformerConvModule",
     "ConformerBlock",
     "SinusoidalPositionalEncoding",
-    "AnatomicalConformer",
+    "LandmarkConformer",
     "HandDominanceModule",
     "SignerDiscriminator",
     "ganin_lambda",

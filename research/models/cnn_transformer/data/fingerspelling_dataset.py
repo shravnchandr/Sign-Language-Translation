@@ -1,6 +1,6 @@
 """
 FingerspellingDataset: serves (coords, mask, char_indices) triples for CTC
-pre-training of AnatomicalConformer.
+pre-training of LandmarkConformer.
 
 Reads from the LMDB built by build_fingerspelling_lmdb.py.
 Tensor layout matches ASLDataset: (T, 2*COORD_FEAT) = [positions | Δ1 velocities].

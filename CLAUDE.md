@@ -11,7 +11,7 @@ Two approaches are under active development, both under `research/models/`:
 | Approach | Location | Status |
 |---|---|---|
 | Factorized VQ-VAE → Conformer translator | `research/models/vqvae_seq2seq/` | Primary pipeline |
-| AnatomicalConformer (end-to-end) | `research/models/cnn_transformer/` | Kaggle training target |
+| LandmarkConformer (end-to-end) | `research/models/cnn_transformer/` | Kaggle training target |
 | ST-GCN (baseline) | `research/models/st_gcn/` | Experimental |
 
 ## Commands
@@ -69,7 +69,7 @@ Parquet → LandmarkProcessor → (T, N, 3)
   → FactorizedTokenEmbedding → Conformer → HybridDecoder → 250-class output
 ```
 
-### Approach 2 — AnatomicalConformer (`research/models/cnn_transformer/`)
+### Approach 2 — LandmarkConformer (`research/models/cnn_transformer/`)
 
 End-to-end supervised classification. Optional CTC pre-training on ASL Fingerspelling initialises the backbone before fine-tuning on the 250-class task. Designed for Kaggle training.
 
@@ -110,12 +110,12 @@ End-to-end supervised classification. Optional CTC pre-training on ASL Fingerspe
 | `translation/beam_search.py` | Beam search with CTC prefix scoring |
 | `translation/config.py` | `TranslationConfig` |
 
-### AnatomicalConformer (`research/models/cnn_transformer/`)
+### LandmarkConformer (`research/models/cnn_transformer/`)
 
 | File | Purpose |
 |------|---------|
 | `config.py` | Landmark layout constants, feature dimensions |
-| `model/anatomical_conformer.py` | `AnatomicalConformer` — main model |
+| `model/landmark_conformer.py` | `LandmarkConformer` — main model |
 | `model/conformer.py` | `ConformerBlock`, `SinusoidalPositionalEncoding` |
 | `model/normalization.py` | `WristNormalization` |
 | `model/grl.py` | `SignerDiscriminator`, `ganin_lambda` — GRL signer-invariance |
@@ -140,7 +140,7 @@ End-to-end supervised classification. Optional CTC pre-training on ASL Fingerspe
 | `research/models/st_gcn/st_gcn_model.py` | 106–110 | `edge_importance` parameter is allocated but never used in `forward()`. |
 | `research/models/st_gcn/st_gcn_training.py` | 219–225 | Double-normalizes adjacency matrix: `LandmarkGraph.get_normalized_adjacency()` already normalizes, then chain-edges are added and it's normalized again. |
 | `research/models/cnn_transformer/data/preprocessing.py` | — | ~~BASE_PATH double-prefixing: `frame_stacked_data` prepended `BASE_PATH` to an already-absolute path built by `dataset.py`. Fixed: `pd.read_parquet(file_path)` directly.~~ **Fixed.** |
-| `research/models/cnn_transformer/model/anatomical_conformer.py` | — | ~~Hand dominance swap inverted: `lh_energy > rh_energy` triggered swap when LH was already dominant.~~ **Fixed: `rh_energy > lh_energy`.** |
+| `research/models/cnn_transformer/model/landmark_conformer.py` | — | ~~Hand dominance swap inverted: `lh_energy > rh_energy` triggered swap when LH was already dominant.~~ **Fixed: `rh_energy > lh_energy`.** |
 | `research/models/cnn_transformer/model/normalization.py` | — | ~~`RobustNormalization` mutated input in-place, corrupting TTA source tensors.~~ **Fixed: clones output before writing.** |
 | `research/models/cnn_transformer/data/augmentation.py` | — | ~~`random_flip` double-negated velocity x-coords (two loop passes, each covering full tensor).~~ **Fixed: single pass.** |
 | `research/models/cnn_transformer/data/augmentation.py` | — | ~~`mixup_batch` discarded the shuffled sample's mask.~~ **Fixed: returns `mask \| mask[index]`.** |
@@ -149,11 +149,11 @@ End-to-end supervised classification. Optional CTC pre-training on ASL Fingerspe
 | `research/models/cnn_transformer/train.py` | — | ~~Validation used 5× stochastic TTA, making checkpoint selection noisy.~~ **Fixed: `evaluate_epoch` is deterministic; TTA reserved for final reporting via `evaluate_epoch_tta`.** |
 | `research/models/cnn_transformer/model/conformer.py` | — | ~~Depthwise conv ran over padded positions, leaking zeros into valid boundary frames.~~ **Fixed: conv residual zeroed at padded positions.** |
 | `research/models/cnn_transformer/data/augmentation.py` | — | ~~`mixup_batch` paired lh-dominant with rh-dominant samples, producing ambiguous hand slot assignments when `HandDominanceModule` runs inside the model.~~ **Fixed: dominance-aware pairing shuffles within same-dominance groups.** |
-| `research/models/cnn_transformer/data/preprocessing.py` + `model/anatomical_conformer.py` | — | ~~Double normalization: `normalize_values` zeroed the nose before LMDB, so `RobustNormalization` in the model always fell through to the shoulder-center branch (nose appeared missing).~~ **Fixed: `normalize_values` implements the full nose→shoulder→hip fallback; `RobustNormalization` removed from model.** LMDB must be rebuilt (`_NORM_VERSION` bump auto-invalidates). |
+| `research/models/cnn_transformer/data/preprocessing.py` + `model/landmark_conformer.py` | — | ~~Double normalization: `normalize_values` zeroed the nose before LMDB, so `RobustNormalization` in the model always fell through to the shoulder-center branch (nose appeared missing).~~ **Fixed: `normalize_values` implements the full nose→shoulder→hip fallback; `RobustNormalization` removed from model.** LMDB must be rebuilt (`_NORM_VERSION` bump auto-invalidates). |
 | `research/models/cnn_transformer/train.py` | — | ~~`FocalLoss` used scalar `alpha=0.25` — a 4× global loss scaling, not per-class weighting.~~ **Fixed: inverse-frequency per-class weights from train.csv, mean-normalised, registered as a buffer.** |
 | `research/models/cnn_transformer/train.py` | — | ~~TTA held 5 full-batch logit tensors simultaneously (OOM risk on long sequences).~~ **Fixed: running sum accumulation; only one extra tensor in memory at a time.** |
 | `research/models/cnn_transformer/model/conformer.py` | — | ~~`SinusoidalPositionalEncoding` raised `IndexError` when `T > max_len=512`.~~ **Fixed: on-the-fly PE generation in `forward()` without mutating the registered buffer (thread-safe).** |
-| `research/models/cnn_transformer/config.py` + `model/anatomical_conformer.py` | — | ~~`SELECTED_FACE_INDICES` built by iterating `FACE_LANDMARK_INDICES.values()` — a dict key reordering would silently corrupt the eyebrow/mouth slice in the model.~~ **Fixed: explicit key ordering in config.py + runtime assertion in `AnatomicalConformer.__init__`.** |
+| `research/models/cnn_transformer/config.py` + `model/landmark_conformer.py` | — | ~~`SELECTED_FACE_INDICES` built by iterating `FACE_LANDMARK_INDICES.values()` — a dict key reordering would silently corrupt the eyebrow/mouth slice in the model.~~ **Fixed: explicit key ordering in config.py + runtime assertion in `LandmarkConformer.__init__`.** |
 | `research/models/cnn_transformer/data/dataset.py` | — | ~~LMDB opened with `map_size=1<<40` (1 TiB) on flat files over NAS — caused `lmdb.open()` to hang for 45+ minutes at mmap time.~~ **Fixed: flat-file reads use `os.path.getsize() + 256 MB` as map_size.** |
 | `research/models/cnn_transformer/pretrain_fingerspelling.py` | — | ~~CTC loss computed inside `autocast` (FP16) — underflows with long sequences (max_frames=384).~~ **Fixed: `logits.float().log_softmax(-1)` before `CTCLoss`.** |
 | `research/models/cnn_transformer/pretrain_fingerspelling.py` | — | ~~`scheduler.step()` called unconditionally even when `GradScaler` skipped `optimizer.step()` on NaN/Inf gradients, desynchronising `OneCycleLR`.~~ **Fixed: compare `scaler.get_scale()` before/after to detect skips.** |
@@ -186,9 +186,9 @@ Columns: `frame`, `type`, `landmark_index`, `x`, `y`, `z`
 
 **Normalization fallback chain** (`RobustPreprocessor`, `RobustNormalization`): nose → shoulder center → hip center. Subtracts the origin to make coordinates body-relative. Falls back when nose landmark is missing.
 
-**Multi-scale velocity** (`AnatomicalConformer`): three temporal scales are fed to the velocity projections. Δ1 is computed in `ASLDataset` as frame differences of raw (pre-normalization) coordinates. Δ2 and Δ5 are computed inside `AnatomicalConformer.forward()` from body-relative positions (after `RobustNormalization` subtracts the nose), so they capture velocity relative to body movement. All three scales are concatenated per body part before projection.
+**Multi-scale velocity** (`LandmarkConformer`): three temporal scales are fed to the velocity projections. Δ1 is computed in `ASLDataset` as frame differences of raw (pre-normalization) coordinates. Δ2 and Δ5 are computed inside `LandmarkConformer.forward()` from body-relative positions (after `RobustNormalization` subtracts the nose), so they capture velocity relative to body movement. All three scales are concatenated per body part before projection.
 
-**Hand dominance** (`HandDominanceModule`): detects dominant hand from wrist velocity; reorders left/right channels so dominant hand is always in the first (LH) slot before projection. Implemented in both `AnatomicalConformer` and the VQ-VAE pipeline. Swap triggers when right-hand energy exceeds left-hand energy — left-handed signers naturally already have dominant hand in the LH slot.
+**Hand dominance** (`HandDominanceModule`): detects dominant hand from wrist velocity; reorders left/right channels so dominant hand is always in the first (LH) slot before projection. Implemented in both `LandmarkConformer` and the VQ-VAE pipeline. Swap triggers when right-hand energy exceeds left-hand energy — left-handed signers naturally already have dominant hand in the LH slot.
 
 **Soft diversity loss** (`EMAVectorQuantizer`): computed from the distance matrix using `softmax(-distances)` before the argmin step. Gradients flow through `z_flat` to the encoder, pushing it toward spread-out representations. The codebook (EMA buffer) is detached — only the encoder receives this gradient.
 

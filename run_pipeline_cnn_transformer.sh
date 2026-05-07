@@ -1,5 +1,5 @@
 #!/bin/bash
-# AnatomicalConformer training pipeline
+# LandmarkConformer training pipeline
 # Stages:
 #   0. Fingerspelling LMDB build + CTC pre-training (optional)
 #   1. ASL LMDB build
@@ -97,7 +97,7 @@ fi
 mkdir -p "$CACHE_DIR" "$CHECKPOINT_DIR"
 
 echo "========================================"
-echo "AnatomicalConformer Pipeline"
+echo "LandmarkConformer Pipeline"
 echo "  Data dir:           $DATA_DIR"
 echo "  Cache dir:          $CACHE_DIR"
 echo "  LMDB path:          $LMDB_PATH"
@@ -179,7 +179,7 @@ fi
 
 # ── Stage 2: Fine-tuning ──────────────────────────────────────────────────────
 echo ""
-echo "[Train] Running two-phase AnatomicalConformer training..."
+echo "[Train] Running two-phase LandmarkConformer training..."
 uv run python -m cnn_transformer.train \
     --data-dir "$DATA_DIR" \
     --cache-dir "$CACHE_DIR" \

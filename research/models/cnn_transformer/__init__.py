@@ -1,3 +1,3 @@
-from .model.anatomical_conformer import AnatomicalConformer
+from .model.landmark_conformer import LandmarkConformer
 
-__all__ = ["AnatomicalConformer"]
+__all__ = ["LandmarkConformer"]
