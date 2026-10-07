@@ -52,3 +52,10 @@ lightning_logs/
 screenshot.png
 external/
 WLASL_Repo/
+
+run_commands.sh
+
+# Claude Code — agent worktrees and personal settings stay local.
+# Shared config (.claude/settings.json, commands/, agents/, skills/) can be committed.
+.claude/worktrees/
+.claude/settings.local.json
