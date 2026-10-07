@@ -203,13 +203,31 @@ backbone at the same `--grl-lambda`; watch disc acc vs chance and sign val acc.
 - All fixes from "Diagnosis Before Run 004" (rigid shift, no loop noise, full-mirror canonicalisation, no flip, no time-stretch crop, GRL λ once, mixup-weighted train acc)
 - d_model=256, n_layers=4, n_heads=4, ~6.5M params; Phase 1 only, 80 epochs, `--num-workers 8`, fp16 AMP
 
-**Timing:** ~16–17 it/s after a cold-cache first epoch (4.6 it/s) — ~1m20s/epoch.
+**Timing:** ~16–17 it/s after a cold-cache first epoch (4.6 it/s) — avg 1m23s/epoch.
+Early-stopped at epoch 70 (20 epochs without improvement after the NaN); total 1h 37m.
 
 **Result:**
 - Best val acc (deterministic): **0.7590** (epoch 50) — above Run 002's 0.7555 (within 3-signer noise)
 - Train acc at epoch 50: 0.75 (mixup-weighted, now trustworthy) — no overfitting; train < val under heavy aug
 - Disc acc ~0.10 vs 0.056 chance — stable, ~2× chance as in Run 003
-- TTA: _pending — run still finishing_
+- Best val acc (TTA): **0.7610**
+
+**Curve** (val acc still rising when the NaN hit — the LR-annealing phase where Run 002
+peaked, epoch 74, was lost):
+
+| Epoch | Train acc | Val acc | Disc acc |
+|------:|----------:|--------:|---------:|
+| 5  | 0.171 | 0.330 | 0.106 |
+| 10 | 0.418 | 0.561 | 0.112 |
+| 20 | 0.575 | 0.659 | 0.109 |
+| 30 | 0.657 | 0.729 | 0.107 |
+| 40 | 0.705 | 0.739 | 0.104 |
+| 45 | 0.732 | 0.741 | 0.100 |
+| **50** | 0.752 | **0.759** | 0.096 |
+| 55–70 | 0.767 → 0.794 | 0.0042 (NaN-poisoned BN) | 0.098 → 0.094 |
+
+NaN-loss epochs: 55 and 60. Disc acc trended down 0.112 → 0.094 (chance 0.056): GRL is
+slowly working. Train ≈ val at epoch 50 — no overfitting.
 
 **Failure at epoch 55:** one batch produced a NaN loss under fp16 AMP. GradScaler skipped
 the step (weights intact, train acc kept rising to 0.78) but the NaN forward had already

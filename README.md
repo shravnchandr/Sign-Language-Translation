@@ -9,9 +9,9 @@ All runs use a signer-independent val split (no test signer seen during training
 | Run | Model | Val Accuracy | Key changes |
 |-----|-------|-------------|-------------|
 | 001 | LandmarkConformer (d_model=512, 49M) | 0.7462 | baseline |
-| 002 | LandmarkConformer (d_model=256, 6.5M) | **0.7555** | smaller model, GRL, stochastic depth, dominance-aware mixup |
+| 002 | LandmarkConformer (d_model=256, 6.5M) | 0.7555 | smaller model, GRL, stochastic depth, dominance-aware mixup |
 | 003 | + multi-scale velocity (Δ1/Δ2/Δ5), face split, depth | 0.7432 | slight regression — more features need more epochs to converge |
-| 004 | + geometry stream (joint angles + fingertip distances), normalization fix | TBD | next RunPod run |
+| 004 | + geometry stream, hand presence, normalization fix, augmentation / handedness / GRL fixes | **0.7590** (TTA 0.7610) | best at epoch 50; a NaN batch at epoch 55 broke eval for the remaining epochs (fixed for Run 005) |
 | — | Factorized VQ-VAE + Conformer | WIP | — |
 | — | ST-GCN | — | baseline, not yet run |
 
