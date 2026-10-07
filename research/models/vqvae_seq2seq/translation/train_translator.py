@@ -111,9 +111,12 @@ class Trainer:
             landmarks = batch["landmarks"].to(self.device)
             mask = batch["mask"].to(self.device)
             indices = self.vqvae.tokenize(landmarks, mask)
-            # Per-sample token lengths: divide frame counts by VQ-VAE chunk size (8).
+            # Per-sample token lengths: divide frame counts by the VQ-VAE chunk size.
             # batch["lengths"] here is frame counts from collate_vqvae.
-            indices["_lengths"] = (batch["lengths"].to(self.device) // 8).clamp(min=1)
+            chunk = self.vqvae.config.base_chunk_size
+            indices["_lengths"] = (batch["lengths"].to(self.device) // chunk).clamp(
+                min=1
+            )
             return indices
 
     def _prepare_targets(
