@@ -73,6 +73,9 @@ def train_epoch(
 ):
     model.train()
     train_loss, correct, total = 0, 0, 0
+    # Logged separately: the adversarial term (≈ ln(n_signers) at chance) jumps
+    # the total as the GRL ramps on, which reads like divergence if summed.
+    sign_sum, adv_sum, adv_n = 0.0, 0.0, 0
     disc_correct, disc_total = 0, 0
     optimizer.zero_grad(set_to_none=True)
 
@@ -137,6 +140,7 @@ def train_epoch(
             x, y_a, y_b, lam, mask, mixup_idx = mixup_batch(x, y, mask)
 
         bn_snapshot = [b.detach().clone() for b in bn_buffers]
+        adv_loss = None
         with autocast(device_type=device.type, dtype=amp_dtype, enabled=use_amp):
             use_grl = grl_lam > 0.0 and n_signers > 0
             if use_grl:
@@ -199,6 +203,11 @@ def train_epoch(
                 scheduler.step()
 
         batch_loss = loss.item()
+        batch_sign = sign_loss.item()
+        sign_sum += batch_sign
+        if adv_loss is not None:
+            adv_sum += adv_loss.item()
+            adv_n += 1
         # Under mixup the target is lam·y_a + (1−lam)·y_b; scoring against y_a
         # alone roughly halves reported accuracy with Beta(0.2, 0.2).
         pred = logits.argmax(dim=1)
@@ -213,9 +222,11 @@ def train_epoch(
 
         if idx % 20 == 0:
             postfix = {
-                "loss": f"{batch_loss:.4f}",
+                "sign": f"{batch_sign:.4f}",
                 "acc": f"{batch_correct / y_a.size(0):.4f}",
             }
+            if adv_loss is not None:
+                postfix["adv"] = f"{adv_loss.item():.4f}"
             if disc_total > 0:
                 postfix["disc_acc"] = f"{disc_correct / disc_total:.4f}"
             pbar.set_postfix(postfix)
@@ -235,9 +246,22 @@ def train_epoch(
             f"(BN stats restored, no backward)",
             flush=True,
         )
-    disc_acc = disc_correct / disc_total if disc_total > 0 else None
     n_ok = max(len(data_loader) - nonfinite, 1)
-    return train_loss / n_ok, correct / max(total, 1), disc_acc
+    return {
+        "loss": train_loss / n_ok,  # sign + adv
+        "sign_loss": sign_sum / n_ok,
+        "adv_loss": adv_sum / adv_n if adv_n else None,
+        "acc": correct / max(total, 1),
+        "disc_acc": disc_correct / disc_total if disc_total > 0 else None,
+    }
+
+
+def _train_str(stats: dict) -> str:
+    """Epoch summary: sign and adversarial losses shown separately."""
+    out = f"Sign Loss: {stats['sign_loss']:.4f}"
+    if stats["adv_loss"] is not None:
+        out += f" | Adv Loss: {stats['adv_loss']:.4f}"
+    return out + f" | Train Acc: {stats['acc']:.4f}"
 
 
 @torch.no_grad()
@@ -561,7 +585,7 @@ def main():
 
         for epoch_idx in range(warmup_epochs):
             t_epoch = time.perf_counter()
-            t_loss, t_acc, _ = train_epoch(
+            tr = train_epoch(
                 model, train_loader, wu_optimizer, criterion, scaler,
                 accumulation_steps=4, use_mixup=True, heavy_augment=True,
                 scheduler=wu_scheduler, epoch=epoch_idx,
@@ -573,7 +597,7 @@ def main():
             p1_epochs_run += 1
             print(
                 f"Epoch {epoch_idx + 1:3d}/{NUM_EPOCHS_PHASE1} [warmup] | "
-                f"Train Loss: {t_loss:.4f} | Train Acc: {t_acc:.4f} | "
+                f"{_train_str(tr)} | "
                 f"Val Acc: {v_acc:.4f} | "
                 f"LR: {wu_optimizer.param_groups[0]['lr']:.2e} | "
                 f"Time: {_fmt_time(epoch_secs)}"
@@ -650,7 +674,7 @@ def main():
     # ── Main Phase 1 loop ─────────────────────────────────────────────────────
     for epoch_idx in range(p1_epochs_run, NUM_EPOCHS_PHASE1):
         t_epoch = time.perf_counter()
-        t_loss, t_acc, disc_acc = train_epoch(
+        tr = train_epoch(
             model,
             train_loader,
             optimizer,
@@ -668,10 +692,10 @@ def main():
         v_loss, v_acc = evaluate_epoch(model, test_loader, criterion)
         epoch_secs = time.perf_counter() - t_epoch
         p1_epochs_run += 1
-        disc_str = f" | Disc Acc: {disc_acc:.4f}" if disc_acc is not None else ""
+        disc_str = f" | Disc Acc: {tr['disc_acc']:.4f}" if tr["disc_acc"] is not None else ""
         print(
             f"Epoch {epoch_idx + 1:3d}/{NUM_EPOCHS_PHASE1} | "
-            f"Train Loss: {t_loss:.4f} | Train Acc: {t_acc:.4f} | "
+            f"{_train_str(tr)} | "
             f"Val Acc: {v_acc:.4f} | LR: {optimizer.param_groups[0]['lr']:.2e} | "
             f"Time: {_fmt_time(epoch_secs)}" + disc_str
         )
@@ -716,7 +740,7 @@ def main():
 
     for p2_epoch in range(NUM_EPOCHS_PHASE2):
         t_epoch = time.perf_counter()
-        t_loss, t_acc, disc_acc = train_epoch(
+        tr = train_epoch(
             model,
             train_loader,
             optimizer,
@@ -735,10 +759,10 @@ def main():
         )
         v_loss, v_acc = evaluate_epoch(model, test_loader, criterion)
         epoch_secs = time.perf_counter() - t_epoch
-        disc_str = f" | Disc Acc: {disc_acc:.4f}" if disc_acc is not None else ""
+        disc_str = f" | Disc Acc: {tr['disc_acc']:.4f}" if tr["disc_acc"] is not None else ""
         print(
             f"P2 Epoch {p2_epoch + 1:3d}/{NUM_EPOCHS_PHASE2} | "
-            f"Train Loss: {t_loss:.4f} | Train Acc: {t_acc:.4f} | "
+            f"{_train_str(tr)} | "
             f"Val Acc: {v_acc:.4f} | LR: {optimizer.param_groups[0]['lr']:.2e} | "
             f"Time: {_fmt_time(epoch_secs)}" + disc_str,
             flush=True,
