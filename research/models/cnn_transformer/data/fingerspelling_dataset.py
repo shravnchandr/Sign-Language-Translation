@@ -3,7 +3,7 @@ FingerspellingDataset: serves (coords, mask, char_indices) triples for CTC
 pre-training of LandmarkConformer.
 
 Reads from the LMDB built by build_fingerspelling_lmdb.py.
-Tensor layout matches ASLDataset: (T, 2*COORD_FEAT) = [positions | Δ1 velocities].
+Tensor layout matches ASLDataset: (T, IN_FEAT) = [positions | Δ1 velocities | hand presence].
 """
 
 import io
@@ -16,6 +16,7 @@ import torch
 from torch.utils.data import Dataset
 
 from .dataset import _open_lmdb_env  # reuse the fork-safe env cache
+from .preprocessing import hand_presence
 
 
 class FingerspellingDataset(Dataset):
@@ -23,7 +24,7 @@ class FingerspellingDataset(Dataset):
     Each sample is one fingerspelling phrase sequence.
 
     Returns:
-      coords:       (T, 2*COORD_FEAT)  float32  [positions | Δ1 velocities]
+      coords:       (T, IN_FEAT)       float32  [positions | Δ1 velocities | presence]
       mask:         (T,)               bool     True = valid frame
       char_indices: List[int]                   CTC target character indices
     """
@@ -77,18 +78,22 @@ class FingerspellingDataset(Dataset):
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, List[int]]:
         sid = self.sequence_ids[idx]
         coords = self._load_coords(sid)  # (T, COORD_FEAT)
+        # The FS LMDB stores missing hands as 0 per frame; this flags them and
+        # holds the last detection through gaps, matching ASLDataset.
+        coords, presence = hand_presence(coords)  # presence: (T, 2)
 
         # Temporal downsampling to max_frames (same as ASLDataset)
         if coords.shape[0] > self.max_frames:
             idxs = torch.linspace(0, coords.shape[0] - 1, self.max_frames).long()
             coords = coords[idxs]
+            presence = presence[idxs]
 
         T = coords.shape[0]
 
         # Δ1 velocity (computed after downsampling so it's consistent)
         vel = torch.zeros_like(coords)
         vel[1:] = coords[1:] - coords[:-1]
-        coords = torch.cat([coords, vel], dim=-1)  # (T, 2*COORD_FEAT)
+        coords = torch.cat([coords, vel, presence], dim=-1)  # (T, IN_FEAT)
 
         mask = torch.ones(T, dtype=torch.bool)
         char_indices = self._encode_phrase(self.phrases[idx])
@@ -107,7 +112,7 @@ def collate_ctc(
     Pad a batch of variable-length sequences for CTC training.
 
     Returns:
-      coords:         (B, T_max, 2*COORD_FEAT)
+      coords:         (B, T_max, IN_FEAT)
       mask:           (B, T_max)  bool
       targets:        (sum(target_lengths),)  concatenated char indices
       input_lengths:  (B,)  valid frame counts

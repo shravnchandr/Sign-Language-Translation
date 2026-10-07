@@ -162,7 +162,39 @@ Tracking every training run, the config used, and the result. Goal: 250-class AS
 
 ---
 
-## Run 004 — Geometry Stream + Normalization Fix (next RunPod run)
+## Diagnosis Before Run 004 — Augmentation & Canonicalization Bugs
+**Date:** 2026-10-06
+
+The Run 003 "information ceiling" conclusion (d_model 256 ≈ 512) is also consistent with a
+**corrupted-input ceiling**: several augmentations destroyed the fine hand-shape signal the
+model needs. Measured on real MediaPipe hands (fingerspelling shard, ~91k hand frames):
+finger segment ≈ 0.053, per-frame motion ≈ 0.011, joint-angle-cosine spread across hand
+shapes ≈ 0.28.
+
+| Issue | Measured effect | Fix |
+|-------|-----------------|-----|
+| `augment_sample` shift was per feature column (±0.02 per joint, not rigid) | joint-angle cos changed by 0.22 (≈ 80% of natural spread), 50% of samples | One rigid offset per axis |
+| Train-loop noise σ=0.01 on every feature, every frame | joint-angle cos changed by 0.19; noise ≈ entire Δ1 velocity signal | Removed (σ=3e-3 dataset noise before velocity kept → 0.045) |
+| `HandDominanceModule` swapped slots without mirroring | Dominant slot mixed left- and right-hand anatomy (and palm normal sign) across signers | Full horizontal mirror via `MIRROR_PERM` |
+| `random_flip` swapped hands only | Pose limbs / eyebrows / lip corners not mirrored → impossible training poses never seen at val | Removed — canonicalization mirrors every input, so a flip is undone except on near-ties |
+| Never-detected hand stored as 0 = nose origin; FS LMDB writes 0 per missing frame | Missing hand indistinguishable from a hand at the face; hands missing in 30–70% of frames | Per-frame presence flags (`hand_presence`, derived from stored data — no LMDB rebuild) fed to `dist_proj`; FS gaps held like ASL |
+| `time_stretch` cropped back to T | Last 10–23% of nearly every sign removed whenever stretch > 1 | Return longer batch |
+| GRL λ applied twice | Backbone got −λ² = −0.01 (not −0.1) → disc acc 2× chance in Run 003 | `loss = sign_loss + adv_loss` |
+| Train acc scored vs `y_a` under mixup | Logged ~0.42 was ≈ half the real value — "no overfitting" conclusion unverified | Mixup-weighted accuracy |
+
+**Evaluation caveat:** the GroupShuffleSplit val set is only **3 signers** (2044, 37779, 53618;
+14,248 samples). Run-to-run differences of ~1 pt (0.7555 vs 0.7432) are within signer-sampling
+noise. The 0.8929 Kaggle score is a hidden-test-set (ensemble) number, not directly comparable.
+
+**Re-run implications:** canonicalization and the presence inputs change the input
+distribution — existing `backbone_best.pth` checkpoints should be re-pre-trained (an old
+backbone still loads: `dist_proj` changed shape and is re-initialised).
+LMDBs do **not** need rebuilding. GRL is now ~10× stronger on the
+backbone at the same `--grl-lambda`; watch disc acc vs chance and sign val acc.
+
+---
+
+## Run 004 — Geometry Stream + Normalization Fix + Augmentation Fixes (next RunPod run)
 **Config changes vs Run 003:**
 - Geometry stream added (joint angles + fingertip distances)
 - Proper preprocessing normalization (nose→shoulder→hip fallback)

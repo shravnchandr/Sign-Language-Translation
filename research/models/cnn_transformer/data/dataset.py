@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader, Dataset, Sampler
 from typing import Dict, List, Optional, Tuple
 from sklearn.model_selection import GroupShuffleSplit, train_test_split
 from .augmentation import augment_sample
-from .preprocessing import frame_stacked_data
+from .preprocessing import frame_stacked_data, hand_presence
 from ._cache_keys import (
     CACHE_VERSION,
     lmdb_key as _lmdb_key,
@@ -248,12 +248,17 @@ class ASLDataset(Dataset):
         coords = self._load_coords(idx)  # (T, D_pos)
         label = int(self.df.iloc[idx]["sign"])
 
+        # Presence must be read before augmentation noise breaks the exact
+        # repeats that mark filled frames.
+        coords, presence = hand_presence(coords)  # presence: (T, 2)
+
         if self.augment:
             coords = torch.tensor(augment_sample(coords.numpy()), dtype=torch.float32)
 
         if coords.shape[0] > self.max_frames:
             idxs = torch.linspace(0, coords.shape[0] - 1, self.max_frames).long()
             coords = coords[idxs]
+            presence = presence[idxs]
 
         vel = torch.zeros_like(coords)
         vel[1:] = coords[1:] - coords[:-1]
@@ -263,7 +268,7 @@ class ASLDataset(Dataset):
             pid = str(self.df.iloc[idx]["participant_id"])
             signer_id = self.signer_to_id.get(pid, -1)
 
-        return torch.cat([coords, vel], dim=-1), label, signer_id  # (T, 2*D_pos)
+        return torch.cat([coords, vel, presence], dim=-1), label, signer_id  # (T, IN_FEAT)
 
 
 def collate_batch(batch):

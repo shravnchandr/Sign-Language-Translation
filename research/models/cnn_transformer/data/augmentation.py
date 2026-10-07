@@ -6,7 +6,7 @@ from ..config import (
     COORD_FEAT,
     LH_START,
     RH_START,
-    N_LH,
+    PRESENCE_START,
     FINGER_LM_RANGES,
     FINGER_COORD_SLICES,
 )
@@ -19,14 +19,26 @@ def augment_sample(
     if np.random.random() > 0.5:
         video_coordinates += np.random.normal(0, noise_std, video_coordinates.shape)
     if np.random.random() > 0.5:
-        video_coordinates += np.random.uniform(
-            -spatial_shift, spatial_shift, (1, video_coordinates.shape[1])
-        )
+        # One rigid offset per axis, shared by every landmark. A per-column
+        # offset would move each joint independently and distort hand shape
+        # (±0.02 is ~40% of a finger segment).
+        T, D = video_coordinates.shape
+        shift = np.random.uniform(-spatial_shift, spatial_shift, COORDS_PER_LM)
+        video_coordinates = (
+            video_coordinates.reshape(T, -1, COORDS_PER_LM) + shift
+        ).reshape(T, D)
     return video_coordinates
 
 
 class AdvancedAugmentation:
-    """Advanced augmentation strategies for landmarks."""
+    """Advanced augmentation strategies for landmarks.
+
+    Batch tensors are [pos | vel | presence]; geometric transforms touch only
+    the coordinate channels (:PRESENCE_START), never the presence flags.
+
+    There is no mirror-flip: HandDominanceModule mirrors every right-dominant
+    input inside the model, which would undo a flip on all but near-tie samples.
+    """
 
     @staticmethod
     def temporal_cropping(x, mask, min_ratio=0.7, max_ratio=0.95):
@@ -43,27 +55,10 @@ class AdvancedAugmentation:
         return x_cropped, mask_cropped
 
     @staticmethod
-    def random_flip(x, probability=0.3):
-        """Negate all x-coords and swap left/right hand blocks for a mirror image."""
-        if np.random.random() >= probability:
-            return x
-        x_flipped = x.clone()
-        # One pass with step=COORDS_PER_LM covers all x-coords across the full
-        # [position | velocity] tensor; a second pass would double-negate velocity.
-        x_flipped[..., ::COORDS_PER_LM] = -x_flipped[..., ::COORDS_PER_LM]
-        lh_size = N_LH * COORDS_PER_LM
-        for half in (0, COORD_FEAT):
-            lh_s = half + LH_START
-            rh_s = half + RH_START
-            lh_chunk = x_flipped[..., lh_s : lh_s + lh_size].clone()
-            rh_chunk = x_flipped[..., rh_s : rh_s + lh_size].clone()
-            x_flipped[..., lh_s : lh_s + lh_size] = rh_chunk
-            x_flipped[..., rh_s : rh_s + lh_size] = lh_chunk
-        return x_flipped
-
-    @staticmethod
     def gaussian_noise(x, std=0.01):
-        return x + torch.randn_like(x) * std
+        x = x.clone()
+        x[..., :PRESENCE_START] += torch.randn_like(x[..., :PRESENCE_START]) * std
+        return x
 
     @staticmethod
     def temporal_interpolation(x, mask):
@@ -104,9 +99,9 @@ class AdvancedAugmentation:
         if new_len < T:
             x_stretched = F.pad(x_stretched, (0, 0, 0, T - new_len))
             mask_stretched = F.pad(mask_stretched, (0, T - new_len))
-        else:
-            x_stretched = x_stretched[:, :T, :]
-            mask_stretched = mask_stretched[:, :T]
+        # Stretching (new_len > T) returns a longer batch rather than cropping
+        # back to T: BucketBatchSampler makes most samples ~T long, so cropping
+        # would cut the final 10–23% of nearly every sign.
         return x_stretched, mask_stretched
 
     @staticmethod
@@ -124,7 +119,10 @@ class AdvancedAugmentation:
     @staticmethod
     def spatial_rotation(x, max_angle=15):
         """Per-sample z-axis rotation via batched 2×2 matmul (no Python coord loop)."""
-        B, T, D = x.shape
+        B, T, _ = x.shape
+        presence = x[..., PRESENCE_START:]
+        x = x[..., :PRESENCE_START]
+        D = PRESENCE_START
         angles = torch.tensor(
             np.radians(np.random.uniform(-max_angle, max_angle, B)),
             dtype=x.dtype,
@@ -145,10 +143,10 @@ class AdvancedAugmentation:
         # Batched matmul: rot[:, None, None] is (B,1,1,2,2), xy[..., None] is (B,T,K,2,1)
         xy_rot = (rot[:, None, None] @ xy.unsqueeze(-1)).squeeze(-1)  # (B, T, K, 2)
         if COORDS_PER_LM == 2:
-            return xy_rot.reshape(B, T, D)
+            return torch.cat([xy_rot.reshape(B, T, D), presence], dim=-1)
         x_lm_out = x_lm.clone()
         x_lm_out[..., :2] = xy_rot
-        return x_lm_out.reshape(B, T, D)
+        return torch.cat([x_lm_out.reshape(B, T, D), presence], dim=-1)
 
     @staticmethod
     def finger_dropout_batch(x, sample_prob=0.5, dropout_prob=0.25):
@@ -168,7 +166,9 @@ class AdvancedAugmentation:
 
     @staticmethod
     def random_scale(x, min_scale=0.9, max_scale=1.1):
-        return x * np.random.uniform(min_scale, max_scale)
+        x = x.clone()
+        x[..., :PRESENCE_START] *= np.random.uniform(min_scale, max_scale)
+        return x
 
 
 def mixup_batch(x, y, mask, alpha=0.2):

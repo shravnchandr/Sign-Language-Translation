@@ -86,17 +86,13 @@ def train_epoch(
         B, T, D = x.shape
 
         # --- Per-sample augmentation (each sample gets an independent decision) ---
+        # No mirror-flip: the model's HandDominanceModule mirrors every
+        # right-dominant input, which would undo it on all but near-ties.
 
-        if heavy_augment:
-            # Flip: compute one flipped copy of the whole batch, then select per sample
-            flip_sel = torch.rand(B, device=x.device) > 0.5
-            if flip_sel.any():
-                x_flipped = AdvancedAugmentation.random_flip(x, probability=1.0)
-                x = torch.where(flip_sel[:, None, None], x_flipped, x)
-
-        # Noise: per-sample gate; randn_like already generates independent noise per element
-        noise_gate = (torch.rand(B, 1, 1, device=x.device) > 0.5).float()
-        x = x + torch.randn_like(x) * 0.01 * noise_gate
+        # No extra coordinate noise here: ASLDataset.augment_sample already adds
+        # σ=3e-3 noise *before* velocity is computed. A further σ=0.01 per-frame
+        # term matched the whole Δ1 velocity signal (~0.01/frame) and shifted
+        # joint-angle cosines by ~0.19 vs ~0.28 natural spread across hand shapes.
 
         # temporal_interpolation writes in-place; x is already owned (cloned above)
         x, mask = AdvancedAugmentation.temporal_interpolation(x, mask)
@@ -150,7 +146,10 @@ def train_epoch(
                         adv_loss = F.cross_entropy(
                             signer_logits[valid], signer_ids[valid]
                         )
-                    loss = sign_loss + grl_lam * adv_loss
+                    # grad_reverse already scales the backbone gradient by
+                    # grl_lam; weighting adv_loss by it again would give the
+                    # backbone −λ² and slow the discriminator by λ.
+                    loss = sign_loss + adv_loss
                     disc_correct += (
                         (signer_logits[valid].argmax(dim=1) == signer_ids[valid])
                         .sum()
@@ -174,7 +173,14 @@ def train_epoch(
                 scheduler.step()
 
         batch_loss = loss.item()
-        batch_correct = (logits.argmax(dim=1) == y_a).sum().item()
+        # Under mixup the target is lam·y_a + (1−lam)·y_b; scoring against y_a
+        # alone roughly halves reported accuracy with Beta(0.2, 0.2).
+        pred = logits.argmax(dim=1)
+        batch_correct = (pred == y_a).float().sum().item()
+        if use_mixup and y_b is not None:
+            batch_correct = (
+                lam * batch_correct + (1 - lam) * (pred == y_b).float().sum().item()
+            )
         train_loss += batch_loss
         correct += batch_correct
         total += y_a.size(0)
@@ -214,9 +220,7 @@ def predict_with_tta(model, x, mask, n_augmentations=5):
         x_aug = x_orig.clone()
         mask_aug = mask.clone()
         if np.random.random() > 0.5:
-            x_aug = AdvancedAugmentation.random_flip(x_aug, probability=1.0)
-        if np.random.random() > 0.5:
-            x_aug = AdvancedAugmentation.gaussian_noise(x_aug, std=0.005)
+            x_aug = AdvancedAugmentation.gaussian_noise(x_aug, std=0.001)
         if np.random.random() > 0.5:
             B_tta, T_tta, D_tta = x_aug.shape
             new_len = min(int(T_tta * np.random.uniform(0.9, 1.1)), T_tta)
@@ -302,7 +306,11 @@ def main():
         help="Epochs for Phase 1 (heavy augmentation)",
     )
     parser.add_argument(
-        "--phase2-epochs", type=int, default=20, help="Epochs for Phase 2 (fine-tuning)"
+        "--phase2-epochs",
+        type=int,
+        default=0,
+        help="Epochs for Phase 2 cosine warmdown (0 = skip). Off by default: it "
+        "never beat the Phase 1 best in Runs 002/003 (LR jumps back to 1e-4).",
     )
     parser.add_argument(
         "--patience",
@@ -403,12 +411,24 @@ def main():
         n_signers=n_signers if grl_active else 0,
     ).to(device)
 
+    missing: list = []
     if args.pretrained_backbone:
         ckpt = torch.load(
             args.pretrained_backbone, map_location="cpu", weights_only=True
         )
+        # strict=False still raises on shape mismatches (e.g. a backbone saved
+        # before dist_proj gained the presence inputs). Drop those tensors so
+        # they are re-initialised and treated as new head params below.
+        own = model.state_dict()
+        reshaped = [
+            k for k, v in ckpt.items() if k in own and own[k].shape != v.shape
+        ]
+        for k in reshaped:
+            del ckpt[k]
         missing, unexpected = model.load_state_dict(ckpt, strict=False)
         print(f"Loaded pre-trained backbone from {args.pretrained_backbone}")
+        if reshaped:
+            print(f"  Re-initialised (shape changed since pre-training): {reshaped}")
         if missing:
             print(f"  Missing keys (expected — new head/cls_token): {len(missing)}")
         if unexpected:
@@ -437,16 +457,14 @@ def main():
     _weights = _weights / _weights.mean()
     class_weights = torch.tensor(_weights).to(device)
     criterion = FocalLoss(class_weights=class_weights)
-    # Head params: new layers not present in the pre-trained backbone.
-    # Backbone params: everything else (conformer blocks, projections, PE).
-    # Used to freeze backbone during warmup and set differential LR after.
-    _HEAD_PREFIXES = (
-        "head.", "cls_token", "signer_disc.",
-        "lh_geo_proj.", "rh_geo_proj.", "feat_fuse.",
-    )
+    # Head params: whatever the pre-trained checkpoint did not provide (always
+    # head/cls_token/signer_disc; plus any layer added after the backbone was
+    # saved). Backbone params: everything that was loaded. Used to freeze the
+    # backbone during warmup and set differential LR after.
+    _new_params = set(missing)
 
     def _is_head(name: str) -> bool:
-        return any(name.startswith(p) for p in _HEAD_PREFIXES)
+        return name.removeprefix("_orig_mod.") in _new_params
 
     warmup_epochs = (
         min(args.backbone_warmup_epochs, NUM_EPOCHS_PHASE1)

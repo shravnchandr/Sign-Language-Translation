@@ -11,6 +11,9 @@ from ..config import (
     RH_START,
     FACE_START,
     INCLUDE_FACE,
+    IN_FEAT,
+    MIRROR_PERM,
+    PRESENCE_START,
     N_FACE,
     N_FACE_EYEBROW,
     N_FACE_MOUTH,
@@ -19,45 +22,40 @@ from ..config import (
 
 class HandDominanceModule(nn.Module):
     """
-    Reorder left/right hand channels so the dominant hand (higher wrist motion
-    energy) always maps to the first hand slot before projection.
+    Canonicalise handedness: horizontally mirror any sequence whose right-hand
+    slot moves more, so the dominant hand always arrives in the first (LH) slot
+    with the same anatomy.
 
-    This makes the model hand-agnostic: a left-handed signer doing "Hello" and
-    a right-handed signer doing "Hello" both arrive at dominant_proj with the
-    same semantics, halving the effective learning burden for one-handed signs.
-
-    The LH↔RH swap is expressed as a precomputed gather permutation applied in
-    a single indexing op. This is robust to any future change in landmark block
-    layout — no manual slice-pair bookkeeping required.
+    A slot swap alone is not enough: a right hand moved into the LH slot is
+    still a mirror-image hand shape on the other side of the body, so lh_proj
+    would see two distributions for every one-handed sign, and pose/eyebrow
+    landmarks would stay un-mirrored. Mirroring (negate x + swap every bilateral
+    landmark via MIRROR_PERM) maps a right-dominant signer exactly onto a
+    left-dominant one. The presence flags are swapped with their hands. Because
+    every input is canonicalised here, a mirror-flip augmentation would be
+    undone for all but near-tie sequences, so training uses none.
     """
 
     def __init__(self):
         super().__init__()
-        # Build a (2*COORD_FEAT,) permutation where:
-        #   output[:, :, LH_START:POSE_START]  ← input[:, :, RH_START:FACE_START]
-        #   output[:, :, RH_START:FACE_START]  ← input[:, :, LH_START:POSE_START]
-        # All other feature indices remain identity-mapped.
-        D = 2 * COORD_FEAT
-        perm = torch.arange(D)
-        for half in (0, COORD_FEAT):
-            perm[half + LH_START : half + POSE_START] = torch.arange(
-                half + RH_START, half + FACE_START
-            )
-            perm[half + RH_START : half + FACE_START] = torch.arange(
-                half + LH_START, half + POSE_START
-            )
-        self.register_buffer("swap_perm", perm)  # moves to correct device with model
+        # Derived constants, not learned state: non-persistent so checkpoints
+        # don't depend on the input layout.
+        self.register_buffer(
+            "mirror_perm", torch.tensor(MIRROR_PERM), persistent=False
+        )
+        x_sign = torch.ones(IN_FEAT)
+        x_sign[:PRESENCE_START:COORDS_PER_LM] = -1.0  # x of pos and vel only
+        self.register_buffer("x_sign", x_sign, persistent=False)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Returns (x, dom_ratio).
 
-        dom_ratio: (B,) in [0, 1] — rh_energy / total_energy.
-          ≈ 0   → left hand naturally dominant (no swap)
-          ≈ 1   → right hand dominant (swap performed)
+        dom_ratio: (B,) in [0.5, 1] — dominant-hand share of wrist motion energy.
+          ≈ 1   → clearly one-handed / dominant-hand sign
           ≈ 0.5 → both hands equally active (symmetric two-handed sign)
         Passed to dist_proj so the model can weight hand streams by ambiguity.
         """
-        # x: (B, T, 2*COORD_FEAT) — caller owns x (already cloned upstream)
+        # x: (B, T, IN_FEAT) — caller owns x (already cloned upstream)
         lh_wrist_vel = x[
             :, :, COORD_FEAT + LH_START : COORD_FEAT + LH_START + COORDS_PER_LM
         ]
@@ -67,11 +65,13 @@ class HandDominanceModule(nn.Module):
         lh_energy = (lh_wrist_vel**2).sum(dim=-1).mean(dim=1)  # (B,)
         rh_energy = (rh_wrist_vel**2).sum(dim=-1).mean(dim=1)  # (B,)
 
-        dom_ratio = rh_energy / (lh_energy + rh_energy + 1e-6)  # (B,)
+        dom_ratio = torch.maximum(lh_energy, rh_energy) / (
+            lh_energy + rh_energy + 1e-6
+        )  # (B,)
 
         swap_idx = torch.where(rh_energy > lh_energy)[0]
         if swap_idx.numel() > 0:
-            x[swap_idx] = x[swap_idx][:, :, self.swap_perm]
+            x[swap_idx] = x[swap_idx][:, :, self.mirror_perm] * self.x_sign
 
         return x, dom_ratio
 
@@ -121,11 +121,15 @@ class LandmarkConformer(nn.Module):
         # 15 joint-angle cosines + 10 fingertip pairwise distances
         #   + 3 palm-normal components (3D only — encodes palm orientation)
         # = 28 (INCLUDE_DEPTH) or 25 (2D) per hand; projected 2 × d_model//8 = d_model//4.
-        # Plus 2 hand-nose distance scalars → d_model//8.
+        # Plus the distance stream (2 hand-nose distances, dom_ratio, 2 presence
+        # flags) → d_model//8.
         _n_geo = 25 + (3 if COORDS_PER_LM == 3 else 0)
         self.lh_geo_proj = nn.Linear(_n_geo, d_model // 8)
         self.rh_geo_proj = nn.Linear(_n_geo, d_model // 8)
-        self.dist_proj = nn.Linear(3, d_model // 8)  # lh_dist, rh_dist, dom_ratio
+        # lh_dist, rh_dist, dom_ratio, lh_present, rh_present. The presence flags
+        # disambiguate a never-detected hand (stored as 0 = the nose origin)
+        # from a hand actually at the face.
+        self.dist_proj = nn.Linear(5, d_model // 8)
 
         # Feature fusion: pos(d_model) + vel(d_model) + geo(d_model//4) + dist(d_model//8) → d_model
         self.feat_fuse = nn.Sequential(
@@ -217,14 +221,13 @@ class LandmarkConformer(nn.Module):
     def forward(self, x, mask, grl_lambda: float = 0.0):
         B, T, _ = x.shape
 
-        x, dom_ratio = self.hand_dominance(
-            x
-        )  # reorder; dom_ratio (B,) = rh_energy/total
+        x, dom_ratio = self.hand_dominance(x)  # mirror; dom_ratio (B,) = dom/total
         x = self.wrist_norm(x)  # landmark 0 = location, landmarks 1-20 = shape
 
-        # Split position and delta-1 velocity halves (dataset layout: [pos | vel1])
+        # Dataset layout: [pos | vel1 | presence (lh, rh)]
         pos = x[:, :, :COORD_FEAT]
-        vel1 = x[:, :, COORD_FEAT:]
+        vel1 = x[:, :, COORD_FEAT:PRESENCE_START]
+        presence = x[:, :, PRESENCE_START:]  # (B, T, 2), after dominance mirror
         c = COORDS_PER_LM
 
         # Shoulder-width normalization: scale all positional and velocity features by
@@ -268,7 +271,7 @@ class LandmarkConformer(nn.Module):
         )  # (B, T, 1)
         dom_ratio_feat = dom_ratio[:, None, None].expand(B, T, 1)  # (B, T, 1)
         dist_feat = self.dist_proj(
-            torch.cat([lh_dist, rh_dist, dom_ratio_feat], dim=-1)
+            torch.cat([lh_dist, rh_dist, dom_ratio_feat, presence], dim=-1)
         )  # (B, T, d_model // 8)
 
         # Compute additional velocity scales from body-relative positions.

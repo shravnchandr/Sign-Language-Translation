@@ -1,10 +1,15 @@
 import numpy as np
 import pandas as pd
+import torch
 from ..config import (
     INCLUDE_FACE,
     INCLUDE_DEPTH,
     ALL_COLUMNS,
+    COORDS_PER_LM,
     FACE_LANDMARK_SET,
+    LH_START,
+    N_LH,
+    RH_START,
 )
 
 
@@ -65,3 +70,50 @@ def frame_stacked_data(file_path: str) -> np.ndarray:
     wide.columns = [f"{col[1]}_{col[0]}" for col in wide.columns]
     wide = wide.reindex(columns=ALL_COLUMNS)
     return wide.ffill().bfill().fillna(0).to_numpy(dtype=np.float32)
+
+
+def hand_presence(coords: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Recover per-frame hand detection flags from stored LMDB coordinates.
+
+    Neither LMDB stores NaNs, so a missing hand is hidden in the values:
+      - ASL Signs (frame_stacked_data): gaps are ffill/bfill'd, so a missing
+        frame is a bit-exact copy of its neighbour; a never-detected hand is 0.
+      - Fingerspelling builders: every missing frame is written as 0.
+    A real MediaPipe detection is never all-zero nor bit-identical to the
+    previous frame, so: present = block ≠ 0 and block ≠ previous block.
+    A leading run of identical frames is ambiguous (ffill from frame 0 vs bfill
+    from the hand's first appearance); it is resolved as bfill.
+
+    Absent frames are then filled by holding the nearest earlier detection
+    (later one for leading frames), matching the ASL convention so pre-training
+    and fine-tuning see the same input. Never-detected hands stay 0; the flag
+    is what distinguishes them from a hand at the nose (the origin).
+
+    Must run on the raw stored coords, before any augmentation noise.
+
+    Args:
+        coords: (T, COORD_FEAT) stored positions.
+    Returns:
+        (coords, presence) — filled copy of coords, and (T, 2) float [lh, rh].
+    """
+    coords = coords.clone()
+    T = coords.shape[0]
+    t_idx = torch.arange(T)
+    flags = []
+    for hs in (LH_START, RH_START):
+        block = coords[:, hs : hs + N_LH * COORDS_PER_LM]
+        present = block.abs().sum(-1) > 0
+        repeat = (block[1:] == block[:-1]).all(-1)  # (T-1,) frame t == t-1
+        present[1:] &= ~repeat
+        # Leading identical run (frames 0..r): either frame 0 was detected and
+        # ffill'd, or the hand first appeared at frame r and was bfill'd. Hands
+        # usually enter after the clip starts, so credit the last frame.
+        r = int(torch.cumprod(repeat.long(), 0).sum())
+        if r > 0 and present[0]:
+            present[0], present[r] = False, True
+        if present.any() and not present.all():
+            src = torch.cummax(torch.where(present, t_idx, -1), dim=0).values
+            src[src < 0] = int(t_idx[present][0])
+            coords[:, hs : hs + N_LH * COORDS_PER_LM] = block[src]
+        flags.append(present)
+    return coords, torch.stack(flags, dim=-1).float()
