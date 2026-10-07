@@ -29,6 +29,19 @@
 set -e
 ORIG_ARGS=("$@")
 
+# Run from the repo root regardless of the caller's cwd (relative paths below
+# and in arguments are repo-relative).
+cd "$(dirname "$0")"
+SELF="$(pwd)/$(basename "$0")"
+
+# setup_runpod.sh installs uv into ~/.local/bin, which is only on PATH in shells
+# started afterwards — not the terminal that ran setup, nor a tmux session
+# launched from it. Exported here, it also reaches the tmux child.
+if ! command -v uv >/dev/null 2>&1 && [ -x "$HOME/.local/bin/uv" ]; then
+    export PATH="$HOME/.local/bin:$PATH"
+fi
+command -v uv >/dev/null 2>&1 || { echo "uv not found — run setup_runpod.sh first." >&2; exit 1; }
+
 export PYTHONPATH="$(pwd)/research/models${PYTHONPATH:+:$PYTHONPATH}"
 export PYTORCH_ALLOC_CONF=expandable_segments:True
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
@@ -121,7 +134,7 @@ if [ "$USE_TMUX" = true ] && [ -z "${TMUX:-}" ]; then
     LOG="logs/cnn_transformer_$(date +%Y%m%d_%H%M%S).log"
     # Child runs with --no-tmux (no recursion). The pane stays open afterwards
     # (exec bash) so the final output and exit code can still be inspected.
-    RUN_CMD=$(printf '%q ' bash "$0" "${ORIG_ARGS[@]}" --no-tmux)
+    RUN_CMD=$(printf '%q ' bash "$SELF" "${ORIG_ARGS[@]}" --no-tmux)
     INNER="set -o pipefail; $RUN_CMD 2>&1 | tee $(printf '%q' "$LOG"); code=\$?; echo; echo \"[pipeline exited with code \$code — log: $LOG]\"; exec bash"
     tmux new-session -d -s "$TMUX_SESSION" -c "$(pwd)" bash -c "$INNER"
     echo "Started in tmux session '$TMUX_SESSION'. It keeps running if you disconnect."

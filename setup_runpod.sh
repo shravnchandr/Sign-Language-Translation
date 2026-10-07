@@ -28,7 +28,13 @@
 #   bash setup_runpod.sh --force                                 # re-download even if verified
 
 set -euo pipefail
+CALLER_DIR="$(pwd)"
 cd "$(dirname "$0")"
+# uv installs to ~/.local/bin, which is only on PATH in shells started after the
+# install — pick it up so re-runs in the same terminal don't miss or reinstall it.
+if ! command -v uv >/dev/null 2>&1 && [ -x "$HOME/.local/bin/uv" ]; then
+    export PATH="$HOME/.local/bin:$PATH"
+fi
 
 # ── Defaults ────────────────────────────────────────────────────────────────
 KERNEL="shravnchandr/build-islt-lmdb"
@@ -49,6 +55,8 @@ while [[ $# -gt 0 ]]; do
         *) echo "Unknown argument: $1"; exit 1 ;;
     esac
 done
+# --from is the caller's path; resolve it before the cd above changes meaning.
+if [ -n "$FROM" ] && [[ "$FROM" != /* ]]; then FROM="$CALLER_DIR/$FROM"; fi
 
 export PYTHONPATH="$(pwd)/research/models${PYTHONPATH:+:$PYTHONPATH}"
 die() { echo "ERROR: $*" >&2; exit 1; }
