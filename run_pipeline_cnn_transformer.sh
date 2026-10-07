@@ -13,6 +13,7 @@
 #   bash run_pipeline_cnn_transformer.sh --phase1-epochs 10 --phase2-epochs 5  # quick test
 #   bash run_pipeline_cnn_transformer.sh --map-size-gb 200
 #   bash run_pipeline_cnn_transformer.sh --allow-errors
+#   bash run_pipeline_cnn_transformer.sh --val-fold 0              # signer fold 0 of 7 (CV)
 #
 # Recommended (downloaded LMDB datasets, skip all local builds):
 #   bash run_pipeline_cnn_transformer.sh --skip-pretrain
@@ -66,6 +67,8 @@ LMDB_WORKERS=4
 COMPILE=false
 BACKBONE_WARMUP_EPOCHS=5   # epochs to freeze backbone after loading pretrained weights
 BACKBONE_LR_RATIO=0.1       # backbone LR as fraction of head LR after warmup
+VAL_FOLD=""        # empty = default split (Runs 001–005); 0..N_FOLDS-1 = signer fold
+N_FOLDS=7
 USE_TMUX=true
 TMUX_SESSION="islr"
 
@@ -112,6 +115,8 @@ while [[ $# -gt 0 ]]; do
         --compile)                 COMPILE=true;                  shift ;;
         --backbone-warmup-epochs)  BACKBONE_WARMUP_EPOCHS="$2";  shift 2 ;;
         --backbone-lr-ratio)       BACKBONE_LR_RATIO="$2";       shift 2 ;;
+        --val-fold)                VAL_FOLD="$2";                shift 2 ;;
+        --n-folds)                 N_FOLDS="$2";                 shift 2 ;;
         --no-tmux)                 USE_TMUX=false;               shift ;;
         --tmux-session)            TMUX_SESSION="$2";            shift 2 ;;
         *) echo "Unknown argument: $1"; exit 1 ;;
@@ -162,6 +167,7 @@ echo "  Phase 2 epochs:     $PHASE2_EPOCHS"
 echo "  Patience:           $PATIENCE"
 echo "  Batch size:         $BATCH_SIZE"
 echo "  Num workers:        $NUM_WORKERS"
+echo "  Validation:         ${VAL_FOLD:+fold $VAL_FOLD/$N_FOLDS}${VAL_FOLD:-default split}"
 echo "  LMDB map size:      ${MAP_SIZE_GB:-1 TiB (default)}"
 echo "  Allow errors:       $ALLOW_ERRORS"
 echo "  torch.compile:      $COMPILE"
@@ -248,6 +254,8 @@ uv run python -m cnn_transformer.train \
     ${PRETRAINED_BACKBONE:+--pretrained-backbone "$PRETRAINED_BACKBONE"} \
     --backbone-warmup-epochs "$BACKBONE_WARMUP_EPOCHS" \
     --backbone-lr-ratio "$BACKBONE_LR_RATIO" \
+    ${VAL_FOLD:+--val-fold "$VAL_FOLD"} \
+    --n-folds "$N_FOLDS" \
     $( [ "$COMPILE" = true ] && echo "--compile" )
 
 echo ""

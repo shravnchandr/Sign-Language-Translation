@@ -7,7 +7,7 @@ import torch
 from pathlib import Path
 from torch.utils.data import DataLoader, Dataset, Sampler
 from typing import Dict, List, Optional, Tuple
-from sklearn.model_selection import GroupShuffleSplit, train_test_split
+from sklearn.model_selection import GroupKFold, GroupShuffleSplit, train_test_split
 from .augmentation import augment_sample
 from .preprocessing import frame_stacked_data, hand_presence
 from ._cache_keys import (
@@ -326,6 +326,8 @@ def get_data_loaders(
     batch_size: int = 64,
     num_workers: int = 4,
     max_frames: int = 128,
+    val_fold: Optional[int] = None,
+    n_folds: int = 7,
 ) -> Tuple[DataLoader, DataLoader, int]:
     """
     Args:
@@ -336,6 +338,11 @@ def get_data_loaders(
         batch_size:  Samples per batch.
         num_workers: DataLoader worker processes.
         max_frames:  Truncate sequences longer than this.
+        val_fold:    If set, validate on fold `val_fold` of a signer-grouped
+                     GroupKFold(n_folds) instead of the default split. Training
+                     every fold in turn is k-fold cross-validation by signer.
+        n_folds:     Number of signer folds (7 → 3 of 21 signers per fold,
+                     matching the default split's size).
 
     Returns:
         (train_loader, test_loader, n_signers) where n_signers is the number of unique
@@ -356,8 +363,17 @@ def get_data_loaders(
     signer_to_id: Dict[str, int] = {}
     n_signers = 0
     if "participant_id" in df.columns:
-        gss = GroupShuffleSplit(n_splits=1, test_size=0.1, random_state=42)
-        train_idx, test_idx = next(gss.split(df, groups=df["participant_id"]))
+        if val_fold is None:
+            # Default split, kept fixed so runs stay comparable (Runs 001–005).
+            gss = GroupShuffleSplit(n_splits=1, test_size=0.1, random_state=42)
+            train_idx, test_idx = next(gss.split(df, groups=df["participant_id"]))
+        else:
+            if not 0 <= val_fold < n_folds:
+                raise ValueError(f"val_fold must be in [0, {n_folds}), got {val_fold}")
+            # Unshuffled GroupKFold is deterministic: signers are assigned to
+            # folds greedily by sample count, so fold k is the same every run.
+            gkf = GroupKFold(n_splits=n_folds)
+            train_idx, test_idx = list(gkf.split(df, groups=df["participant_id"]))[val_fold]
         train_df = df.iloc[train_idx]
         test_df = df.iloc[test_idx]
         # Build a stable int mapping from training signers only.
@@ -367,12 +383,20 @@ def get_data_loaders(
         )
         signer_to_id = {pid: i for i, pid in enumerate(unique_signers)}
         n_signers = len(signer_to_id)
+        # Separate id map for validation signers, used only to report
+        # per-signer accuracy (the GRL uses the training map above).
+        val_signers = sorted(test_df["participant_id"].astype(str).unique().tolist())
+        val_signer_to_id = {pid: i for i, pid in enumerate(val_signers)}
+        split_name = "default split" if val_fold is None else f"fold {val_fold}/{n_folds}"
         print(
-            f"Signer-independent split: "
+            f"Signer-independent split ({split_name}): "
             f"{train_df['participant_id'].nunique()} train signers, "
-            f"{test_df['participant_id'].nunique()} val signers"
+            f"{test_df['participant_id'].nunique()} val signers {val_signers}"
         )
     else:
+        if val_fold is not None:
+            raise ValueError("--val-fold needs participant_id in train.csv")
+        val_signers, val_signer_to_id = [], {}
         train_df, test_df = train_test_split(
             df, test_size=0.1, stratify=df["sign"], random_state=42
         )
@@ -396,8 +420,9 @@ def get_data_loaders(
         lmdb_path=lmdb_path,
         max_frames=max_frames,
         augment=False,
-        signer_to_id=signer_to_id,
+        signer_to_id=val_signer_to_id,
     )
+    test_dataset.signer_names = val_signers  # index = signer id in val batches
 
     worker_kwargs = (
         dict(persistent_workers=True, prefetch_factor=2) if num_workers > 0 else {}

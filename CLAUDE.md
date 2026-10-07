@@ -24,6 +24,7 @@ uv sync
 bash setup_runpod.sh                     # default: saved output of Kaggle notebook shravnchandr/build-islt-lmdb
 bash run_pipeline_cnn_transformer.sh --skip-pretrain --num-workers 8   # relaunches in tmux session "islr"
 tmux attach -t islr                      # logs also in logs/cnn_transformer_<timestamp>.log; --no-tmux = foreground
+bash run_pipeline_cnn_transformer.sh --skip-pretrain --val-fold 2   # validate on signer fold 2 of 7 (GroupKFold)
 bash runpod_results.sh send run005       # on the pod, before stopping it (disk is erased on stop)
 bash runpod_results.sh receive <code>    # on your machine → runs/run005/ (gitignored)
 
@@ -223,6 +224,8 @@ Columns: `frame`, `type`, `landmark_index`, `x`, `y`, `z`
 **Pre-tokenization cache**: `precompute_tokens.py` runs the frozen VQ-VAE once, saves per-sample token indices to `data/tokens/`. `TokenizedTranslationDataset` loads these directly — no VQ-VAE needed during Phase 2 training.
 
 **Conformer kernel size**: must be significantly smaller than the average sequence length. VQ-VAE chunk size 8 → 40–80 frame signs produce 5–10 tokens. `encoder_kernel_size=7` fits within the sequence; larger values operate mostly on padding.
+
+**Validation splits** (`cnn_transformer/data/dataset.py:get_data_loaders`): default is a fixed `GroupShuffleSplit(test_size=0.1, random_state=42)` → 3 val signers (2044, 37779, 53618) — kept so runs stay comparable. `--val-fold k` uses unshuffled `GroupKFold(--n-folds, default 7)` by `participant_id` (deterministic; 3 signers ≈ 13–14k samples per fold); training every fold is k-fold CV by signer. Every epoch also prints per-signer val accuracy and the spread — signer variance is large, so pooled 1-point changes are not meaningful on their own.
 
 **Best model selection**: Phase 1 saves checkpoints based on val reconstruction loss (not total loss). The diversity term dominates total loss magnitude and is a poor ranking signal.
 

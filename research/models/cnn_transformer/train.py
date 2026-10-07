@@ -309,32 +309,52 @@ def predict_with_tta(model, x, mask, n_augmentations=5):
     return logit_sum / n_augmentations
 
 
+def _evaluate(model, data_loader, criterion, predict, desc):
+    """Return (loss, acc, per_signer) where per_signer maps each validation
+    signer to its own accuracy. Accuracy varies a lot between signers, so the
+    pooled number alone can't show whether a change helped everyone or one
+    signer."""
+    model.train(False)
+    names = getattr(data_loader.dataset, "signer_names", [])
+    hits = torch.zeros(len(names))
+    counts = torch.zeros(len(names))
+    test_loss, correct, total = 0, 0, 0
+    for x, mask, y, sid in tqdm(data_loader, desc=desc, leave=False):
+        x, mask, y = x.to(device), mask.to(device), y.to(device)
+        logits = predict(model, x, mask)
+        test_loss += criterion(logits, y).item()
+        hit = (logits.argmax(dim=1) == y).cpu()
+        correct += hit.sum().item()
+        total += y.size(0)
+        ok = sid >= 0
+        if names and ok.any():
+            hits.index_add_(0, sid[ok], hit[ok].float())
+            counts.index_add_(0, sid[ok], torch.ones(int(ok.sum())))
+    per_signer = {n: (hits[i] / counts[i]).item() for i, n in enumerate(names) if counts[i] > 0}
+    return test_loss / len(data_loader), correct / total, per_signer
+
+
 @torch.no_grad()
 def evaluate_epoch(model, data_loader, criterion):
     """Deterministic evaluation — no TTA — for stable model selection."""
-    model.train(False)
-    test_loss, correct, total = 0, 0, 0
-    for x, mask, y, _ in tqdm(data_loader, desc="Validation", leave=False):
-        x, mask, y = x.to(device), mask.to(device), y.to(device)
-        logits = model(x, mask)
-        test_loss += criterion(logits, y).item()
-        correct += (logits.argmax(dim=1) == y).sum().item()
-        total += y.size(0)
-    return test_loss / len(data_loader), correct / total
+    return _evaluate(model, data_loader, criterion, lambda m, x, k: m(x, k), "Validation")
 
 
 @torch.no_grad()
 def evaluate_epoch_tta(model, data_loader, criterion):
     """TTA evaluation — used for final/reporting accuracy only."""
-    model.train(False)
-    test_loss, correct, total = 0, 0, 0
-    for x, mask, y, _ in tqdm(data_loader, desc="TTA Eval", leave=False):
-        x, mask, y = x.to(device), mask.to(device), y.to(device)
-        logits = predict_with_tta(model, x, mask, n_augmentations=5)
-        test_loss += criterion(logits, y).item()
-        correct += (logits.argmax(dim=1) == y).sum().item()
-        total += y.size(0)
-    return test_loss / len(data_loader), correct / total
+    return _evaluate(
+        model, data_loader, criterion,
+        lambda m, x, k: predict_with_tta(m, x, k, n_augmentations=5), "TTA Eval",
+    )
+
+
+def _signer_str(per_signer: dict) -> str:
+    if not per_signer:
+        return ""
+    vals = list(per_signer.values())
+    body = " | ".join(f"{n} {a:.4f}" for n, a in per_signer.items())
+    return f"  per-signer val: {body}  (spread {max(vals) - min(vals):.4f})"
 
 
 def main():
@@ -399,6 +419,19 @@ def main():
         "Ramped from 0 via Ganin schedule.",
     )
     parser.add_argument(
+        "--val-fold",
+        type=int,
+        default=None,
+        help="Validate on this signer fold of GroupKFold(--n-folds) instead of the "
+        "default split. Train every fold in turn for k-fold cross-validation by signer.",
+    )
+    parser.add_argument(
+        "--n-folds",
+        type=int,
+        default=7,
+        help="Number of signer folds for --val-fold (7 → 3 of 21 signers per fold).",
+    )
+    parser.add_argument(
         "--lmdb-path",
         default="data/asl-is-lmdb/is.lmdb.mdb",
         help="Path to LMDB archive. Download from shravnchandr/asl-is-lmdb or "
@@ -455,6 +488,8 @@ def main():
         lmdb_path=args.lmdb_path,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
+        val_fold=args.val_fold,
+        n_folds=args.n_folds,
     )
 
     grl_active = args.grl_lambda > 0.0 and n_signers > 0
@@ -545,6 +580,7 @@ def main():
         return f"{h}h {m:02d}m {s:02d}s" if h else f"{m}m {s:02d}s"
 
     best_acc = -float("inf")
+    best_signers: dict = {}
     patience = 0
     p1_saved = False
 
@@ -592,7 +628,7 @@ def main():
                 total_epochs=NUM_EPOCHS_PHASE1,
                 grl_lambda=0.0, n_signers=0,
             )
-            v_loss, v_acc = evaluate_epoch(model, test_loader, criterion)
+            v_loss, v_acc, v_signers = evaluate_epoch(model, test_loader, criterion)
             epoch_secs = time.perf_counter() - t_epoch
             p1_epochs_run += 1
             print(
@@ -602,8 +638,10 @@ def main():
                 f"LR: {wu_optimizer.param_groups[0]['lr']:.2e} | "
                 f"Time: {_fmt_time(epoch_secs)}"
             )
+            if v_signers:
+                print(_signer_str(v_signers))
             if v_acc > best_acc:
-                best_acc = v_acc
+                best_acc, best_signers = v_acc, v_signers
                 torch.save(model.state_dict(), p1_ckpt)
                 p1_saved = True
                 print(f"  → Saved best P1 model ({best_acc:.4f})")
@@ -689,7 +727,7 @@ def main():
             grl_lambda=args.grl_lambda if grl_active else 0.0,
             n_signers=n_signers,
         )
-        v_loss, v_acc = evaluate_epoch(model, test_loader, criterion)
+        v_loss, v_acc, v_signers = evaluate_epoch(model, test_loader, criterion)
         epoch_secs = time.perf_counter() - t_epoch
         p1_epochs_run += 1
         disc_str = f" | Disc Acc: {tr['disc_acc']:.4f}" if tr["disc_acc"] is not None else ""
@@ -699,8 +737,10 @@ def main():
             f"Val Acc: {v_acc:.4f} | LR: {optimizer.param_groups[0]['lr']:.2e} | "
             f"Time: {_fmt_time(epoch_secs)}" + disc_str
         )
+        if v_signers:
+            print(_signer_str(v_signers))
         if v_acc > best_acc:
-            best_acc = v_acc
+            best_acc, best_signers = v_acc, v_signers
             patience = 0
             torch.save(model.state_dict(), p1_ckpt)
             p1_saved = True
@@ -757,7 +797,7 @@ def main():
             grl_lambda=args.grl_lambda if grl_active else 0.0,
             n_signers=n_signers,
         )
-        v_loss, v_acc = evaluate_epoch(model, test_loader, criterion)
+        v_loss, v_acc, v_signers = evaluate_epoch(model, test_loader, criterion)
         epoch_secs = time.perf_counter() - t_epoch
         disc_str = f" | Disc Acc: {tr['disc_acc']:.4f}" if tr["disc_acc"] is not None else ""
         print(
@@ -767,8 +807,10 @@ def main():
             f"Time: {_fmt_time(epoch_secs)}" + disc_str,
             flush=True,
         )
+        if v_signers:
+            print(_signer_str(v_signers))
         if v_acc > best_acc:
-            best_acc = v_acc
+            best_acc, best_signers = v_acc, v_signers
             torch.save(model.state_dict(), final_ckpt)
             final_saved = True
             print(f"  → Saved FINAL best model ({best_acc:.4f})")
@@ -782,9 +824,15 @@ def main():
         model.load_state_dict(torch.load(final_ckpt, weights_only=True))
     elif p1_saved:
         model.load_state_dict(torch.load(p1_ckpt, weights_only=True))
-    _, tta_acc = evaluate_epoch_tta(model, test_loader, criterion)
+    _, tta_acc, tta_signers = evaluate_epoch_tta(model, test_loader, criterion)
+    split = "default split" if args.val_fold is None else f"fold {args.val_fold}/{args.n_folds}"
+    print(f"Validation: {split}")
     print(f"Best val accuracy (deterministic): {best_acc:.4f}")
+    if best_signers:
+        print(_signer_str(best_signers))
     print(f"Best val accuracy (TTA):           {tta_acc:.4f}")
+    if tta_signers:
+        print(_signer_str(tta_signers))
     print(
         f"Phase 1 time : {_fmt_time(p1_total)} ({p1_epochs_run} epochs, avg {_fmt_time(p1_total / max(p1_epochs_run, 1))}/epoch)"
     )
