@@ -452,7 +452,11 @@ def main():
         sign2idx = json.load(f)
     _label_df = pd.read_csv(os.path.join(args.data_dir, "train.csv"))
     _label_df["label"] = _label_df["sign"].map(sign2idx)
-    _counts = _label_df["label"].value_counts().sort_index()
+    # Reindex over every class: value_counts() omits absent labels, which would
+    # shorten the vector and shift every later weight onto the wrong class.
+    _counts = (
+        _label_df["label"].value_counts().reindex(range(NUM_CLASSES), fill_value=0)
+    )
     _weights = (1.0 / _counts.clip(lower=1).values).astype("float32")
     _weights = _weights / _weights.mean()
     class_weights = torch.tensor(_weights).to(device)
