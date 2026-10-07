@@ -19,6 +19,14 @@ from .model.grl import ganin_lambda
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 use_amp = device.type == "cuda"
+# bf16 keeps fp32's exponent range, so activations can't overflow to inf the
+# way fp16 can (Run 004 hit a NaN batch at epoch 55 under fp16) and no loss
+# scaling is needed. Ampere and newer (A40/A100/3090/4090/H100) support it.
+amp_dtype = (
+    torch.bfloat16
+    if use_amp and torch.cuda.is_bf16_supported()
+    else torch.float16
+)
 if device.type == "cuda":
     torch.backends.cudnn.benchmark = True
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -75,6 +83,16 @@ def train_epoch(
         else 0.0
     )
 
+    # BatchNorm running stats update during the forward pass, so a single
+    # non-finite batch poisons them permanently: train mode (batch stats) keeps
+    # working while eval mode (running stats) collapses to chance. GradScaler
+    # protects the weights but not these buffers — snapshot and restore them.
+    bn_buffers = [
+        b for n, b in model.named_buffers()
+        if n.endswith(("running_mean", "running_var", "num_batches_tracked"))
+    ]
+    nonfinite = 0
+
     pbar = tqdm(data_loader, desc=f"Epoch {epoch + 1}/{total_epochs}")
     for idx, (x, mask, y, signer_ids) in enumerate(pbar):
         # Clone once upfront so all augmentations can write in-place without
@@ -118,7 +136,8 @@ def train_epoch(
         if use_mixup:
             x, y_a, y_b, lam, mask, mixup_idx = mixup_batch(x, y, mask)
 
-        with autocast(device_type=device.type, enabled=use_amp):
+        bn_snapshot = [b.detach().clone() for b in bn_buffers]
+        with autocast(device_type=device.type, dtype=amp_dtype, enabled=use_amp):
             use_grl = grl_lam > 0.0 and n_signers > 0
             if use_grl:
                 logits, signer_logits = model(x, mask, grl_lambda=grl_lam)
@@ -160,6 +179,13 @@ def train_epoch(
                     loss = sign_loss
             else:
                 loss = sign_loss
+
+        if not torch.isfinite(loss):
+            # Undo this batch's BN stat update and skip its backward entirely.
+            for buf, saved in zip(bn_buffers, bn_snapshot):
+                buf.copy_(saved)
+            nonfinite += 1
+            continue
 
         scaler.scale(loss / accumulation_steps).backward()
 
@@ -203,8 +229,15 @@ def train_epoch(
         if scheduler is not None:
             scheduler.step()
 
+    if nonfinite:
+        print(
+            f"  WARNING: skipped {nonfinite} non-finite batch(es) this epoch "
+            f"(BN stats restored, no backward)",
+            flush=True,
+        )
     disc_acc = disc_correct / disc_total if disc_total > 0 else None
-    return train_loss / len(data_loader), correct / total, disc_acc
+    n_ok = max(len(data_loader) - nonfinite, 1)
+    return train_loss / n_ok, correct / max(total, 1), disc_acc
 
 
 @torch.no_grad()
@@ -476,7 +509,10 @@ def main():
     )
     MAX_LR = 5e-4
 
-    scaler = GradScaler(enabled=use_amp)
+    # Loss scaling only matters for fp16; bf16 has fp32's range.
+    scaler = GradScaler(enabled=use_amp and amp_dtype == torch.float16)
+    if use_amp:
+        print(f"AMP dtype   : {str(amp_dtype).replace('torch.', '')}")
 
     def _fmt_time(seconds: float) -> str:
         s = int(seconds)

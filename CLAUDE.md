@@ -168,6 +168,7 @@ End-to-end supervised classification. Optional CTC pre-training on ASL Fingerspe
 | `research/models/cnn_transformer/data/augmentation.py` | — | ~~`mixup_batch` paired lh-dominant with rh-dominant samples, producing ambiguous hand slot assignments when `HandDominanceModule` runs inside the model.~~ **Fixed: dominance-aware pairing shuffles within same-dominance groups.** |
 | `research/models/cnn_transformer/data/preprocessing.py` + `model/landmark_conformer.py` | — | ~~Double normalization: `normalize_values` zeroed the nose before LMDB, so `RobustNormalization` in the model always fell through to the shoulder-center branch (nose appeared missing).~~ **Fixed: `normalize_values` implements the full nose→shoulder→hip fallback; `RobustNormalization` removed from model.** LMDB must be rebuilt (`_NORM_VERSION` bump auto-invalidates). |
 | `research/models/cnn_transformer/train.py` | — | ~~`FocalLoss` used scalar `alpha=0.25` — a 4× global loss scaling, not per-class weighting.~~ **Fixed: inverse-frequency per-class weights from train.csv, mean-normalised, registered as a buffer.** |
+| `research/models/cnn_transformer/train.py` | — | ~~A single NaN batch under fp16 AMP poisoned the conv-module BatchNorm running stats: GradScaler protected the weights, but eval (running stats) collapsed to chance permanently while train mode looked fine (Run 004, epoch 55).~~ **Fixed: bf16 autocast on Ampere+; non-finite-loss guard restores BN buffers and skips the backward.** |
 | `research/models/cnn_transformer/train.py` | — | ~~TTA held 5 full-batch logit tensors simultaneously (OOM risk on long sequences).~~ **Fixed: running sum accumulation; only one extra tensor in memory at a time.** |
 | `research/models/cnn_transformer/model/conformer.py` | — | ~~`SinusoidalPositionalEncoding` raised `IndexError` when `T > max_len=512`.~~ **Fixed: on-the-fly PE generation in `forward()` without mutating the registered buffer (thread-safe).** |
 | `research/models/cnn_transformer/config.py` + `model/landmark_conformer.py` | — | ~~`SELECTED_FACE_INDICES` built by iterating `FACE_LANDMARK_INDICES.values()` — a dict key reordering would silently corrupt the eyebrow/mouth slice in the model.~~ **Fixed: explicit key ordering in config.py + runtime assertion in `LandmarkConformer.__init__`.** |
@@ -213,7 +214,7 @@ Columns: `frame`, `type`, `landmark_index`, `x`, `y`, `z`
 
 **Variable-length batching**: all datasets return a `padding_mask` `(B, T)` bool tensor (`True` = valid). Pass to model alongside `landmarks` or token indices.
 
-**AMP training**: `torch.amp.autocast` + `GradScaler` wrap every forward/backward pass. Disabled automatically when not on CUDA.
+**AMP training**: `torch.amp.autocast` wraps every forward pass — bf16 on Ampere+ (no `GradScaler` needed), fp16 + `GradScaler` otherwise. Disabled automatically when not on CUDA. `train_epoch` skips non-finite-loss batches and restores BatchNorm running stats from a pre-forward snapshot (a NaN forward would otherwise permanently break eval).
 
 **Preprocessing cache**: `VQVAEDataset` accepts `cache_dir`. First access processes each parquet and saves a `.pt` tensor; subsequent accesses skip parquet parsing entirely. Default: `data/cache/`.
 

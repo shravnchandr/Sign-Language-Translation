@@ -194,14 +194,35 @@ backbone at the same `--grl-lambda`; watch disc acc vs chance and sign val acc.
 
 ---
 
-## Run 004 — Geometry Stream + Normalization Fix + Augmentation Fixes (next RunPod run)
+## Run 004 — Geometry Stream + Normalization Fix + Augmentation Fixes
+**Date:** 2026-10-07
+**Hardware:** RunPod — NVIDIA A40 (no persistent volume; `setup_runpod.sh`)
 **Config changes vs Run 003:**
-- Geometry stream added (joint angles + fingertip distances)
+- Geometry stream (joint angles + fingertip distances + palm normal) and distance stream with hand presence flags
 - Proper preprocessing normalization (nose→shoulder→hip fallback)
-- LMDB rebuild required (CACHE_VERSION changed)
-- Phase 2 dropped; single-phase 100 epochs
+- All fixes from "Diagnosis Before Run 004" (rigid shift, no loop noise, full-mirror canonicalisation, no flip, no time-stretch crop, GRL λ once, mixup-weighted train acc)
+- d_model=256, n_layers=4, n_heads=4, ~6.5M params; Phase 1 only, 80 epochs, `--num-workers 8`, fp16 AMP
 
-**Expected val accuracy:** TBD — geometry features add explicit hand-shape signal that raw XYZ buries; expect improvement over 0.7432 if the information ceiling was partly a representation issue.
+**Timing:** ~16–17 it/s after a cold-cache first epoch (4.6 it/s) — ~1m20s/epoch.
+
+**Result:**
+- Best val acc (deterministic): **0.7590** (epoch 50) — above Run 002's 0.7555 (within 3-signer noise)
+- Train acc at epoch 50: 0.75 (mixup-weighted, now trustworthy) — no overfitting; train < val under heavy aug
+- Disc acc ~0.10 vs 0.056 chance — stable, ~2× chance as in Run 003
+- TTA: _pending — run still finishing_
+
+**Failure at epoch 55:** one batch produced a NaN loss under fp16 AMP. GradScaler skipped
+the step (weights intact, train acc kept rising to 0.78) but the NaN forward had already
+updated the Conformer conv-module BatchNorm running stats → eval mode (running stats)
+output NaN → **val acc collapsed to 0.0042 (chance) for every later epoch**, while train
+mode (batch stats) was unaffected. Reproduced on CPU. Best checkpoint (epoch 50) predates
+it, so the reported result is valid, but epochs 51–80 could not improve it.
+
+**Fixes for Run 005:** bf16 autocast on Ampere+ (fp32 exponent range — no overflow, no loss
+scaling); non-finite-loss guard in `train_epoch` restores BN buffers from a pre-forward
+snapshot and skips the backward, with a per-epoch warning count. The NaN's root cause
+under fp16 is unconfirmed (GRL now acts at full strength — a candidate); if warnings
+persist under bf16 it is a real numerical bug, not overflow.
 
 ---
 
