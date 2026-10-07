@@ -24,6 +24,8 @@ uv sync
 bash setup_runpod.sh                     # default: saved output of Kaggle notebook shravnchandr/build-islt-lmdb
 bash run_pipeline_cnn_transformer.sh --skip-pretrain --num-workers 8   # relaunches in tmux session "islr"
 tmux attach -t islr                      # logs also in logs/cnn_transformer_<timestamp>.log; --no-tmux = foreground
+bash runpod_results.sh send run005       # on the pod, before stopping it (disk is erased on stop)
+bash runpod_results.sh receive <code>    # on your machine → runs/run005/ (gitignored)
 
 # VQ-VAE full pipeline (run from project root — requires research/models/ on PYTHONPATH)
 PYTHONPATH=research/models bash run_pipeline_vqvae_seq2seq.sh

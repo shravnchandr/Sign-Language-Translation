@@ -215,6 +215,13 @@ tmux attach -t islr         # training runs in a detached tmux session; detach w
 The pipeline relaunches itself in tmux (session `islr`) and logs to
 `logs/cnn_transformer_<timestamp>.log`; pass `--no-tmux` to run in the foreground.
 
+**Before stopping the pod** (its disk is erased on stop), pull checkpoints and logs:
+
+```bash
+bash runpod_results.sh send run005           # on the pod — prints a one-time code
+bash runpod_results.sh receive <code>        # on your machine → runs/run005/
+```
+
 ```bash
 # Recommended: pre-built LMDBs, skip pre-training
 bash run_pipeline_cnn_transformer.sh --skip-pretrain
