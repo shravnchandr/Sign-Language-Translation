@@ -202,6 +202,19 @@ Extract to `data/Isolated_ASL_Recognition/` and `data/ASL_Fingerspelling_Recogni
 
 ### LandmarkConformer
 
+**On a fresh RunPod pod (no persistent volume):**
+
+```bash
+git clone https://github.com/shravnchandr/Sign-Language-Translation.git && cd Sign-Language-Translation
+mkdir -p ~/.kaggle && mv ~/kaggle.json ~/.kaggle/ && chmod 600 ~/.kaggle/kaggle.json
+bash setup_runpod.sh        # uv + tmux, CUDA check, LMDB from the build notebook's output, key check
+bash run_pipeline_cnn_transformer.sh --skip-pretrain --num-workers 8
+tmux attach -t islr         # training runs in a detached tmux session; detach with Ctrl-b d
+```
+
+The pipeline relaunches itself in tmux (session `islr`) and logs to
+`logs/cnn_transformer_<timestamp>.log`; pass `--no-tmux` to run in the foreground.
+
 ```bash
 # Recommended: pre-built LMDBs, skip pre-training
 bash run_pipeline_cnn_transformer.sh --skip-pretrain

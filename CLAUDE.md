@@ -20,9 +20,14 @@ Two approaches are under active development, both under `research/models/`:
 # Install dependencies (UV package manager, Python 3.14)
 uv sync
 
-# Full pipeline (run from project root — requires research/models/ on PYTHONPATH)
-PYTHONPATH=research/models bash run_pipeline.sh
-PYTHONPATH=research/models bash run_pipeline.sh --vqvae-epochs 10 --translator-epochs 10
+# LandmarkConformer on a fresh RunPod pod: env + tmux + LMDB download/verify, then train
+bash setup_runpod.sh                     # default: saved output of Kaggle notebook shravnchandr/build-islt-lmdb
+bash run_pipeline_cnn_transformer.sh --skip-pretrain --num-workers 8   # relaunches in tmux session "islr"
+tmux attach -t islr                      # logs also in logs/cnn_transformer_<timestamp>.log; --no-tmux = foreground
+
+# VQ-VAE full pipeline (run from project root — requires research/models/ on PYTHONPATH)
+PYTHONPATH=research/models bash run_pipeline_vqvae_seq2seq.sh
+PYTHONPATH=research/models bash run_pipeline_vqvae_seq2seq.sh --vqvae-epochs 10 --translator-epochs 10
 
 # Train VQ-VAE (Phase 1)
 PYTHONPATH=research/models uv run python -m vqvae_seq2seq.vqvae.train_vqvae \
@@ -155,6 +160,7 @@ End-to-end supervised classification. Optional CTC pre-training on ASL Fingerspe
 | `research/models/cnn_transformer/train.py` | — | ~~Train accuracy scored against `y_a` only under mixup, roughly halving it (Runs 002/003 logged ~0.42).~~ **Fixed: `lam·acc_a + (1−lam)·acc_b`.** |
 | `research/models/cnn_transformer/train.py` | — | ~~Warmup "head" prefixes hardcoded `lh_geo_proj`/`rh_geo_proj`/`feat_fuse` (present in any current backbone) and omitted `dist_proj`.~~ **Fixed: head = keys missing from the checkpoint.** |
 | `research/models/cnn_transformer/data/augmentation.py` | — | ~~`mixup_batch` discarded the shuffled sample's mask.~~ **Fixed: returns `mask \| mask[index]`.** |
+| `research/models/cnn_transformer/train.py` | — | ~~Class weights built from `value_counts()` of present labels only — an absent class shortened the vector and shifted every later weight onto the wrong class.~~ **Fixed: reindexed over `range(NUM_CLASSES)`.** |
 | `research/models/cnn_transformer/train.py` | — | ~~OneCycleLR `steps_per_epoch=len(train_loader)` ignored gradient accumulation, making schedule 2–4× slower.~~ **Fixed: `total_steps` computed from actual optimizer step counts per phase.** |
 | `research/models/cnn_transformer/train.py` | — | ~~Phase 2 loop `range(epoch_idx+1, total_steps)` ran too many epochs after early stopping.~~ **Fixed: `range(NUM_EPOCHS_PHASE2)`.** |
 | `research/models/cnn_transformer/train.py` | — | ~~Validation used 5× stochastic TTA, making checkpoint selection noisy.~~ **Fixed: `evaluate_epoch` is deterministic; TTA reserved for final reporting via `evaluate_epoch_tta`.** |

@@ -17,12 +17,24 @@
 # Recommended (downloaded LMDB datasets, skip all local builds):
 #   bash run_pipeline_cnn_transformer.sh --skip-pretrain
 #   bash run_pipeline_cnn_transformer.sh --skip-fs-lmdb --pretrain-epochs 40  # pre-train from downloaded FS LMDB
+#
+# tmux: started outside tmux, the pipeline relaunches itself in a detached tmux
+# session (default name "islr") so it survives a closed terminal / browser tab,
+# and tees all output to logs/cnn_transformer_<timestamp>.log.
+#   tmux attach -t islr        # watch live; detach again with Ctrl-b then d
+#   tail -f logs/cnn_transformer_*.log
+#   bash run_pipeline_cnn_transformer.sh --no-tmux ...   # run in the foreground
+#   bash run_pipeline_cnn_transformer.sh --tmux-session exp2 ...  # parallel/other run
 
 set -e
+ORIG_ARGS=("$@")
 
 export PYTHONPATH="$(pwd)/research/models${PYTHONPATH:+:$PYTHONPATH}"
 export PYTORCH_ALLOC_CONF=expandable_segments:True
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+# Python block-buffers stdout into a pipe; without this the tee'd log and the
+# tmux pane lag by minutes.
+export PYTHONUNBUFFERED=1
 
 # ── Defaults ────────────────────────────────────────────────────────────────
 DATA_DIR="data/asl-is-lmdb"          # downloaded from shravnchandr/asl-is-lmdb
@@ -41,6 +53,8 @@ LMDB_WORKERS=4
 COMPILE=false
 BACKBONE_WARMUP_EPOCHS=5   # epochs to freeze backbone after loading pretrained weights
 BACKBONE_LR_RATIO=0.1       # backbone LR as fraction of head LR after warmup
+USE_TMUX=true
+TMUX_SESSION="islr"
 
 # Fingerspelling pre-training
 FS_DATA_DIR="data/asl-fs-lmdb"       # downloaded from shravnchandr/asl-fs-lmdb
@@ -85,9 +99,37 @@ while [[ $# -gt 0 ]]; do
         --compile)                 COMPILE=true;                  shift ;;
         --backbone-warmup-epochs)  BACKBONE_WARMUP_EPOCHS="$2";  shift 2 ;;
         --backbone-lr-ratio)       BACKBONE_LR_RATIO="$2";       shift 2 ;;
+        --no-tmux)                 USE_TMUX=false;               shift ;;
+        --tmux-session)            TMUX_SESSION="$2";            shift 2 ;;
         *) echo "Unknown argument: $1"; exit 1 ;;
     esac
 done
+
+# ── tmux: relaunch detached so the run survives a closed terminal ───────────
+if [ "$USE_TMUX" = true ] && [ -z "${TMUX:-}" ]; then
+    if ! command -v tmux >/dev/null 2>&1; then
+        echo "tmux not found. Install it (apt-get install -y tmux) or pass --no-tmux." >&2
+        exit 1
+    fi
+    if tmux has-session -t "=$TMUX_SESSION" 2>/dev/null; then
+        echo "tmux session '$TMUX_SESSION' already exists — a run may be in progress." >&2
+        echo "  attach:  tmux attach -t $TMUX_SESSION" >&2
+        echo "  or start another with --tmux-session <name>, or end it: tmux kill-session -t $TMUX_SESSION" >&2
+        exit 1
+    fi
+    mkdir -p logs
+    LOG="logs/cnn_transformer_$(date +%Y%m%d_%H%M%S).log"
+    # Child runs with --no-tmux (no recursion). The pane stays open afterwards
+    # (exec bash) so the final output and exit code can still be inspected.
+    RUN_CMD=$(printf '%q ' bash "$0" "${ORIG_ARGS[@]}" --no-tmux)
+    INNER="set -o pipefail; $RUN_CMD 2>&1 | tee $(printf '%q' "$LOG"); code=\$?; echo; echo \"[pipeline exited with code \$code — log: $LOG]\"; exec bash"
+    tmux new-session -d -s "$TMUX_SESSION" -c "$(pwd)" bash -c "$INNER"
+    echo "Started in tmux session '$TMUX_SESSION'. It keeps running if you disconnect."
+    echo "  watch live:  tmux attach -t $TMUX_SESSION     (detach: Ctrl-b then d)"
+    echo "  log file:    tail -f $LOG"
+    echo "  stop run:    tmux kill-session -t $TMUX_SESSION"
+    exit 0
+fi
 
 # If --pretrained-backbone is given directly, skip the pre-training stage
 if [ -n "$PRETRAINED_BACKBONE" ]; then
@@ -197,5 +239,7 @@ uv run python -m cnn_transformer.train \
 
 echo ""
 echo "========================================"
-echo "Training complete. Best model: $CHECKPOINT_DIR/best_final.pth"
+# best_final.pth only exists if Phase 2 ran and beat the Phase 1 best.
+if [ -f "$CHECKPOINT_DIR/best_final.pth" ]; then BEST="$CHECKPOINT_DIR/best_final.pth"; else BEST="$CHECKPOINT_DIR/best_phase1.pth"; fi
+echo "Training complete. Best model: $BEST"
 echo "========================================"
