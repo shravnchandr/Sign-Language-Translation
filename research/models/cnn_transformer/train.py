@@ -437,6 +437,17 @@ def main():
         "exceed 128, 0.3%% exceed 256).",
     )
     parser.add_argument(
+        "--hand-drop-prob",
+        type=float,
+        default=0.0,
+        help="Per-hand probability of dropping a contiguous span of frames the way "
+        "MediaPipe tracking gaps appear in the data (0 = off).",
+    )
+    parser.add_argument("--hand-drop-min", type=float, default=0.1,
+                        help="Min dropped span, as a fraction of the clip.")
+    parser.add_argument("--hand-drop-max", type=float, default=0.4,
+                        help="Max dropped span, as a fraction of the clip.")
+    parser.add_argument(
         "--stretch-mode",
         choices=["batch", "sample"],
         default="batch",
@@ -521,6 +532,7 @@ def main():
         val_fold=args.val_fold,
         n_folds=args.n_folds,
         max_frames=args.max_frames,
+        hand_drop=(args.hand_drop_prob, args.hand_drop_min, args.hand_drop_max),
     )
 
     grl_active = args.grl_lambda > 0.0 and n_signers > 0
@@ -605,6 +617,11 @@ def main():
         stretch_prob=args.stretch_prob,
     )
     print(f"Max frames  : {args.max_frames}")
+    print(
+        "Hand dropout: "
+        + (f"p={args.hand_drop_prob}, span {args.hand_drop_min}–{args.hand_drop_max} of clip"
+           if args.hand_drop_prob > 0 else "off")
+    )
     print(
         f"Time stretch: {args.stretch_mode} {args.stretch_min}–{args.stretch_max}× "
         f"(p={args.stretch_prob})"

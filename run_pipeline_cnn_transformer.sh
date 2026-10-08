@@ -16,6 +16,7 @@
 #   bash run_pipeline_cnn_transformer.sh --val-fold 0              # signer fold 0 of 7 (CV)
 #   bash run_pipeline_cnn_transformer.sh --stretch-mode sample --stretch-min 0.5 --stretch-max 2.0 --stretch-prob 0.8
 #   bash run_pipeline_cnn_transformer.sh --max-frames 256           # keep long clips longer (default 128)
+#   bash run_pipeline_cnn_transformer.sh --hand-drop-prob 0.5       # simulate hand-tracking gaps (default off)
 #
 # Recommended (downloaded LMDB datasets, skip all local builds):
 #   bash run_pipeline_cnn_transformer.sh --skip-pretrain
@@ -120,7 +121,7 @@ while [[ $# -gt 0 ]]; do
         --backbone-lr-ratio)       BACKBONE_LR_RATIO="$2";       shift 2 ;;
         --val-fold)                VAL_FOLD="$2";                shift 2 ;;
         --n-folds)                 N_FOLDS="$2";                 shift 2 ;;
-        --stretch-mode|--stretch-min|--stretch-max|--stretch-prob|--max-frames)
+        --stretch-mode|--stretch-min|--stretch-max|--stretch-prob|--max-frames|--hand-drop-prob|--hand-drop-min|--hand-drop-max)
                                    TRAIN_EXTRA_ARGS+=("$1" "$2"); shift 2 ;;
         --no-tmux)                 USE_TMUX=false;               shift ;;
         --tmux-session)            TMUX_SESSION="$2";            shift 2 ;;

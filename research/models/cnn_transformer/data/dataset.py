@@ -9,7 +9,7 @@ from pathlib import Path
 from torch.utils.data import DataLoader, Dataset, Sampler
 from typing import Dict, List, Optional, Tuple
 from sklearn.model_selection import GroupKFold, GroupShuffleSplit, train_test_split
-from .augmentation import augment_sample
+from .augmentation import augment_sample, hand_dropout
 from .preprocessing import frame_stacked_data, hand_presence
 from ._cache_keys import (
     CACHE_VERSION,
@@ -94,8 +94,12 @@ class ASLDataset(Dataset):
         max_frames: int = 128,
         augment: bool = False,
         signer_to_id: Optional[Dict[str, int]] = None,
+        hand_drop: Optional[Tuple[float, float, float]] = None,
     ):
+        """hand_drop: (prob, min_frac, max_frac) for hand_dropout(), applied
+        only when augment=True; None or prob 0 disables it."""
         self.df = df.reset_index(drop=True)
+        self.hand_drop = hand_drop
         self.base_path = Path(base_path)
         self.cache_dir = Path(cache_dir) if cache_dir else None
         self.max_frames = max_frames
@@ -260,6 +264,9 @@ class ASLDataset(Dataset):
         coords, presence = hand_presence(coords)  # presence: (T, 2)
 
         if self.augment:
+            if self.hand_drop and self.hand_drop[0] > 0:
+                # Before noise and velocity, so a dropped span looks like a real gap.
+                coords, presence = hand_dropout(coords, presence, *self.hand_drop)
             coords = torch.tensor(augment_sample(coords.numpy()), dtype=torch.float32)
 
         if coords.shape[0] > self.max_frames:
@@ -335,6 +342,7 @@ def get_data_loaders(
     max_frames: int = 128,
     val_fold: Optional[int] = None,
     n_folds: int = 7,
+    hand_drop: Optional[Tuple[float, float, float]] = None,
 ) -> Tuple[DataLoader, DataLoader, int]:
     """
     Args:
@@ -350,6 +358,8 @@ def get_data_loaders(
                      every fold in turn is k-fold cross-validation by signer.
         n_folds:     Number of signer folds (7 → 3 of 21 signers per fold,
                      matching the default split's size).
+        hand_drop:   (prob, min_frac, max_frac) hand-dropout augmentation for
+                     the training set only; None = off.
 
     Returns:
         (train_loader, test_loader, n_signers) where n_signers is the number of unique
@@ -419,6 +429,7 @@ def get_data_loaders(
         max_frames=max_frames,
         augment=True,
         signer_to_id=signer_to_id,
+        hand_drop=hand_drop,
     )
     test_dataset = ASLDataset(
         test_df,

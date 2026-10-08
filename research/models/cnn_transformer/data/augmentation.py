@@ -5,6 +5,7 @@ from ..config import (
     COORDS_PER_LM,
     COORD_FEAT,
     LH_START,
+    N_LH,
     RH_START,
     PRESENCE_START,
     FINGER_LM_RANGES,
@@ -28,6 +29,48 @@ def augment_sample(
             video_coordinates.reshape(T, -1, COORDS_PER_LM) + shift
         ).reshape(T, D)
     return video_coordinates
+
+
+def hand_dropout(
+    coords: torch.Tensor,
+    presence: torch.Tensor,
+    prob: float = 0.5,
+    min_frac: float = 0.1,
+    max_frac: float = 0.4,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Simulate MediaPipe losing a hand for a stretch of frames.
+
+    Signer diagnostics: the fraction of frames with no hand detected ranks
+    per-signer accuracy almost perfectly (Spearman -0.94 over 6 val signers),
+    and well-tracked training signers rarely show such gaps. For each hand that
+    is detected at all, with probability `prob`, one contiguous span covering
+    U(min_frac, max_frac) of the clip is dropped exactly the way the stored data
+    encodes a real gap: positions frozen at the last detection before the span
+    (the first one after it, for a span at the start) and presence set to 0.
+
+    Must run on hand_presence() output, before noise / velocity, so a dropped
+    span is indistinguishable from a real one. Uses torch's RNG (seeded per
+    DataLoader worker).
+
+    coords: (T, COORD_FEAT) filled positions; presence: (T, 2) [lh, rh].
+    Returns modified copies.
+    """
+    T = coords.shape[0]
+    if prob <= 0.0 or T < 3:
+        return coords, presence
+    coords, presence = coords.clone(), presence.clone()
+    width = N_LH * COORDS_PER_LM
+    for h, start in enumerate((LH_START, RH_START)):
+        if not presence[:, h].any() or torch.rand(()) >= prob:
+            continue
+        frac = min_frac + (max_frac - min_frac) * torch.rand(()).item()
+        span = min(max(1, round(frac * T)), T - 1)  # never drop the whole clip
+        s = int(torch.randint(0, T - span + 1, ()))
+        e = s + span
+        hold = coords[s - 1 if s > 0 else e, start : start + width]
+        coords[s:e, start : start + width] = hold
+        presence[s:e, h] = 0.0
+    return coords, presence
 
 
 class AdvancedAugmentation:
