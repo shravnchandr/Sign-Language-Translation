@@ -25,6 +25,40 @@ class GLU(nn.Module):
         return out * torch.sigmoid(gate)
 
 
+class MaskedBatchNorm1d(nn.BatchNorm1d):
+    """BatchNorm1d whose batch statistics ignore padded frames.
+
+    nn.BatchNorm1d averages over every (batch, time) position, so padding
+    shifts both the training normalisation and the running statistics used at
+    evaluation. With a (B, T) validity mask, mean / variance (and the running
+    update) use valid frames only, and padded outputs are zeroed. Same
+    parameters and buffers as nn.BatchNorm1d, so checkpoints are compatible.
+    Statistics are computed in fp32 under autocast.
+    """
+
+    def forward(self, x, mask=None):
+        if mask is None:
+            return super().forward(x)
+        m = mask[:, None, :].to(torch.float32)  # (B, 1, T)
+        xf = x.float()
+        if self.training:
+            n = m.sum().clamp(min=2.0)
+            mean = (xf * m).sum((0, 2)) / n
+            var = ((xf - mean[None, :, None]).pow(2) * m).sum((0, 2)) / n
+            with torch.no_grad():
+                self.num_batches_tracked += 1
+                self.running_mean.mul_(1 - self.momentum).add_(self.momentum * mean)
+                self.running_var.mul_(1 - self.momentum).add_(
+                    self.momentum * var * n / (n - 1)
+                )
+        else:
+            mean, var = self.running_mean, self.running_var
+        y = (xf - mean[None, :, None]) * torch.rsqrt(var[None, :, None] + self.eps)
+        if self.affine:
+            y = y * self.weight[None, :, None] + self.bias[None, :, None]
+        return (y * m).to(x.dtype)
+
+
 class ConformerConvModule(nn.Module):
     """Convolution module used in Conformer blocks."""
 
@@ -38,22 +72,27 @@ class ConformerConvModule(nn.Module):
         self.depthwise_conv = nn.Conv1d(
             d_model, d_model, kernel_size, padding=kernel_size // 2, groups=d_model
         )
-        self.batch_norm = nn.BatchNorm1d(d_model)
+        self.batch_norm = MaskedBatchNorm1d(d_model)
         self.swish = Swish()
         # Pointwise Conv 2
         self.pointwise_conv2 = nn.Linear(d_model, d_model)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x):
-        # x: (B, T, D)
+    def forward(self, x, mask=None):
+        # x: (B, T, D); mask: (B, T) True = valid
         x = self.layer_norm(x)
         x = self.pointwise_conv1(x)
         x = self.glu(x)  # (B, T, D)
+        if mask is not None:
+            # LayerNorm's bias and pointwise_conv1's bias make zeroed padding
+            # nonzero again; re-zero it right before the temporal conv so it
+            # cannot leak into valid boundary frames.
+            x = x * mask.unsqueeze(-1)
 
         # Prepare for Depthwise Conv1d
         x = x.transpose(1, 2)  # (B, D, T)
         x = self.depthwise_conv(x)
-        x = self.batch_norm(x)
+        x = self.batch_norm(x, mask)
         x = self.swish(x)
         x = x.transpose(1, 2)  # (B, T, D)
 
@@ -125,7 +164,7 @@ class ConformerBlock(nn.Module):
         # so padded slots stay clean in the residual stream.
         if mask is not None:
             x = x * mask.unsqueeze(-1)
-        conv_out = self.conv(x)
+        conv_out = self.conv(x, mask)
         if mask is not None:
             conv_out = conv_out * mask.unsqueeze(-1)
         x = x + conv_out

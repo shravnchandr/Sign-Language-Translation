@@ -55,7 +55,7 @@ class HandDominanceModule(nn.Module):
           ≈ 0.5 → both hands equally active (symmetric two-handed sign)
         Passed to dist_proj so the model can weight hand streams by ambiguity.
         """
-        # x: (B, T, IN_FEAT) — caller owns x (already cloned upstream).
+        # x: (B, T, IN_FEAT) — LandmarkConformer.forward passes its own clone.
         # xy only: wrist z in storage is a coordinate-system artifact (see
         # LandmarkConformer._fix_depth), up to ~80% of raw wrist motion energy.
         lh_wrist_vel = x[:, :, COORD_FEAT + LH_START : COORD_FEAT + LH_START + 2]
@@ -245,6 +245,10 @@ class LandmarkConformer(nn.Module):
 
     def forward(self, x, mask, grl_lambda: float = 0.0):
         B, T, _ = x.shape
+        # Mirroring, wrist normalisation and the depth fix all write in place;
+        # without this, calling the model twice on one tensor gave different
+        # outputs (max |Δlogit| up to 7.8).
+        x = x.clone()
 
         x, dom_ratio = self.hand_dominance(x)  # mirror; dom_ratio (B,) = dom/total
         x = self.wrist_norm(x)  # landmark 0 = location, landmarks 1-20 = shape
