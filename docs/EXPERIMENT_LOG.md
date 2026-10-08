@@ -81,6 +81,9 @@ Tracking every training run, the config used, and the result. Goal: 250-class AS
 - Train acc at convergence:     ~0.42
 
 **Analysis:**
+- *(2026-10-08 correction: train acc here is measured on augmented, mixup-mixed inputs and is not
+  comparable to val — this bullet does not establish anything about overfitting. See "Review
+  corrections".)*
 - Overfitting eliminated: train acc ~0.42 vs val acc ~0.755 — inverse of Run 001's 99.9% / 74.6% pattern. Heavy aug + mixup + smaller model all contributing.
 - Phase 2 didn't improve on Phase 1 best (P2 peak 0.7551 vs 0.7555); warmdown acted as polishing, not exploration. `best_final.pth` is the Phase 1 checkpoint.
 - Phase 2 train loss climbed 0.40 → 0.65 over the first ~6 epochs — expected warm restart at LR=1e-4 after Phase 1 finished at LR~8e-6. Val acc held steady throughout.
@@ -275,7 +278,10 @@ batch guard, and separate sign/adv loss logging. Default val split; 80 epochs;
   gain over Run 004 is the LR-annealing phase it got to use (+1.7 pt from epoch 50 to 79).
 - **Plateau:** +0.3 pt over the last 20 epochs at this recipe/length.
 - **GRL working, slowly:** adv loss 2.73 → 2.80 (chance ln 18 = 2.89), disc acc 0.111 → 0.092.
-- **Still underfitting:** train 0.80 ≈ val 0.77 — capacity is not being used; next levers are
+  *(Correction: low discriminator accuracy — measured against original ids under mixup — does not
+  show signer invariance; needs a GRL on/off ablation and a frozen-embedding signer probe.)*
+- **Still underfitting:** train 0.80 ≈ val 0.77 *(correction: not comparable — augmented
+  mixup-weighted train acc vs clean val; use the new "Clean Train" metric)* — capacity is not being used; next levers are
   training length and lighter regularisation (see 1st-place comparison below), measured
   with `--val-fold` / per-signer accuracy.
 
@@ -330,8 +336,38 @@ Duration is a minor factor — it does not close 34503's ~22 pt gap to 62590. Ne
 only 49445 (highest `no_hand`) moves, within noise. Train acc drops slightly (0.795 → 0.784). The
 `no_hand` correlation is real but not addressable by robustness training: when MediaPipe loses the hand
 (per prior work, mostly hand–face and hand–hand contact) the discriminative information is absent from
-the input. The limit for these signers is landmark extraction, not the classifier. Hand dropout is
+the input. *(Correction: this is a hypothesis, not a conclusion — six signers and one augmentation
+run cannot separate tracking quality from duration, framing, signing style or the depth artifact
+found afterwards.)* Hand dropout is
 dropped from the recipe; current best = Run 005 recipe + per-clip stretch (fold 0: 0.6802).
+
+---
+
+## Review corrections & fixes (2026-10-08)
+An external code review raised five pipeline issues and five over-strong conclusions. All
+measurable claims reproduced locally (Run 005 checkpoint, local parquets):
+
+| Issue | Measured | Fix (commit) |
+|---|---|---|
+| Nose-z subtracted from hand/face z (different MediaPipe depth frames) | raw wrist z 0.000 → stored 1.46–1.53; **52–82% of wrist velocity energy** is this artifact; hand–nose distance dominated by it | xy for dominance / hand–nose distance / shoulder scale; wrist z → 0; face z re-centred per frame; finger z kept (= raw wrist-relative z to 1e-6) (`70e651a`) |
+| Finger dropout zeroed fingers before wrist subtraction → finger = −wrist | code | dropped finger collapses onto its wrist → exactly 0 in wrist frame (`5cf402c`) |
+| Never-detected hands got noise/shift geometry in training only | code | re-zeroed after `augment_sample`; TTA noise skips them (`5cf402c`) |
+| Batch stretch & TTA interpolated Δ1 with positions, and blended short clips' last frames with padding | 2× stretch kept Δ1 at 1.0 while positions moved 0.5 | all resampling via `_resample_prefix`: valid frames only, Δ1 rebuilt (`5cf402c`) |
+| Padding leaked into depthwise conv; BatchNorm counted padded frames | +10 masked frames changed logits by up to **0.165** (6-frame clip) | re-mask before depthwise conv + `MaskedBatchNorm1d`; now ≤ 1e-3 (`b14f75e`) |
+| `forward()` mutated its input | same tensor twice → max Δlogit **7.8** | clone at the model boundary (`b14f75e`) |
+| No seeding; focal modulation from weighted smoothed CE; only augmented train acc | code; class counts 299–415 | `--seed` (default 42), `--loss ce`, `--train-eval-size` "Clean Train" metric (`b62a3e3`) |
+
+**Corrected conclusions** (marked inline above):
+- "No overfitting" / "underfitting" claims compared augmented, mixup-weighted train acc with clean val —
+  unsupported. Use Clean Train.
+- "GRL working" (low disc acc) — unsupported; needs on/off ablation + clean signer probe.
+- Hand-dropout null result ≠ proof of an extraction ceiling — a hypothesis.
+- Signer diagnostics "hard signers sign at normal per-frame speed" — that `speed` used wrist xyz, mostly
+  the z artifact; recomputed in xy from now on. The duration/no-hand correlations used other columns
+  and stand, but remain n=6.
+- **All runs up to and including fold0_stretch_handdrop carry the depth artifact and the other bugs.**
+  Their relative comparisons (same bugs on both sides) are informative, but the next seeded run with all
+  fixes is a new baseline, not directly comparable to the 0.668 / 0.680 fold-0 numbers.
 
 ---
 
