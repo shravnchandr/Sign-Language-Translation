@@ -16,6 +16,7 @@ from .data.dataset import clean_subset_loader, get_data_loaders
 from .data.augmentation import AdvancedAugmentation, mixup_batch
 from .model.landmark_conformer import HandDominanceModule, LandmarkConformer
 from .model.grl import ganin_lambda
+from .model.supcon import CrossSignerSupCon
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 use_amp = device.type == "cuda"
@@ -76,12 +77,19 @@ def train_epoch(
     stretch_prob=0.5,
     mixup_prob=1.0,
     finger_drop_prob=0.5,
+    affine_rot=15.0,
+    affine_shear=0.0,
+    affine_scale=0.0,
+    affine_prob=0.5,
+    supcon=None,
+    supcon_weight=0.0,
 ):
     model.train()
     train_loss, correct, total = 0, 0, 0
     # Logged separately: the adversarial term (≈ ln(n_signers) at chance) jumps
     # the total as the GRL ramps on, which reads like divergence if summed.
     sign_sum, adv_sum, adv_n = 0.0, 0.0, 0
+    con_sum, con_n, con_pos = 0.0, 0, 0.0
     disc_correct, disc_total = 0, 0
     optimizer.zero_grad(set_to_none=True)
 
@@ -138,11 +146,11 @@ def train_epoch(
                 )
 
             # Rotation — batched 2×2 matmul replaces D//2 Python iterations
-            sel_rot = torch.rand(B, device=x.device) > 0.5
+            sel_rot = torch.rand(B, device=x.device) > 1.0 - affine_prob
             if sel_rot.any():
                 sel_idx = torch.where(sel_rot)[0]
-                x[sel_idx] = AdvancedAugmentation.spatial_rotation(
-                    x[sel_idx], max_angle=15
+                x[sel_idx] = AdvancedAugmentation.spatial_affine(
+                    x[sel_idx], affine_rot, affine_shear, affine_scale
                 )
 
             if finger_drop_prob > 0:
@@ -152,6 +160,8 @@ def train_epoch(
         # then told not to re-mirror, since a mixture can flip dominance.
         with torch.no_grad():
             x, _ = canon(x, mask)
+
+        x_clean, mask_clean = x, mask  # canonicalised, augmented, unmixed
 
         # --- Mixup ---
         y_a, y_b, lam, mixup_idx = y, None, 1.0, None
@@ -207,6 +217,15 @@ def train_epoch(
             else:
                 loss = sign_loss
 
+            con_loss = None
+            if supcon is not None and supcon_weight > 0:
+                # Contrastive term on the unmixed clips (a mixture belongs to
+                # two signs, so it has no clean positive), second forward pass.
+                base = getattr(model, "_orig_mod", model)
+                emb = model(x_clean, mask_clean, canonical=True, return_embedding=True)
+                con_loss, pos_frac = supcon(base.proj_head(emb), y, signer_ids)
+                loss = loss + supcon_weight * con_loss
+
         if not torch.isfinite(loss):
             # Undo this batch's BN stat update and skip its backward entirely.
             for buf, saved in zip(bn_buffers, bn_snapshot):
@@ -231,6 +250,10 @@ def train_epoch(
         if adv_loss is not None:
             adv_sum += adv_loss.item()
             adv_n += 1
+        if con_loss is not None:
+            con_sum += con_loss.detach().item()
+            con_pos += pos_frac
+            con_n += 1
         # Under mixup the target is lam·y_a + (1−lam)·y_b; scoring against y_a
         # alone roughly halves reported accuracy with Beta(0.2, 0.2).
         pred = logits.argmax(dim=1)
@@ -274,6 +297,8 @@ def train_epoch(
         "loss": train_loss / n_ok,  # sign + adv
         "sign_loss": sign_sum / n_ok,
         "adv_loss": adv_sum / adv_n if adv_n else None,
+        "con_loss": con_sum / con_n if con_n else None,
+        "con_pos": con_pos / con_n if con_n else None,
         "acc": correct / max(total, 1),
         "disc_acc": disc_correct / disc_total if disc_total > 0 else None,
     }
@@ -284,6 +309,8 @@ def _train_str(stats: dict) -> str:
     out = f"Sign Loss: {stats['sign_loss']:.4f}"
     if stats["adv_loss"] is not None:
         out += f" | Adv Loss: {stats['adv_loss']:.4f}"
+    if stats.get("con_loss") is not None:
+        out += f" | Con Loss: {stats['con_loss']:.4f} (pos {stats['con_pos']:.0%})"
     return out + f" | Train Acc: {stats['acc']:.4f}"
 
 
@@ -423,6 +450,18 @@ def main():
         help="Max GRL adversarial weight for signer-invariance (0 = disabled). "
         "Ramped from 0 via Ganin schedule.",
     )
+    parser.add_argument("--supcon-weight", type=float, default=0.0,
+                        help="Weight of the cross-signer supervised contrastive loss (0 = off).")
+    parser.add_argument("--supcon-temp", type=float, default=0.1, help="Contrastive temperature.")
+    parser.add_argument("--supcon-queue", type=int, default=4096,
+                        help="Cross-batch memory size (recent embeddings) for the contrastive loss.")
+    parser.add_argument("--supcon-dim", type=int, default=128, help="Contrastive projection size.")
+    parser.add_argument("--aug-rotate", type=float, default=15.0, help="Max in-plane rotation (deg).")
+    parser.add_argument("--aug-shear", type=float, default=0.0, help="Max shear (0 = off).")
+    parser.add_argument("--aug-scale", type=float, default=0.0,
+                        help="Max per-axis (anisotropic) scale deviation (0 = off).")
+    parser.add_argument("--aug-affine-prob", type=float, default=0.5,
+                        help="Per-clip probability of the spatial affine (rotation/shear/scale).")
     parser.add_argument("--mixup-prob", type=float, default=1.0,
                         help="Probability a batch is mixed (1.0 = every batch, Runs 001–005; 0 = off).")
     parser.add_argument("--finger-drop-prob", type=float, default=0.5,
@@ -570,6 +609,7 @@ def main():
         n_signers=n_signers if grl_active else 0,
         zero_parts=tuple(p for p in args.zero_parts.split(",") if p),
         use_depth=not args.no_depth,
+        supcon_dim=args.supcon_dim if args.supcon_weight > 0 else 0,
     ).to(device)
 
     missing: list = []
@@ -658,6 +698,24 @@ def main():
         stretch_prob=args.stretch_prob,
         mixup_prob=args.mixup_prob,
         finger_drop_prob=args.finger_drop_prob,
+        affine_rot=args.aug_rotate,
+        affine_shear=args.aug_shear,
+        affine_scale=args.aug_scale,
+        affine_prob=args.aug_affine_prob,
+        supcon=(
+            CrossSignerSupCon(args.supcon_dim, args.supcon_queue, args.supcon_temp).to(device)
+            if args.supcon_weight > 0 else None
+        ),
+        supcon_weight=args.supcon_weight,
+    )
+    print(
+        f"Spatial aug : rotate ±{args.aug_rotate}°, shear ±{args.aug_shear}, "
+        f"scale ±{args.aug_scale} (p={args.aug_affine_prob})"
+    )
+    print(
+        "Contrastive : "
+        + (f"cross-signer SupCon w={args.supcon_weight}, τ={args.supcon_temp}, "
+           f"queue {args.supcon_queue}, dim {args.supcon_dim}" if args.supcon_weight > 0 else "off")
     )
     print(
         f"Regularisers: mixup p={args.mixup_prob}, finger drop p={args.finger_drop_prob} | "

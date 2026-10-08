@@ -204,36 +204,50 @@ class AdvancedAugmentation:
         return x
 
     @staticmethod
-    def spatial_rotation(x, max_angle=15):
-        """Per-sample z-axis rotation via batched 2×2 matmul (no Python coord loop)."""
+    def spatial_affine(x, max_angle=15, max_shear=0.0, max_scale=0.0):
+        """Per-sample in-plane affine on x, y of positions and Δ1 (batched 2×2).
+
+        A = R(θ) · Shear(s) · diag(1+a, 1+b): rotation θ ~ U(±max_angle°),
+        shear s ~ U(±max_shear), per-axis scale a, b ~ U(±max_scale). Simulates
+        camera angle and body-proportion differences between signers. About the
+        origin (the nose), so body-relative layout is kept; a uniform scale or
+        global shift is omitted (shoulder-width normalisation undoes the first,
+        the second only adds a nuisance offset). Linear, so Δ1 stays equal to
+        the difference of the transformed positions. z and presence untouched.
+        With max_shear = max_scale = 0 this is exactly the previous rotation
+        (same random draws).
+        """
         B, T, _ = x.shape
         presence = x[..., PRESENCE_START:]
         x = x[..., :PRESENCE_START]
         D = PRESENCE_START
-        angles = torch.tensor(
-            np.radians(np.random.uniform(-max_angle, max_angle, B)),
-            dtype=x.dtype,
-            device=x.device,
-        )  # (B,)
+        kw = dict(dtype=x.dtype, device=x.device)
+        angles = torch.tensor(np.radians(np.random.uniform(-max_angle, max_angle, B)), **kw)
         cos_a, sin_a = torch.cos(angles), torch.sin(angles)
-        # (B, 2, 2) rotation matrices, broadcast over T and K (landmark pairs)
-        rot = torch.stack(
-            [
-                torch.stack([cos_a, -sin_a], dim=-1),
-                torch.stack([sin_a, cos_a], dim=-1),
-            ],
+        A = torch.stack(
+            [torch.stack([cos_a, -sin_a], dim=-1), torch.stack([sin_a, cos_a], dim=-1)],
             dim=-2,
-        )  # (B, 2, 2)
-        # Reshape to expose (x,y) pairs: (B, T, K, C) where K = D // COORDS_PER_LM
+        )  # (B, 2, 2) rotation
+        if max_shear > 0:
+            sh = torch.tensor(np.random.uniform(-max_shear, max_shear, B), **kw)
+            S = torch.eye(2, **kw).repeat(B, 1, 1)
+            S[:, 0, 1] = sh
+            A = A @ S
+        if max_scale > 0:
+            sc = torch.tensor(1.0 + np.random.uniform(-max_scale, max_scale, (B, 2)), **kw)
+            A = A @ torch.diag_embed(sc)
         x_lm = x.reshape(B, T, D // COORDS_PER_LM, COORDS_PER_LM)
-        xy = x_lm[..., :2]  # (B, T, K, 2) — covers all pairs when COORDS_PER_LM==2
-        # Batched matmul: rot[:, None, None] is (B,1,1,2,2), xy[..., None] is (B,T,K,2,1)
-        xy_rot = (rot[:, None, None] @ xy.unsqueeze(-1)).squeeze(-1)  # (B, T, K, 2)
+        xy = (A[:, None, None] @ x_lm[..., :2].unsqueeze(-1)).squeeze(-1)  # (B, T, K, 2)
         if COORDS_PER_LM == 2:
-            return torch.cat([xy_rot.reshape(B, T, D), presence], dim=-1)
+            return torch.cat([xy.reshape(B, T, D), presence], dim=-1)
         x_lm_out = x_lm.clone()
-        x_lm_out[..., :2] = xy_rot
+        x_lm_out[..., :2] = xy
         return torch.cat([x_lm_out.reshape(B, T, D), presence], dim=-1)
+
+    @staticmethod
+    def spatial_rotation(x, max_angle=15):
+        """Per-sample in-plane rotation (spatial_affine without shear/scale)."""
+        return AdvancedAugmentation.spatial_affine(x, max_angle)
 
     @staticmethod
     def finger_dropout_batch(x, sample_prob=0.5, dropout_prob=0.25):

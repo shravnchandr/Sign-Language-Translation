@@ -102,6 +102,7 @@ class LandmarkConformer(nn.Module):
         ctc_vocab_size=0,
         zero_parts=(),
         use_depth=True,
+        supcon_dim=0,
     ):
         """zero_parts ⊆ {"face", "pose"} and use_depth=False are input ablations
         (inputs zeroed inside the model, train and eval alike; no new params):
@@ -188,6 +189,12 @@ class LandmarkConformer(nn.Module):
         self.ctc_head = (
             nn.Linear(d_model, ctc_vocab_size + 1) if ctc_vocab_size > 0 else None
         )
+        # Training-only projection for the cross-signer contrastive loss
+        # (model/supcon.py); unused at inference.
+        self.proj_head = (
+            nn.Sequential(nn.Linear(d_model, d_model), nn.GELU(), nn.Linear(d_model, supcon_dim))
+            if supcon_dim > 0 else None
+        )
 
     @staticmethod
     def _fix_depth(x: torch.Tensor) -> torch.Tensor:
@@ -267,7 +274,10 @@ class LandmarkConformer(nn.Module):
 
         return features
 
-    def forward(self, x, mask, grl_lambda: float = 0.0, canonical: bool = False):
+    def forward(
+        self, x, mask, grl_lambda: float = 0.0, canonical: bool = False,
+        return_embedding: bool = False,
+    ):
         """canonical=True: the caller already mirrored x to the dominant-in-LH
         convention (training does this before mixup), so only dom_ratio is
         computed here — re-mirroring a mixture could flip it."""
@@ -394,6 +404,8 @@ class LandmarkConformer(nn.Module):
             x = block(x, mask)
 
         cls_out = x[:, 0]
+        if return_embedding:
+            return cls_out  # (B, d_model), for the contrastive projection
         sign_logits = self.head(cls_out)
         if self.training and self.signer_disc is not None and grl_lambda > 0.0:
             return sign_logits, self.signer_disc(cls_out, lam=grl_lambda)

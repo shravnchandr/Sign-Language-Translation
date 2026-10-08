@@ -19,6 +19,8 @@
 #   bash run_pipeline_cnn_transformer.sh --hand-drop-prob 0.5       # simulate hand-tracking gaps (default off)
 #   bash run_pipeline_cnn_transformer.sh --loss ce --seed 1         # loss ablation / another seed
 #   bash run_pipeline_cnn_transformer.sh --mixup-prob 0 / --finger-drop-prob 0 / --zero-parts face / --no-depth   # ablations
+#   bash run_pipeline_cnn_transformer.sh --supcon-weight 0.2        # cross-signer contrastive loss
+#   bash run_pipeline_cnn_transformer.sh --aug-rotate 30 --aug-shear 0.15 --aug-scale 0.2 --aug-affine-prob 0.75
 #
 # Recommended (downloaded LMDB datasets, skip all local builds):
 #   bash run_pipeline_cnn_transformer.sh --skip-pretrain
@@ -123,7 +125,7 @@ while [[ $# -gt 0 ]]; do
         --backbone-lr-ratio)       BACKBONE_LR_RATIO="$2";       shift 2 ;;
         --val-fold)                VAL_FOLD="$2";                shift 2 ;;
         --n-folds)                 N_FOLDS="$2";                 shift 2 ;;
-        --stretch-mode|--stretch-min|--stretch-max|--stretch-prob|--max-frames|--hand-drop-prob|--hand-drop-min|--hand-drop-max|--seed|--train-eval-size|--loss|--mixup-prob|--finger-drop-prob|--zero-parts)
+        --stretch-mode|--stretch-min|--stretch-max|--stretch-prob|--max-frames|--hand-drop-prob|--hand-drop-min|--hand-drop-max|--seed|--train-eval-size|--loss|--mixup-prob|--finger-drop-prob|--zero-parts|--supcon-weight|--supcon-temp|--supcon-queue|--supcon-dim|--aug-rotate|--aug-shear|--aug-scale|--aug-affine-prob)
                                    TRAIN_EXTRA_ARGS+=("$1" "$2"); shift 2 ;;
         --no-depth)                TRAIN_EXTRA_ARGS+=("$1");   shift ;;
         --no-tmux)                 USE_TMUX=false;               shift ;;
