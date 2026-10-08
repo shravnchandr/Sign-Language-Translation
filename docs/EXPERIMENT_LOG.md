@@ -316,6 +316,23 @@ single seed (~1 pt run-to-run noise) so modest but likely real. Cost: 1m45s vs 1
 Duration is a minor factor — it does not close 34503's ~22 pt gap to 62590. Next: hand dropout on top
 (`--hand-drop-prob 0.5`), compared against this run.
 
+### Fold 0 + stretch + hand dropout (`--hand-drop-prob 0.5`, span 0.1–0.4)
+| | Baseline | Stretch | Stretch + drop | Δ drop vs stretch |
+|---|---|---|---|---|
+| best, pooled | 0.6680 | **0.6802** | 0.6774 | −0.3 |
+| TTA, pooled | 0.6674 | 0.6786 | 0.6777 | −0.1 |
+| avg ep 71–80, pooled | 0.6629 | 0.6743 | 0.6743 | ±0.0 |
+| 34503 (avg 71–80) | 0.5521 | 0.5708 | 0.5674 | −0.3 |
+| 49445 (avg 71–80) | 0.6458 | 0.6567 | 0.6658 | +0.9 |
+| 62590 (avg 71–80) | 0.7919 | 0.7964 | 0.7901 | −0.6 |
+
+**Null result.** Simulated tracking gaps do not help the signers with the most real gaps (34503 −0.3);
+only 49445 (highest `no_hand`) moves, within noise. Train acc drops slightly (0.795 → 0.784). The
+`no_hand` correlation is real but not addressable by robustness training: when MediaPipe loses the hand
+(per prior work, mostly hand–face and hand–hand contact) the discriminative information is absent from
+the input. The limit for these signers is landmark extraction, not the classifier. Hand dropout is
+dropped from the recipe; current best = Run 005 recipe + per-clip stretch (fold 0: 0.6802).
+
 ---
 
 ## Pending Ideas (not yet implemented)
