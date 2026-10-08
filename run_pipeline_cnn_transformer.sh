@@ -173,7 +173,7 @@ echo "  Phase 2 epochs:     $PHASE2_EPOCHS"
 echo "  Patience:           $PATIENCE"
 echo "  Batch size:         $BATCH_SIZE"
 echo "  Num workers:        $NUM_WORKERS"
-echo "  Validation:         ${VAL_FOLD:+fold $VAL_FOLD/$N_FOLDS}${VAL_FOLD:-default split}"
+if [ -n "$VAL_FOLD" ]; then echo "  Validation:         fold $VAL_FOLD/$N_FOLDS"; else echo "  Validation:         default split"; fi
 echo "  LMDB map size:      ${MAP_SIZE_GB:-1 TiB (default)}"
 echo "  Allow errors:       $ALLOW_ERRORS"
 echo "  torch.compile:      $COMPILE"
