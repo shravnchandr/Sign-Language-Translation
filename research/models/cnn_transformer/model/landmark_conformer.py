@@ -55,13 +55,11 @@ class HandDominanceModule(nn.Module):
           ≈ 0.5 → both hands equally active (symmetric two-handed sign)
         Passed to dist_proj so the model can weight hand streams by ambiguity.
         """
-        # x: (B, T, IN_FEAT) — caller owns x (already cloned upstream)
-        lh_wrist_vel = x[
-            :, :, COORD_FEAT + LH_START : COORD_FEAT + LH_START + COORDS_PER_LM
-        ]
-        rh_wrist_vel = x[
-            :, :, COORD_FEAT + RH_START : COORD_FEAT + RH_START + COORDS_PER_LM
-        ]
+        # x: (B, T, IN_FEAT) — caller owns x (already cloned upstream).
+        # xy only: wrist z in storage is a coordinate-system artifact (see
+        # LandmarkConformer._fix_depth), up to ~80% of raw wrist motion energy.
+        lh_wrist_vel = x[:, :, COORD_FEAT + LH_START : COORD_FEAT + LH_START + 2]
+        rh_wrist_vel = x[:, :, COORD_FEAT + RH_START : COORD_FEAT + RH_START + 2]
         lh_energy = (lh_wrist_vel**2).sum(dim=-1).mean(dim=1)  # (B,)
         rh_energy = (rh_wrist_vel**2).sum(dim=-1).mean(dim=1)  # (B,)
 
@@ -168,6 +166,33 @@ class LandmarkConformer(nn.Module):
         )
 
     @staticmethod
+    def _fix_depth(x: torch.Tensor) -> torch.Tensor:
+        """Remove the depth artifact of body-relative normalisation (in place).
+
+        MediaPipe z values live in different frames: hand z is relative to the
+        wrist (raw wrist z == 0), face z to the head, pose z to the hips. The
+        LMDB subtracts the pose nose from every landmark, z included, so a stored
+        wrist z is just -nose_z (≈ 1.5) plus pose-depth jitter — up to ~80% of
+        wrist motion energy in real clips — and face z carries the same offset.
+
+        Must run after WristNormalization (finger z − wrist z is the true
+        hand-relative depth, so finger and palm geometry keep their z):
+          - wrist z (pos and Δ1) → 0
+          - face z (pos and Δ1) re-centred per frame on the face mean
+        Pose z stays: pose z and nose z share the hip-centred frame.
+        """
+        if COORDS_PER_LM != 3:
+            return x
+        for half in (0, COORD_FEAT):
+            for hs in (LH_START, RH_START):
+                x[:, :, half + hs + 2] = 0.0
+            fz = x[:, :, half + FACE_START + 2 : half + COORD_FEAT : 3]
+            x[:, :, half + FACE_START + 2 : half + COORD_FEAT : 3] = fz - fz.mean(
+                -1, keepdim=True
+            )
+        return x
+
+    @staticmethod
     def _hand_geometry(hand: torch.Tensor) -> torch.Tensor:
         """
         Compute rotation-invariant hand shape descriptors in the wrist frame.
@@ -223,6 +248,7 @@ class LandmarkConformer(nn.Module):
 
         x, dom_ratio = self.hand_dominance(x)  # mirror; dom_ratio (B,) = dom/total
         x = self.wrist_norm(x)  # landmark 0 = location, landmarks 1-20 = shape
+        x = self._fix_depth(x)  # drop the nose-z artifact from wrist and face z
 
         # Dataset layout: [pos | vel1 | presence (lh, rh)]
         pos = x[:, :, :COORD_FEAT]
@@ -234,8 +260,9 @@ class LandmarkConformer(nn.Module):
         # the mean inter-shoulder distance over valid frames. Makes the model invariant
         # to camera distance and signer body size. Per-sequence mean (not per-frame)
         # avoids scale noise from shoulder movement within a sign.
-        lshoulder = pos[:, :, POSE_START + 11 * c : POSE_START + 12 * c]
-        rshoulder = pos[:, :, POSE_START + 12 * c : POSE_START + 13 * c]
+        # xy: image-plane scale; MediaPipe pose z is a noisy estimate.
+        lshoulder = pos[:, :, POSE_START + 11 * c : POSE_START + 11 * c + 2]
+        rshoulder = pos[:, :, POSE_START + 12 * c : POSE_START + 12 * c + 2]
         shoulder_w = (lshoulder - rshoulder).norm(dim=-1)  # (B, T)
         mean_sw = (shoulder_w * mask.float()).sum(1) / mask.float().sum(1).clamp(
             min=1
@@ -263,12 +290,9 @@ class LandmarkConformer(nn.Module):
 
         # Hand-nose distances: dominant and non-dominant wrist to nose (origin).
         # Encodes when hands are in the face region — gates relevance of face NMMs.
-        lh_dist = pos[:, :, LH_START : LH_START + c].norm(
-            dim=-1, keepdim=True
-        )  # (B, T, 1)
-        rh_dist = pos[:, :, RH_START : RH_START + c].norm(
-            dim=-1, keepdim=True
-        )  # (B, T, 1)
+        # xy only: with stored z the distance was dominated by the ~1.5 nose-z offset.
+        lh_dist = pos[:, :, LH_START : LH_START + 2].norm(dim=-1, keepdim=True)  # (B, T, 1)
+        rh_dist = pos[:, :, RH_START : RH_START + 2].norm(dim=-1, keepdim=True)  # (B, T, 1)
         dom_ratio_feat = dom_ratio[:, None, None].expand(B, T, 1)  # (B, T, 1)
         dist_feat = self.dist_proj(
             torch.cat([lh_dist, rh_dist, dom_ratio_feat, presence], dim=-1)

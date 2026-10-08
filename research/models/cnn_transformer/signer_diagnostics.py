@@ -17,7 +17,7 @@ any augmentation), i.e. what the model actually sees:
                   mirrors these (HandDominanceModule); a signer far from the
                   population norm here signs with the other hand
   dom_ratio       dominant hand's share of wrist motion (0.5 two-handed .. 1 one-handed)
-  speed           dominant-wrist motion per frame, in shoulder widths
+  speed           dominant-wrist xy motion per frame, in shoulder widths
   shoulder_w      shoulder width in image units (camera distance / framing proxy)
   pose_det, face_det  per-frame detection rate of pose / face landmarks
 
@@ -71,7 +71,9 @@ def clip_stats(coords: torch.Tensor) -> dict:
         active, lead, trail = 0, float("nan"), float("nan")
 
     def wrist(start):
-        return filled[:, start : start + _C]
+        # xy only: stored wrist z is -nose_z (a depth-frame artifact), which
+        # otherwise dominates wrist motion energy (52–82% in sampled clips).
+        return filled[:, start : start + 2]
 
     def energy(w):
         return float((w[1:] - w[:-1]).pow(2).sum(-1).mean()) if T > 1 else 0.0

@@ -257,12 +257,9 @@ def mixup_batch(x, y, mask, alpha=0.2):
     # (after mixup), so mixing a lh-dominant sample with a rh-dominant sample
     # produces ambiguous hand slot assignments. Pair same-dominance samples only.
     B, device = x.size(0), x.device
-    lh_wrist_vel = x[
-        :, :, COORD_FEAT + LH_START : COORD_FEAT + LH_START + COORDS_PER_LM
-    ]
-    rh_wrist_vel = x[
-        :, :, COORD_FEAT + RH_START : COORD_FEAT + RH_START + COORDS_PER_LM
-    ]
+    # xy only, matching HandDominanceModule (stored wrist z is an artifact).
+    lh_wrist_vel = x[:, :, COORD_FEAT + LH_START : COORD_FEAT + LH_START + 2]
+    rh_wrist_vel = x[:, :, COORD_FEAT + RH_START : COORD_FEAT + RH_START + 2]
     rh_dominant = (rh_wrist_vel**2).sum(-1).mean(1) > (lh_wrist_vel**2).sum(-1).mean(1)
 
     rh_idx = torch.where(rh_dominant)[0]
