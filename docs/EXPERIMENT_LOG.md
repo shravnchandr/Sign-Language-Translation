@@ -244,6 +244,43 @@ persist under bf16 it is a real numerical bug, not overflow.
 
 ---
 
+## Run 005 — Run 004 config + bf16 / non-finite guard / split loss logging
+**Date:** 2026-10-07
+**Hardware:** RunPod — NVIDIA A40
+**Config:** identical to Run 004 except bf16 autocast (no GradScaler), the non-finite
+batch guard, and separate sign/adv loss logging. Default val split; 80 epochs;
+`--checkpoint-dir checkpoints/run005`.
+
+**Timing:** avg 1m 18s/epoch; 80 epochs in 1h 44m (no early stop).
+
+**Result:**
+- Best val acc (deterministic): **0.7665** (epoch 79)
+- Best val acc (TTA): **0.7669**
+- No NaN epochs, **0 non-finite batches skipped** — bf16 alone removed the Run 004 failure
+
+| Epoch | Sign loss | Adv loss | Train acc | Val acc | Disc acc |
+|------:|----------:|---------:|----------:|--------:|---------:|
+| 10 | 2.815 | 2.729 | 0.433 | 0.555 | 0.111 |
+| 20 | 2.200 | 2.736 | 0.582 | 0.682 | 0.109 |
+| 30 | 1.907 | 2.749 | 0.657 | 0.718 | 0.108 |
+| 40 | 1.736 | 2.765 | 0.705 | 0.738 | 0.103 |
+| 50 | 1.550 | 2.781 | 0.751 | 0.750 | 0.099 |
+| 60 | 1.398 | 2.795 | 0.787 | 0.762 | 0.094 |
+| 70 | 1.340 | 2.794 | 0.802 | 0.765 | 0.096 |
+| **79** | 1.383 | 2.798 | 0.799 | **0.7665** | 0.092 |
+
+**Analysis:**
+- **Seed noise ≈ 1 pt.** At epoch 50 Run 004 had 0.7590 and Run 005 0.7499 with the
+  same recipe — differences under ~1 pt on this split are not evidence. Most of Run 005's
+  gain over Run 004 is the LR-annealing phase it got to use (+1.7 pt from epoch 50 to 79).
+- **Plateau:** +0.3 pt over the last 20 epochs at this recipe/length.
+- **GRL working, slowly:** adv loss 2.73 → 2.80 (chance ln 18 = 2.89), disc acc 0.111 → 0.092.
+- **Still underfitting:** train 0.80 ≈ val 0.77 — capacity is not being used; next levers are
+  training length and lighter regularisation (see 1st-place comparison below), measured
+  with `--val-fold` / per-signer accuracy.
+
+---
+
 ## Pending Ideas (not yet implemented)
 
 ### High priority

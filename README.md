@@ -11,7 +11,8 @@ All runs use a signer-independent val split (no test signer seen during training
 | 001 | LandmarkConformer (d_model=512, 49M) | 0.7462 | baseline |
 | 002 | LandmarkConformer (d_model=256, 6.5M) | 0.7555 | smaller model, GRL, stochastic depth, dominance-aware mixup |
 | 003 | + multi-scale velocity (Δ1/Δ2/Δ5), face split, depth | 0.7432 | slight regression — more features need more epochs to converge |
-| 004 | + geometry stream, hand presence, normalization fix, augmentation / handedness / GRL fixes | **0.7590** (TTA 0.7610) | best at epoch 50; a NaN batch at epoch 55 broke eval for the remaining epochs (fixed for Run 005) |
+| 004 | + geometry stream, hand presence, normalization fix, augmentation / handedness / GRL fixes | 0.7590 (TTA 0.7610) | best at epoch 50; a NaN batch at epoch 55 broke eval for the remaining epochs |
+| 005 | Run 004 + bf16 AMP, non-finite batch guard | **0.7665** (TTA 0.7669) | clean 80 epochs; plateaued — run-to-run noise ≈ 1 pt on this split |
 | — | Factorized VQ-VAE + Conformer | WIP | — |
 | — | ST-GCN | — | baseline, not yet run |
 
