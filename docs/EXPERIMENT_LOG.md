@@ -369,6 +369,17 @@ measurable claims reproduced locally (Run 005 checkpoint, local parquets):
   Their relative comparisons (same bugs on both sides) are informative, but the next seeded run with all
   fixes is a new baseline, not directly comparable to the 0.668 / 0.680 fold-0 numbers.
 
+### Second review round (2026-10-08)
+Reproduced and fixed: padding-dependent `dom_ratio` (0.998 → 0.969 with 100 pad frames; 0 for no
+motion), per-signer summary parser regression (introduced by the Clean Train line), TTA noise breaking
+Δ1, batch membership fixed across epochs, mixup on raw clips able to flip dominance, single-source
+mixup tails, discriminator accuracy ignoring mixup weights, class weights from the full CSV.
+Ablation flags added so the open questions can be **measured**: `--loss ce`, `--mixup-prob`,
+`--finger-drop-prob`, `--zero-parts face,pose`, `--no-depth`; GRL off = `--grl-lambda 0`.
+Open (needs runs, not code): focal vs CE, GRL on/off + frozen-feature signer probe, mixup / finger
+dropout value, face / pose / depth value, presence-heuristic accuracy on sparse clips (raw masks were
+not kept in the LMDB).
+
 ---
 
 ## Pending Ideas (not yet implemented)
