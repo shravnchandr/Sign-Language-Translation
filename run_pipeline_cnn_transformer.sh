@@ -15,6 +15,7 @@
 #   bash run_pipeline_cnn_transformer.sh --allow-errors
 #   bash run_pipeline_cnn_transformer.sh --val-fold 0              # signer fold 0 of 7 (CV)
 #   bash run_pipeline_cnn_transformer.sh --stretch-mode sample --stretch-min 0.5 --stretch-max 2.0 --stretch-prob 0.8
+#   bash run_pipeline_cnn_transformer.sh --max-frames 256           # keep long clips longer (default 128)
 #
 # Recommended (downloaded LMDB datasets, skip all local builds):
 #   bash run_pipeline_cnn_transformer.sh --skip-pretrain
@@ -70,7 +71,7 @@ BACKBONE_WARMUP_EPOCHS=5   # epochs to freeze backbone after loading pretrained 
 BACKBONE_LR_RATIO=0.1       # backbone LR as fraction of head LR after warmup
 VAL_FOLD=""        # empty = default split (Runs 001–005); 0..N_FOLDS-1 = signer fold
 N_FOLDS=7
-STRETCH_ARGS=()    # forwarded to train.py only when set (defaults: batch 0.8–1.3×, p=0.5)
+TRAIN_EXTRA_ARGS=()  # forwarded to train.py only when set (stretch / max-frames; train.py defaults otherwise)
 USE_TMUX=true
 TMUX_SESSION="islr"
 
@@ -119,8 +120,8 @@ while [[ $# -gt 0 ]]; do
         --backbone-lr-ratio)       BACKBONE_LR_RATIO="$2";       shift 2 ;;
         --val-fold)                VAL_FOLD="$2";                shift 2 ;;
         --n-folds)                 N_FOLDS="$2";                 shift 2 ;;
-        --stretch-mode|--stretch-min|--stretch-max|--stretch-prob)
-                                   STRETCH_ARGS+=("$1" "$2");    shift 2 ;;
+        --stretch-mode|--stretch-min|--stretch-max|--stretch-prob|--max-frames)
+                                   TRAIN_EXTRA_ARGS+=("$1" "$2"); shift 2 ;;
         --no-tmux)                 USE_TMUX=false;               shift ;;
         --tmux-session)            TMUX_SESSION="$2";            shift 2 ;;
         *) echo "Unknown argument: $1"; exit 1 ;;
@@ -260,7 +261,7 @@ uv run python -m cnn_transformer.train \
     --backbone-lr-ratio "$BACKBONE_LR_RATIO" \
     ${VAL_FOLD:+--val-fold "$VAL_FOLD"} \
     --n-folds "$N_FOLDS" \
-    "${STRETCH_ARGS[@]}" \
+    "${TRAIN_EXTRA_ARGS[@]}" \
     $( [ "$COMPILE" = true ] && echo "--compile" )
 
 echo ""

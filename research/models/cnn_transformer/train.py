@@ -430,6 +430,13 @@ def main():
         "Ramped from 0 via Ganin schedule.",
     )
     parser.add_argument(
+        "--max-frames",
+        type=int,
+        default=128,
+        help="Clips longer than this are uniformly subsampled to it (5.6%% of clips "
+        "exceed 128, 0.3%% exceed 256).",
+    )
+    parser.add_argument(
         "--stretch-mode",
         choices=["batch", "sample"],
         default="batch",
@@ -513,6 +520,7 @@ def main():
         num_workers=args.num_workers,
         val_fold=args.val_fold,
         n_folds=args.n_folds,
+        max_frames=args.max_frames,
     )
 
     grl_active = args.grl_lambda > 0.0 and n_signers > 0
@@ -596,6 +604,7 @@ def main():
         stretch_max=args.stretch_max,
         stretch_prob=args.stretch_prob,
     )
+    print(f"Max frames  : {args.max_frames}")
     print(
         f"Time stretch: {args.stretch_mode} {args.stretch_min}–{args.stretch_max}× "
         f"(p={args.stretch_prob})"

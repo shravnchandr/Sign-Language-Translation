@@ -27,6 +27,7 @@ tmux attach -t islr                      # logs also in logs/cnn_transformer_<ti
 bash run_pipeline_cnn_transformer.sh --skip-pretrain --val-fold 2   # validate on signer fold 2 of 7 (GroupKFold)
 PYTHONPATH=research/models uv run python -m cnn_transformer.signer_diagnostics --logs 'logs/fold*.log'   # per-signer data stats vs val acc (CPU)
 bash run_pipeline_cnn_transformer.sh --skip-pretrain --val-fold 0 --stretch-mode sample --stretch-min 0.5 --stretch-max 2.0 --stretch-prob 0.8   # per-clip tempo aug
+bash run_pipeline_cnn_transformer.sh --skip-pretrain --max-frames 256   # longer cap (default 128; 5.6% of clips > 128, 0.3% > 256)
 bash runpod_results.sh send run005       # on the pod, before stopping it (disk is erased on stop)
 bash runpod_results.sh receive <code>    # on your machine → runs/run005/ (gitignored)
 
@@ -178,6 +179,7 @@ End-to-end supervised classification. Optional CTC pre-training on ASL Fingerspe
 | `research/models/cnn_transformer/train.py` | — | ~~TTA held 5 full-batch logit tensors simultaneously (OOM risk on long sequences).~~ **Fixed: running sum accumulation; only one extra tensor in memory at a time.** |
 | `research/models/cnn_transformer/model/conformer.py` | — | ~~`SinusoidalPositionalEncoding` raised `IndexError` when `T > max_len=512`.~~ **Fixed: on-the-fly PE generation in `forward()` without mutating the registered buffer (thread-safe).** |
 | `research/models/cnn_transformer/config.py` + `model/landmark_conformer.py` | — | ~~`SELECTED_FACE_INDICES` built by iterating `FACE_LANDMARK_INDICES.values()` — a dict key reordering would silently corrupt the eyebrow/mouth slice in the model.~~ **Fixed: explicit key ordering in config.py + runtime assertion in `LandmarkConformer.__init__`.** |
+| `research/models/cnn_transformer/data/dataset.py` | — | ~~Length sidecar `_lengths_<CACHE_VERSION>.json` ignored `max_frames` and split membership — a run with a different cap (or an equal-size split) reused stale lengths, mis-bucketing batches.~~ **Fixed: keyed on CACHE_VERSION + max_frames + md5 of the split's paths.** |
 | `research/models/cnn_transformer/data/dataset.py` | — | ~~LMDB opened with `map_size=1<<40` (1 TiB) on flat files over NAS — caused `lmdb.open()` to hang for 45+ minutes at mmap time.~~ **Fixed: flat-file reads use `os.path.getsize() + 256 MB` as map_size.** |
 | `research/models/cnn_transformer/pretrain_fingerspelling.py` | — | ~~CTC loss computed inside `autocast` (FP16) — underflows with long sequences (max_frames=384).~~ **Fixed: `logits.float().log_softmax(-1)` before `CTCLoss`.** |
 | `research/models/cnn_transformer/pretrain_fingerspelling.py` | — | ~~`scheduler.step()` called unconditionally even when `GradScaler` skipped `optimizer.step()` on NaN/Inf gradients, desynchronising `OneCycleLR`.~~ **Fixed: compare `scaler.get_scale()` before/after to detect skips.** |

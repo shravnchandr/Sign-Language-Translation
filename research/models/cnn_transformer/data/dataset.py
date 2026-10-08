@@ -1,3 +1,4 @@
+import hashlib
 import io
 import json
 import os
@@ -206,9 +207,15 @@ class ASLDataset(Dataset):
         return None
 
     def _load_or_compute_lengths(self) -> List[int]:
-        """Return per-sample sequence lengths, loading from sidecar JSON if available."""
+        """Return per-sample sequence lengths, loading from sidecar JSON if available.
+
+        The sidecar is keyed on the data format, the frame cap and the exact
+        list of samples: lengths are stored capped at max_frames, and different
+        val folds put different samples in the same cache dir.
+        """
+        split_digest = hashlib.md5("\n".join(self.df["path"]).encode()).hexdigest()[:8]
         lengths_file = (
-            (self.cache_dir / f"_lengths_{_CACHE_VERSION}.json")
+            (self.cache_dir / f"_lengths_{_CACHE_VERSION}_{self.max_frames}_{split_digest}.json")
             if self.cache_dir
             else None
         )
