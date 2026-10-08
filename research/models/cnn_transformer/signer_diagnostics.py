@@ -8,6 +8,9 @@ code's own LMDB keys and hand_presence(), on the raw stored coordinates (before
 any augmentation), i.e. what the model actually sees:
 
   frames          clip length (frames)
+  active          frames from the first to the last frame with a hand detected
+  idle_lead/trail fraction of the clip before the first / after the last hand
+                  detection (idle time around the sign itself)
   lh_det, rh_det  per-frame detection rate of each hand
   no_hand         fraction of frames with neither hand detected
   rh_dom          fraction of clips where the RH slot moves more — the model
@@ -60,6 +63,12 @@ def clip_stats(coords: torch.Tensor) -> dict:
     """Statistics for one stored clip (T, COORD_FEAT)."""
     filled, presence = hand_presence(coords)
     T = coords.shape[0]
+    any_hand = (presence.sum(1) > 0).nonzero().flatten()
+    if len(any_hand):
+        first, last = int(any_hand[0]), int(any_hand[-1])
+        active, lead, trail = last - first + 1, first / T, (T - 1 - last) / T
+    else:  # no hand ever detected
+        active, lead, trail = 0, float("nan"), float("nan")
 
     def wrist(start):
         return filled[:, start : start + _C]
@@ -74,6 +83,9 @@ def clip_stats(coords: torch.Tensor) -> dict:
     dom_e = max(lh_e, rh_e)
     return {
         "frames": T,
+        "active": active,
+        "idle_lead": lead,
+        "idle_trail": trail,
         "lh_det": float(presence[:, 0].mean()),
         "rh_det": float(presence[:, 1].mean()),
         "no_hand": float((presence.sum(1) == 0).float().mean()),
@@ -121,10 +133,8 @@ def main():
 
     df = pd.read_csv(Path(args.data_dir) / "train.csv")
     df["participant_id"] = df["participant_id"].astype(str)
-    if args.per_signer > 0:
-        df = df.groupby("participant_id", group_keys=False).apply(
-            lambda g: g.sample(min(len(g), args.per_signer), random_state=0)
-        )
+    if args.per_signer > 0:  # shuffle, then first k per signer: a seeded random sample
+        df = df.sample(frac=1, random_state=0).groupby("participant_id").head(args.per_signer)
 
     rows, missing = [], 0
     with _open_lmdb_env(args.lmdb_path).begin(buffers=True) as txn:
@@ -145,6 +155,7 @@ def main():
         n=("frames", "size"), **{c: (c, "mean") for c in clips.columns if c != "participant_id"}
     )
     stats.insert(1, "frames_med", clips.groupby("participant_id")["frames"].median())
+    stats.insert(3, "active_med", clips.groupby("participant_id")["active"].median())
 
     acc = parse_signer_accuracy(args.logs)
     if acc:
