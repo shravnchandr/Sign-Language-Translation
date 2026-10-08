@@ -380,6 +380,35 @@ Open (needs runs, not code): focal vs CE, GRL on/off + frozen-feature signer pro
 dropout value, face / pose / depth value, presence-heuristic accuracy on sparse clips (raw masks were
 not kept in the LMDB).
 
+### Fold 0, all review fixes + stretch, seed 42 (`fold0_fixed`) — new baseline
+| | Stretch (pre-fix) | Fixed | Δ |
+|---|---|---|---|
+| best, pooled | 0.6802 | **0.6771** | −0.3 |
+| TTA | 0.6786 | 0.6775 | −0.1 |
+| avg ep 71–80 | 0.6743 | 0.6738 | ±0.0 |
+| 34503 / 49445 / 62590 (best) | 0.577 / 0.661 / 0.803 | 0.574 / 0.656 / 0.803 | ≤ 0.5 |
+
+Same final accuracy: the fixes sped up early learning (+9 pt at epochs 8–10) but not the endpoint.
+0 non-finite batches; 1m54s/epoch.
+
+**Clean train (3,000 un-augmented training clips, eval mode) vs val:**
+
+| epoch | 10 | 20 | 30 | 40 | 50 | 60 | 70 | 80 |
+|---|---|---|---|---|---|---|---|---|
+| clean train | 0.684 | 0.813 | 0.884 | 0.924 | 0.950 | 0.963 | 0.970 | 0.970 |
+| val | 0.550 | 0.612 | 0.647 | 0.662 | 0.669 | 0.671 | 0.670 | 0.675 |
+| gap (pt) | 13.4 | 20.1 | 23.7 | 26.2 | 28.1 | 29.2 | 30.0 | 29.5 |
+
+Best checkpoint (epoch 72): clean train **0.971** vs val 0.677 → **29.4 pt gap**. The earlier
+"underfitting" reading (augmented train acc ≈ 0.80) was wrong: the model nearly memorises its 18
+training signers while val plateaus from ~epoch 50. The bottleneck is signer generalisation — not
+capacity, not training length (longer runs would widen the gap). Disc acc 0.142 → 0.109 (chance
+0.056): the CLS sheds some signer identity, yet the gap still widens.
+
+Next (budget ≈ 2 runs): `--grl-lambda 0` (does the GRL help at all?) and stronger signer-variation
+augmentation (1st place: scale 0.8–1.2, shear 0.15, shift 0.1, rotate 30° vs our 15° / small shift).
+Deprioritised: 160-epoch run, `--loss ce`.
+
 ---
 
 ## Pending Ideas (not yet implemented)
