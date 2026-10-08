@@ -98,17 +98,25 @@ class AdvancedAugmentation:
         return x_cropped, mask_cropped
 
     @staticmethod
-    def gaussian_noise(x, std=0.01):
-        """Coordinate noise, except on hands never detected in the clip
-        (they stay exactly zero, as in un-augmented data)."""
+    def gaussian_noise(x, std=0.01, mask=None):
+        """Position noise on valid frames, then Δ1 rebuilt from the noisy
+        positions (independent noise on Δ1 would break their agreement and
+        write into padded frames). Hands never detected in the clip stay
+        exactly zero, as in un-augmented data."""
         x = x.clone()
-        noise = torch.randn_like(x[..., :PRESENCE_START]) * std
+        B, T, _ = x.shape
+        if mask is None:
+            mask = torch.ones(B, T, dtype=torch.bool, device=x.device)
+        noise = torch.randn_like(x[..., :COORD_FEAT]) * std * mask.unsqueeze(-1)
         width = N_LH * COORDS_PER_LM
         for h, hs in enumerate((LH_START, RH_START)):
             absent = x[..., PRESENCE_START + h].sum(1) == 0  # (B,)
-            for half in (0, COORD_FEAT):
-                noise[absent, :, half + hs : half + hs + width] = 0.0
-        x[..., :PRESENCE_START] += noise
+            noise[absent, :, hs : hs + width] = 0.0
+        x[..., :COORD_FEAT] += noise
+        pos = x[..., :COORD_FEAT]
+        vel = torch.zeros_like(pos)
+        vel[:, 1:] = (pos[:, 1:] - pos[:, :-1]) * (mask[:, 1:] & mask[:, :-1]).unsqueeze(-1)
+        x[..., COORD_FEAT:PRESENCE_START] = vel
         return x
 
     @staticmethod
@@ -260,22 +268,24 @@ class AdvancedAugmentation:
 
 
 def mixup_batch(x, y, mask, alpha=0.2):
-    # Dominance-aware pairing: HandDominanceModule reorders hands INSIDE the model
-    # (after mixup), so mixing a lh-dominant sample with a rh-dominant sample
-    # produces ambiguous hand slot assignments. Pair same-dominance samples only.
-    B, device = x.size(0), x.device
-    # xy only, matching HandDominanceModule (stored wrist z is an artifact).
-    lh_wrist_vel = x[:, :, COORD_FEAT + LH_START : COORD_FEAT + LH_START + 2]
-    rh_wrist_vel = x[:, :, COORD_FEAT + RH_START : COORD_FEAT + RH_START + 2]
-    rh_dominant = (rh_wrist_vel**2).sum(-1).mean(1) > (lh_wrist_vel**2).sum(-1).mean(1)
+    """Mixup on canonicalised clips, time-aligned.
 
-    rh_idx = torch.where(rh_dominant)[0]
-    lh_idx = torch.where(~rh_dominant)[0]
-
-    index = torch.empty(B, dtype=torch.long, device=device)
-    index[rh_idx] = rh_idx[torch.randperm(len(rh_idx), device=device)]
-    index[lh_idx] = lh_idx[torch.randperm(len(lh_idx), device=device)]
-
+    Inputs must already be mirrored to the dominant-in-LH convention (the
+    training loop does this with HandDominanceModule before calling): mixing
+    two raw clips can cancel the dominant hand's motion and flip which hand
+    the model would mirror. Each partner is resampled to its anchor's length
+    (Δ1 rebuilt), so the two signs span the same frames and the anchor's mask
+    is exact — mixing different lengths otherwise leaves a tail where only
+    one source contributes but the union mask calls it valid.
+    """
+    B, T, _ = x.shape
+    index = torch.randperm(B, device=x.device)
+    la, lb = mask.sum(1).tolist(), mask[index].sum(1).tolist()
+    factors = [a / b if (a != b and a >= 2 and b >= 2) else None for a, b in zip(la, lb)]
+    partner, _ = AdvancedAugmentation._resample_prefix(x[index], mask[index], factors)
+    partner = partner[:, :T]
+    if partner.shape[1] < T:
+        partner = F.pad(partner, (0, 0, 0, T - partner.shape[1]))
+    partner = partner * mask.unsqueeze(-1)  # anchor frames only
     lam = np.random.beta(alpha, alpha)
-    mixed_mask = mask | mask[index]
-    return lam * x + (1 - lam) * x[index], y, y[index], lam, mixed_mask, index
+    return lam * x + (1 - lam) * partner, y, y[index], lam, mask, index

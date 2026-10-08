@@ -18,6 +18,7 @@
 #   bash run_pipeline_cnn_transformer.sh --max-frames 256           # keep long clips longer (default 128)
 #   bash run_pipeline_cnn_transformer.sh --hand-drop-prob 0.5       # simulate hand-tracking gaps (default off)
 #   bash run_pipeline_cnn_transformer.sh --loss ce --seed 1         # loss ablation / another seed
+#   bash run_pipeline_cnn_transformer.sh --mixup-prob 0 / --finger-drop-prob 0 / --zero-parts face / --no-depth   # ablations
 #
 # Recommended (downloaded LMDB datasets, skip all local builds):
 #   bash run_pipeline_cnn_transformer.sh --skip-pretrain
@@ -122,8 +123,9 @@ while [[ $# -gt 0 ]]; do
         --backbone-lr-ratio)       BACKBONE_LR_RATIO="$2";       shift 2 ;;
         --val-fold)                VAL_FOLD="$2";                shift 2 ;;
         --n-folds)                 N_FOLDS="$2";                 shift 2 ;;
-        --stretch-mode|--stretch-min|--stretch-max|--stretch-prob|--max-frames|--hand-drop-prob|--hand-drop-min|--hand-drop-max|--seed|--train-eval-size|--loss)
+        --stretch-mode|--stretch-min|--stretch-max|--stretch-prob|--max-frames|--hand-drop-prob|--hand-drop-min|--hand-drop-max|--seed|--train-eval-size|--loss|--mixup-prob|--finger-drop-prob|--zero-parts)
                                    TRAIN_EXTRA_ARGS+=("$1" "$2"); shift 2 ;;
+        --no-depth)                TRAIN_EXTRA_ARGS+=("$1");   shift ;;
         --no-tmux)                 USE_TMUX=false;               shift ;;
         --tmux-session)            TMUX_SESSION="$2";            shift 2 ;;
         *) echo "Unknown argument: $1"; exit 1 ;;

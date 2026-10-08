@@ -5,7 +5,6 @@ import os
 import random
 import time
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -15,7 +14,7 @@ from torch.amp.grad_scaler import GradScaler
 from tqdm import tqdm
 from .data.dataset import clean_subset_loader, get_data_loaders
 from .data.augmentation import AdvancedAugmentation, mixup_batch
-from .model.landmark_conformer import LandmarkConformer
+from .model.landmark_conformer import HandDominanceModule, LandmarkConformer
 from .model.grl import ganin_lambda
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -75,6 +74,8 @@ def train_epoch(
     stretch_min=0.8,
     stretch_max=1.3,
     stretch_prob=0.5,
+    mixup_prob=1.0,
+    finger_drop_prob=0.5,
 ):
     model.train()
     train_loss, correct, total = 0, 0, 0
@@ -100,6 +101,7 @@ def train_epoch(
         if n.endswith(("running_mean", "running_var", "num_batches_tracked"))
     ]
     nonfinite = 0
+    canon = HandDominanceModule().to(device)  # mirrors clips before mixup
 
     pbar = tqdm(data_loader, desc=f"Epoch {epoch + 1}/{total_epochs}")
     for idx, (x, mask, y, signer_ids) in enumerate(pbar):
@@ -143,12 +145,18 @@ def train_epoch(
                     x[sel_idx], max_angle=15
                 )
 
-            # Finger dropout — batch mask replaces B clone+loop calls
-            x = AdvancedAugmentation.finger_dropout_batch(x)
+            if finger_drop_prob > 0:
+                x = AdvancedAugmentation.finger_dropout_batch(x, sample_prob=finger_drop_prob)
+
+        # Canonicalise (mirror right-dominant clips) BEFORE mixup; the model is
+        # then told not to re-mirror, since a mixture can flip dominance.
+        with torch.no_grad():
+            x, _ = canon(x, mask)
 
         # --- Mixup ---
         y_a, y_b, lam, mixup_idx = y, None, 1.0, None
-        if use_mixup:
+        mixed = use_mixup and np.random.random() < mixup_prob
+        if mixed:
             x, y_a, y_b, lam, mask, mixup_idx = mixup_batch(x, y, mask)
 
         bn_snapshot = [b.detach().clone() for b in bn_buffers]
@@ -156,11 +164,11 @@ def train_epoch(
         with autocast(device_type=device.type, dtype=amp_dtype, enabled=use_amp):
             use_grl = grl_lam > 0.0 and n_signers > 0
             if use_grl:
-                logits, signer_logits = model(x, mask, grl_lambda=grl_lam)
+                logits, signer_logits = model(x, mask, grl_lambda=grl_lam, canonical=True)
             else:
-                logits = model(x, mask)
+                logits = model(x, mask, canonical=True)
 
-            if use_mixup:
+            if mixed:
                 sign_loss = lam * criterion(logits, y_a) + (1 - lam) * criterion(
                     logits, y_b
                 )
@@ -170,7 +178,7 @@ def train_epoch(
             if use_grl:
                 valid = signer_ids >= 0
                 if valid.any():
-                    if use_mixup and mixup_idx is not None:
+                    if mixed:
                         signer_ids_b = signer_ids[mixup_idx]
                         adv_loss = lam * F.cross_entropy(
                             signer_logits[valid], signer_ids[valid]
@@ -185,11 +193,14 @@ def train_epoch(
                     # grl_lam; weighting adv_loss by it again would give the
                     # backbone −λ² and slow the discriminator by λ.
                     loss = sign_loss + adv_loss
-                    disc_correct += (
-                        (signer_logits[valid].argmax(dim=1) == signer_ids[valid])
-                        .sum()
-                        .item()
-                    )
+                    # Mixup-weighted, like the adversarial loss.
+                    pred_s = signer_logits[valid].argmax(dim=1)
+                    hit = (pred_s == signer_ids[valid]).float().sum()
+                    if mixed:
+                        hit = lam * hit + (1 - lam) * (
+                            pred_s == signer_ids[mixup_idx][valid]
+                        ).float().sum()
+                    disc_correct += hit.item()
                     disc_total += valid.sum().item()
                 else:
                     loss = sign_loss
@@ -224,7 +235,7 @@ def train_epoch(
         # alone roughly halves reported accuracy with Beta(0.2, 0.2).
         pred = logits.argmax(dim=1)
         batch_correct = (pred == y_a).float().sum().item()
-        if use_mixup and y_b is not None:
+        if mixed:
             batch_correct = (
                 lam * batch_correct + (1 - lam) * (pred == y_b).float().sum().item()
             )
@@ -289,7 +300,7 @@ def predict_with_tta(model, x, mask, n_augmentations=5):
         x_aug = x_orig.clone()
         mask_aug = mask.clone()
         if np.random.random() > 0.5:
-            x_aug = AdvancedAugmentation.gaussian_noise(x_aug, std=0.001)
+            x_aug = AdvancedAugmentation.gaussian_noise(x_aug, std=0.001, mask=mask_aug)
         if np.random.random() > 0.5:
             # Mild tempo jitter: resamples each clip's valid frames and rebuilds Δ1.
             x_aug, mask_aug = AdvancedAugmentation.time_stretch(x_aug, mask_aug, 0.9, 1.1)
@@ -412,6 +423,15 @@ def main():
         help="Max GRL adversarial weight for signer-invariance (0 = disabled). "
         "Ramped from 0 via Ganin schedule.",
     )
+    parser.add_argument("--mixup-prob", type=float, default=1.0,
+                        help="Probability a batch is mixed (1.0 = every batch, Runs 001–005; 0 = off).")
+    parser.add_argument("--finger-drop-prob", type=float, default=0.5,
+                        help="Per-clip probability of finger dropout (0.5 = Runs 001–005; 0 = off).")
+    parser.add_argument("--zero-parts", default="",
+                        help="Input ablation: comma list of {face,pose} zeroed inside the model "
+                        "(train and eval). Pass the same flag when evaluating a checkpoint.")
+    parser.add_argument("--no-depth", action="store_true",
+                        help="Input ablation: zero all z inside the model (2D only).")
     parser.add_argument("--seed", type=int, default=42,
                         help="Seeds Python, NumPy and torch (incl. DataLoader workers). "
                         "Not bitwise-deterministic on GPU (cudnn.benchmark).")
@@ -548,6 +568,8 @@ def main():
         dropout=args.dropout,
         drop_path_max=args.drop_path_max,
         n_signers=n_signers if grl_active else 0,
+        zero_parts=tuple(p for p in args.zero_parts.split(",") if p),
+        use_depth=not args.no_depth,
     ).to(device)
 
     missing: list = []
@@ -587,14 +609,12 @@ def main():
     print(f"Model params: {sum(p.numel() for p in model.parameters()):,}")
 
     # Per-class weights: inverse frequency, normalised so mean weight == 1.
-    with open(sign_map_file) as f:
-        sign2idx = json.load(f)
-    _label_df = pd.read_csv(os.path.join(args.data_dir, "train.csv"))
-    _label_df["label"] = _label_df["sign"].map(sign2idx)
+    # From the training split only (labels already mapped to indices).
+    _train_labels = train_loader.dataset.df["sign"]
     # Reindex over every class: value_counts() omits absent labels, which would
     # shorten the vector and shift every later weight onto the wrong class.
     _counts = (
-        _label_df["label"].value_counts().reindex(range(NUM_CLASSES), fill_value=0)
+        _train_labels.value_counts().reindex(range(NUM_CLASSES), fill_value=0)
     )
     _weights = (1.0 / _counts.clip(lower=1).values).astype("float32")
     _weights = _weights / _weights.mean()
@@ -636,6 +656,12 @@ def main():
         stretch_min=args.stretch_min,
         stretch_max=args.stretch_max,
         stretch_prob=args.stretch_prob,
+        mixup_prob=args.mixup_prob,
+        finger_drop_prob=args.finger_drop_prob,
+    )
+    print(
+        f"Regularisers: mixup p={args.mixup_prob}, finger drop p={args.finger_drop_prob} | "
+        f"inputs: zero_parts={args.zero_parts or 'none'}, depth={'off' if args.no_depth else 'on'}"
     )
     print(f"Max frames  : {args.max_frames}")
     print(
@@ -913,14 +939,14 @@ def main():
     split = "default split" if args.val_fold is None else f"fold {args.val_fold}/{args.n_folds}"
     print(f"Validation: {split}")
     print(f"Best val accuracy (deterministic): {best_acc:.4f}")
+    if best_signers:
+        print(_signer_str(best_signers))  # must directly follow (signer_diagnostics parses it)
     if train_eval_loader is not None:
         _, ct_acc, _ = evaluate_epoch(model, train_eval_loader, criterion)
         print(
             f"Clean train accuracy (best ckpt, {len(train_eval_loader.dataset)} clips, "
             f"no aug): {ct_acc:.4f}  → train−val gap {ct_acc - best_acc:+.4f}"
         )
-    if best_signers:
-        print(_signer_str(best_signers))
     print(f"Best val accuracy (TTA):           {tta_acc:.4f}")
     if tta_signers:
         print(_signer_str(tta_signers))

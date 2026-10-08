@@ -112,10 +112,18 @@ def parse_signer_accuracy(log_globs: list[str]) -> dict[str, float]:
     for path in paths:
         lines = Path(path).read_text(errors="replace").replace("\r", "\n").splitlines()
         for i, line in enumerate(lines):
-            if _BEST_RE.search(line) and i + 1 < len(lines) and "per-signer val:" in lines[i + 1]:
-                body = lines[i + 1].split("per-signer val:", 1)[1].split("(spread")[0]
-                for pid, a in _PAIR_RE.findall(body):
-                    acc[pid] = float(a)
+            if not _BEST_RE.search(line):
+                continue
+            # The per-signer line follows the deterministic summary; tolerate
+            # other summary lines in between, stop at the next summary.
+            for nxt in lines[i + 1 : i + 6]:
+                if "Best val accuracy" in nxt:
+                    break
+                if "per-signer val:" in nxt:
+                    body = nxt.split("per-signer val:", 1)[1].split("(spread")[0]
+                    for pid, a in _PAIR_RE.findall(body):
+                        acc[pid] = float(a)
+                    break
     if log_globs and not acc:
         print(f"WARNING: no per-signer results found in {paths or log_globs} "
               "(runs must finish, and be made with per-signer logging)")

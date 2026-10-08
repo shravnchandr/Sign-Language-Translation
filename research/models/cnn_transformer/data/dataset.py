@@ -311,32 +311,40 @@ def collate_batch(batch):
 
 
 class BucketBatchSampler(Sampler):
-    """Groups sequences by length to minimise padding waste within each batch."""
+    """Groups sequences of similar length to limit padding, with batch
+    membership re-drawn every epoch.
 
-    def __init__(self, lengths: List[int], batch_size: int, drop_last: bool = False):
-        self.lengths = lengths
+    Each epoch: shuffle all indices, split into pools of pool_batches ×
+    batch_size, sort each pool by length, cut it into batches, shuffle the
+    batch order. (Sorting the whole dataset once fixed every batch's members
+    across epochs, so mixup partners never changed.)
+    """
+
+    def __init__(self, lengths: List[int], batch_size: int, drop_last: bool = False,
+                 pool_batches: int = 50):
+        self.lengths = np.asarray(lengths)
         self.batch_size = batch_size
         self.drop_last = drop_last
+        self.pool = batch_size * pool_batches
 
     def __iter__(self):
-        sorted_idxs = np.argsort(self.lengths)
-        buckets = [
-            sorted_idxs[i : i + self.batch_size]
-            for i in range(0, len(sorted_idxs), self.batch_size)
-        ]
-        if self.drop_last and len(buckets[-1]) < self.batch_size:
-            buckets = buckets[:-1]
+        perm = np.random.permutation(len(self.lengths))
+        buckets = []
+        for p in range(0, len(perm), self.pool):
+            pool = perm[p : p + self.pool]
+            pool = pool[np.argsort(self.lengths[pool], kind="stable")]
+            buckets += [pool[i : i + self.batch_size] for i in range(0, len(pool), self.batch_size)]
+        if self.drop_last:
+            buckets = [b for b in buckets if len(b) == self.batch_size]
         np.random.shuffle(buckets)
         for b in buckets:
-            yield list(b)
+            yield b.tolist()
 
     def __len__(self) -> int:
         n = len(self.lengths)
-        return (
-            n // self.batch_size
-            if self.drop_last
-            else (n + self.batch_size - 1) // self.batch_size
-        )
+        if not self.drop_last:
+            return sum(-(-min(self.pool, n - p) // self.batch_size) for p in range(0, n, self.pool))
+        return sum(min(self.pool, n - p) // self.batch_size for p in range(0, n, self.pool))
 
 
 def get_data_loaders(

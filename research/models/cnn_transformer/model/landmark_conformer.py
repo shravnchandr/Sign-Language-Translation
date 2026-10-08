@@ -47,8 +47,13 @@ class HandDominanceModule(nn.Module):
         x_sign[:PRESENCE_START:COORDS_PER_LM] = -1.0  # x of pos and vel only
         self.register_buffer("x_sign", x_sign, persistent=False)
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Returns (x, dom_ratio).
+    def forward(
+        self, x: torch.Tensor, mask: torch.Tensor | None = None, apply: bool = True
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Returns (x, dom_ratio). Energies are averaged over valid frames
+        (mask) so padding cannot shift the ratio; apply=False computes the
+        ratio without mirroring (input already canonicalised).
+
 
         dom_ratio: (B,) in [0.5, 1] — dominant-hand share of wrist motion energy.
           ≈ 1   → clearly one-handed / dominant-hand sign
@@ -60,15 +65,25 @@ class HandDominanceModule(nn.Module):
         # LandmarkConformer._fix_depth), up to ~80% of raw wrist motion energy.
         lh_wrist_vel = x[:, :, COORD_FEAT + LH_START : COORD_FEAT + LH_START + 2]
         rh_wrist_vel = x[:, :, COORD_FEAT + RH_START : COORD_FEAT + RH_START + 2]
-        lh_energy = (lh_wrist_vel**2).sum(dim=-1).mean(dim=1)  # (B,)
-        rh_energy = (rh_wrist_vel**2).sum(dim=-1).mean(dim=1)  # (B,)
+        lh_e = (lh_wrist_vel**2).sum(dim=-1)  # (B, T)
+        rh_e = (rh_wrist_vel**2).sum(dim=-1)
+        if mask is not None:
+            m = mask.to(lh_e.dtype)
+            n = m.sum(1).clamp(min=1)
+            lh_energy, rh_energy = (lh_e * m).sum(1) / n, (rh_e * m).sum(1) / n
+        else:
+            lh_energy, rh_energy = lh_e.mean(1), rh_e.mean(1)
 
-        dom_ratio = torch.maximum(lh_energy, rh_energy) / (
-            lh_energy + rh_energy + 1e-6
+        # Dominant share in [0.5, 1]; no wrist motion at all → neutral 0.5.
+        total = lh_energy + rh_energy
+        dom_ratio = torch.where(
+            total > 1e-12,
+            torch.maximum(lh_energy, rh_energy) / total.clamp(min=1e-12),
+            torch.full_like(total, 0.5),
         )  # (B,)
 
         swap_idx = torch.where(rh_energy > lh_energy)[0]
-        if swap_idx.numel() > 0:
+        if apply and swap_idx.numel() > 0:
             x[swap_idx] = x[swap_idx][:, :, self.mirror_perm] * self.x_sign
 
         return x, dom_ratio
@@ -85,8 +100,17 @@ class LandmarkConformer(nn.Module):
         drop_path_max=0.1,
         n_signers=0,
         ctc_vocab_size=0,
+        zero_parts=(),
+        use_depth=True,
     ):
+        """zero_parts ⊆ {"face", "pose"} and use_depth=False are input ablations
+        (inputs zeroed inside the model, train and eval alike; no new params):
+        they exist to measure whether those inputs help rather than assume it."""
         super().__init__()
+        unknown = set(zero_parts) - {"face", "pose"}
+        assert not unknown, f"unknown zero_parts {unknown}"
+        self.zero_parts = frozenset(zero_parts)
+        self.use_depth = use_depth
         # Offsets are computed dynamically from COORDS_PER_LM, so toggling
         # INCLUDE_DEPTH is safe. Toggling INCLUDE_FACE is NOT safe — face_proj
         # assumes face data is present.
@@ -243,16 +267,21 @@ class LandmarkConformer(nn.Module):
 
         return features
 
-    def forward(self, x, mask, grl_lambda: float = 0.0):
+    def forward(self, x, mask, grl_lambda: float = 0.0, canonical: bool = False):
+        """canonical=True: the caller already mirrored x to the dominant-in-LH
+        convention (training does this before mixup), so only dom_ratio is
+        computed here — re-mirroring a mixture could flip it."""
         B, T, _ = x.shape
         # Mirroring, wrist normalisation and the depth fix all write in place;
         # without this, calling the model twice on one tensor gave different
         # outputs (max |Δlogit| up to 7.8).
         x = x.clone()
 
-        x, dom_ratio = self.hand_dominance(x)  # mirror; dom_ratio (B,) = dom/total
+        x, dom_ratio = self.hand_dominance(x, mask, apply=not canonical)
         x = self.wrist_norm(x)  # landmark 0 = location, landmarks 1-20 = shape
         x = self._fix_depth(x)  # drop the nose-z artifact from wrist and face z
+        if not self.use_depth and COORDS_PER_LM == 3:
+            x[:, :, 2:PRESENCE_START:3] = 0.0  # ablation: 2D only
 
         # Dataset layout: [pos | vel1 | presence (lh, rh)]
         pos = x[:, :, :COORD_FEAT]
@@ -301,6 +330,13 @@ class LandmarkConformer(nn.Module):
         dist_feat = self.dist_proj(
             torch.cat([lh_dist, rh_dist, dom_ratio_feat, presence], dim=-1)
         )  # (B, T, d_model // 8)
+
+        # Input ablations: zero whole parts after the shoulder scale (needs pose)
+        # and hand-geometry streams are computed; projections then see a constant.
+        for part in self.zero_parts:
+            lo, hi = {"pose": (POSE_START, RH_START), "face": (FACE_START, COORD_FEAT)}[part]
+            pos[:, :, lo:hi] = 0.0
+            vel1[:, :, lo:hi] = 0.0
 
         # Compute additional velocity scales from body-relative positions.
         # Divided by their time delta so all three scales share the same unit
