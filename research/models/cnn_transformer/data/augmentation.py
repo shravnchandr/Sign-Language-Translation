@@ -294,12 +294,23 @@ def mixup_batch(x, y, mask, alpha=0.2):
     """
     B, T, _ = x.shape
     index = torch.randperm(B, device=x.device)
-    la, lb = mask.sum(1).tolist(), mask[index].sum(1).tolist()
+    la, lb = [int(v) for v in mask.sum(1).tolist()], [int(v) for v in mask[index].sum(1).tolist()]
     factors = [a / b if (a != b and a >= 2 and b >= 2) else None for a, b in zip(la, lb)]
     partner, _ = AdvancedAugmentation._resample_prefix(x[index], mask[index], factors)
     partner = partner[:, :T]
     if partner.shape[1] < T:
         partner = F.pad(partner, (0, 0, 0, T - partner.shape[1]))
+    # Single-frame clips can't be interpolated: a 1-frame partner is held across
+    # the anchor's frames (otherwise the anchor's tail mixes with padding), and
+    # a 1-frame anchor takes the partner's middle frame. Δ1 of a held frame is 0.
+    src = x[index]
+    for b in range(B):
+        if la[b] >= 2 and lb[b] == 1:
+            partner[b, : la[b]] = src[b, 0]
+            partner[b, : la[b], COORD_FEAT:PRESENCE_START] = 0.0
+        elif la[b] == 1 and lb[b] >= 2:
+            partner[b, 0] = src[b, lb[b] // 2]
+            partner[b, 0, COORD_FEAT:PRESENCE_START] = 0.0
     partner = partner * mask.unsqueeze(-1)  # anchor frames only
     lam = np.random.beta(alpha, alpha)
     return lam * x + (1 - lam) * partner, y, y[index], lam, mask, index

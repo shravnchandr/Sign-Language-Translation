@@ -22,10 +22,14 @@ class CrossSignerSupCon(nn.Module):
     through the current batch (anchors and in-batch keys) only.
 
     Signer id −1 (unknown) never forms a positive. Computed in fp32.
+    Rows with a non-finite embedding are dropped before the loss and never
+    enqueued — one bad batch must not poison every later batch through the
+    queue. queue_size=0 means in-batch candidates only.
     """
 
     def __init__(self, dim: int, queue_size: int = 4096, temperature: float = 0.1):
         super().__init__()
+        assert queue_size >= 0, "queue_size must be >= 0 (0 = in-batch only)"
         self.temperature = temperature
         self.queue_size = queue_size
         self.register_buffer("q_z", torch.zeros(queue_size, dim))
@@ -47,7 +51,12 @@ class CrossSignerSupCon(nn.Module):
         """z: (B, dim) projections; labels, signers: (B,) long.
         Returns (loss, fraction of anchors that had ≥1 positive)."""
         z = F.normalize(z.float(), dim=-1)
+        finite = torch.isfinite(z).all(dim=1)
+        if not finite.all():
+            z, labels, signers = z[finite], labels[finite], signers[finite]
         B = z.shape[0]
+        if B == 0:
+            return torch.zeros((), device=z.device), 0.0
         keys = torch.cat([z, self.q_z[: self.filled]])
         ky = torch.cat([labels, self.q_y[: self.filled]])
         ks = torch.cat([signers, self.q_s[: self.filled]])
@@ -61,12 +70,17 @@ class CrossSignerSupCon(nn.Module):
         pos = same_sign & known & ~same_signer & ~is_self
         valid = ~is_self & ~(same_sign & same_signer)
 
-        sim = sim.masked_fill(~valid, float("-inf"))
-        log_prob = sim - torch.logsumexp(sim, dim=1, keepdim=True)
         has_pos = pos.any(1)
-        self._enqueue(z.detach(), labels, signers)
+        if self.queue_size > 0:
+            self._enqueue(z.detach(), labels, signers)
         if not has_pos.any():
             return z.sum() * 0.0, 0.0
-        per_anchor = -torch.where(pos, log_prob, torch.zeros_like(log_prob)).sum(1)
-        loss = (per_anchor[has_pos] / pos.sum(1)[has_pos]).mean()
+        # Only anchors with a positive (hence ≥1 valid candidate): a row with no
+        # valid candidate is all -inf, its logsumexp is NaN, and backward would
+        # propagate 0·NaN = NaN even though its loss is masked out.
+        sim_p = sim[has_pos].masked_fill(~valid[has_pos], float("-inf"))
+        log_prob = sim_p - torch.logsumexp(sim_p, dim=1, keepdim=True)
+        pos_p = pos[has_pos]
+        per_anchor = -torch.where(pos_p, log_prob, torch.zeros_like(log_prob)).sum(1)
+        loss = (per_anchor / pos_p.sum(1)).mean()
         return loss, has_pos.float().mean().item()

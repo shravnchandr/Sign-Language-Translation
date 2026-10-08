@@ -1,4 +1,5 @@
 import argparse
+from contextlib import contextmanager
 import json
 import math
 import os
@@ -55,6 +56,23 @@ class FocalLoss(nn.Module):
         )
         pt = torch.exp(-ce_loss)
         return ((1 - pt) ** self.gamma * ce_loss).mean()
+
+
+@contextmanager
+def _frozen_bn_stats(model):
+    """Run a train-mode forward without updating BatchNorm running statistics
+    (it still normalises with batch statistics). Used for the contrastive
+    pass so that enabling it changes only the objective: running statistics
+    — what evaluation uses — come from the main pass alone, as without it."""
+    bns = [m for m in model.modules() if isinstance(m, nn.modules.batchnorm._BatchNorm)]
+    saved = [m.momentum for m in bns]
+    for m in bns:
+        m.momentum = 0.0
+    try:
+        yield
+    finally:
+        for m, mom in zip(bns, saved):
+            m.momentum = mom
 
 
 def train_epoch(
@@ -222,7 +240,8 @@ def train_epoch(
                 # Contrastive term on the unmixed clips (a mixture belongs to
                 # two signs, so it has no clean positive), second forward pass.
                 base = getattr(model, "_orig_mod", model)
-                emb = model(x_clean, mask_clean, canonical=True, return_embedding=True)
+                with _frozen_bn_stats(base):
+                    emb = model(x_clean, mask_clean, canonical=True, return_embedding=True)
                 con_loss, pos_frac = supcon(base.proj_head(emb), y, signer_ids)
                 loss = loss + supcon_weight * con_loss
 
