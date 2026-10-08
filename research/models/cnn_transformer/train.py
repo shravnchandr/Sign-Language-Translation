@@ -70,6 +70,10 @@ def train_epoch(
     total_epochs=1,
     grl_lambda=0.0,
     n_signers=0,
+    stretch_mode="batch",
+    stretch_min=0.8,
+    stretch_max=1.3,
+    stretch_prob=0.5,
 ):
     model.train()
     train_loss, correct, total = 0, 0, 0
@@ -119,9 +123,16 @@ def train_epoch(
         x, mask = AdvancedAugmentation.temporal_interpolation(x, mask)
 
         if heavy_augment:
-            # Time stretch — one batch-wide interpolation replaces B serial calls
-            if np.random.random() > 0.5:
-                x, mask = AdvancedAugmentation.time_stretch(x, mask)
+            # Time stretch. "batch": one factor for the whole batch (default,
+            # Runs 001–005). "sample": an independent factor per clip.
+            if stretch_mode == "sample":
+                x, mask = AdvancedAugmentation.resample_per_sample(
+                    x, mask, stretch_min, stretch_max, stretch_prob
+                )
+            elif np.random.random() > 1.0 - stretch_prob:
+                x, mask = AdvancedAugmentation.time_stretch(
+                    x, mask, stretch_min, stretch_max
+                )
 
             # Rotation — batched 2×2 matmul replaces D//2 Python iterations
             sel_rot = torch.rand(B, device=x.device) > 0.5
@@ -419,6 +430,18 @@ def main():
         "Ramped from 0 via Ganin schedule.",
     )
     parser.add_argument(
+        "--stretch-mode",
+        choices=["batch", "sample"],
+        default="batch",
+        help="Temporal stretch: one factor per batch (default) or per clip.",
+    )
+    parser.add_argument("--stretch-min", type=float, default=0.8,
+                        help="Min stretch factor (<1 = faster/shorter).")
+    parser.add_argument("--stretch-max", type=float, default=1.3,
+                        help="Max stretch factor (>1 = slower/longer).")
+    parser.add_argument("--stretch-prob", type=float, default=0.5,
+                        help="Probability a batch (batch mode) or clip (sample mode) is stretched.")
+    parser.add_argument(
         "--val-fold",
         type=int,
         default=None,
@@ -567,6 +590,16 @@ def main():
         if args.pretrained_backbone else 0
     )
     MAX_LR = 5e-4
+    aug_kw = dict(
+        stretch_mode=args.stretch_mode,
+        stretch_min=args.stretch_min,
+        stretch_max=args.stretch_max,
+        stretch_prob=args.stretch_prob,
+    )
+    print(
+        f"Time stretch: {args.stretch_mode} {args.stretch_min}–{args.stretch_max}× "
+        f"(p={args.stretch_prob})"
+    )
 
     # Loss scaling only matters for fp16; bf16 has fp32's range.
     scaler = GradScaler(enabled=use_amp and amp_dtype == torch.float16)
@@ -626,7 +659,7 @@ def main():
                 accumulation_steps=4, use_mixup=True, heavy_augment=True,
                 scheduler=wu_scheduler, epoch=epoch_idx,
                 total_epochs=NUM_EPOCHS_PHASE1,
-                grl_lambda=0.0, n_signers=0,
+                grl_lambda=0.0, n_signers=0, **aug_kw,
             )
             v_loss, v_acc, v_signers = evaluate_epoch(model, test_loader, criterion)
             epoch_secs = time.perf_counter() - t_epoch
@@ -726,6 +759,7 @@ def main():
             total_epochs=NUM_EPOCHS_PHASE1,
             grl_lambda=args.grl_lambda if grl_active else 0.0,
             n_signers=n_signers,
+            **aug_kw,
         )
         v_loss, v_acc, v_signers = evaluate_epoch(model, test_loader, criterion)
         epoch_secs = time.perf_counter() - t_epoch
@@ -796,6 +830,7 @@ def main():
             total_epochs=p1_epochs_run + NUM_EPOCHS_PHASE2,
             grl_lambda=args.grl_lambda if grl_active else 0.0,
             n_signers=n_signers,
+            **aug_kw,
         )
         v_loss, v_acc, v_signers = evaluate_epoch(model, test_loader, criterion)
         epoch_secs = time.perf_counter() - t_epoch

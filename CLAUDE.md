@@ -26,6 +26,7 @@ bash run_pipeline_cnn_transformer.sh --skip-pretrain --num-workers 8   # relaunc
 tmux attach -t islr                      # logs also in logs/cnn_transformer_<timestamp>.log; --no-tmux = foreground
 bash run_pipeline_cnn_transformer.sh --skip-pretrain --val-fold 2   # validate on signer fold 2 of 7 (GroupKFold)
 PYTHONPATH=research/models uv run python -m cnn_transformer.signer_diagnostics --logs 'logs/fold*.log'   # per-signer data stats vs val acc (CPU)
+bash run_pipeline_cnn_transformer.sh --skip-pretrain --val-fold 0 --stretch-mode sample --stretch-min 0.5 --stretch-max 2.0 --stretch-prob 0.8   # per-clip tempo aug
 bash runpod_results.sh send run005       # on the pod, before stopping it (disk is erased on stop)
 bash runpod_results.sh receive <code>    # on your machine → runs/run005/ (gitignored)
 
@@ -231,6 +232,6 @@ Columns: `frame`, `type`, `landmark_index`, `x`, `y`, `z`
 
 **Best model selection**: Phase 1 saves checkpoints based on val reconstruction loss (not total loss). The diversity term dominates total loss magnitude and is a poor ranking signal.
 
-**Per-sample augmentation** (`cnn_transformer/train.py`): each sample in a batch gets an independent augmentation decision. Vectorized for rotation/finger dropout; time_stretch is batch-wide. Geometric transforms touch only coordinate channels (`:PRESENCE_START`), never the presence flags. Coordinate noise is added once, in `ASLDataset` (`augment_sample`, before velocity is computed).
+**Per-sample augmentation** (`cnn_transformer/train.py`): each sample in a batch gets an independent augmentation decision. Vectorized for rotation/finger dropout; time_stretch is batch-wide. Geometric transforms touch only coordinate channels (`:PRESENCE_START`), never the presence flags. Coordinate noise is added once, in `ASLDataset` (`augment_sample`, before velocity is computed). Time stretch: `--stretch-mode batch` (default, Runs 001–005: one 0.8–1.3× factor per batch, p=0.5) or `sample` (`resample_per_sample`: independent factor per clip, Δ1 recomputed from the resampled positions). Motivated by signer diagnostics: the hardest signers' signs last ~2× longer (median 45–56 frames vs ~22) at normal per-frame speed.
 
 **Label mapping**: 250 ASL signs indexed 0–249. Mapping lives in `data/asl-is-lmdb/sign_to_prediction_index_map.json` (downloaded with the LMDB dataset).

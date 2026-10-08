@@ -105,6 +105,44 @@ class AdvancedAugmentation:
         return x_stretched, mask_stretched
 
     @staticmethod
+    def resample_per_sample(x, mask, min_factor=0.5, max_factor=2.0, prob=0.8):
+        """Per-sample temporal resampling: each selected clip gets its own
+        speed factor f ~ U(min_factor, max_factor) (f > 1 = slower / longer).
+
+        Signers differ ~2× in sign duration at similar per-frame speed (hard
+        fold-0 signers: median 45–56 frames vs ~22 overall), which a single
+        batch-wide 0.8–1.3× stretch never covers. Δ1 velocity is recomputed
+        from the resampled positions (as in ASLDataset); presence flags are
+        interpolated like the rest. Valid frames must be a
+        mask prefix (true for collate_batch output); padding stays at the end.
+        """
+        B, T, D = x.shape
+        lengths = mask.sum(1).tolist()
+        seqs = []
+        for b in range(B):
+            L = int(lengths[b])
+            seq = x[b, :L]
+            if L >= 2 and np.random.random() < prob:
+                new_len = max(2, int(round(L * np.random.uniform(min_factor, max_factor))))
+                seq = F.interpolate(
+                    seq.T.unsqueeze(0), size=new_len, mode="linear", align_corners=True
+                )[0].T.clone()
+                # Recompute Δ1 from the resampled positions, exactly as
+                # ASLDataset builds it; interpolating the old Δ1 is only
+                # approximately consistent on noisy landmarks.
+                pos = seq[:, :COORD_FEAT]
+                seq[0, COORD_FEAT:PRESENCE_START] = 0.0
+                seq[1:, COORD_FEAT:PRESENCE_START] = pos[1:] - pos[:-1]
+            seqs.append(seq)
+        T_new = max(len(s) for s in seqs)
+        x_out = x.new_zeros(B, T_new, D)
+        m_out = mask.new_zeros(B, T_new)
+        for b, seq in enumerate(seqs):
+            x_out[b, : len(seq)] = seq
+            m_out[b, : len(seq)] = True
+        return x_out, m_out
+
+    @staticmethod
     def finger_dropout(x, mask=None, dropout_prob=0.3):
         """Randomly zero out entire fingers in both hands."""
         x = x.clone()
