@@ -409,6 +409,15 @@ Next (budget ≈ 2 runs): `--grl-lambda 0` (does the GRL help at all?) and stron
 augmentation (1st place: scale 0.8–1.2, shear 0.15, shift 0.1, rotate 30° vs our 15° / small shift).
 Deprioritised: 160-epoch run, `--loss ce`.
 
+Implemented for the next two runs (both off by default, compared against `fold0_fixed`):
+- `--supcon-weight 0.2` — cross-signer supervised contrastive loss (same sign, different signer =
+  positive; cross-batch memory queue; unmixed second pass). Success = val ≥ +2 pt, clean-train gap
+  narrower, gains on the hard signers.
+- `--aug-rotate 30 --aug-shear 0.15 --aug-scale 0.2 --aug-affine-prob 0.75` — stronger signer-variation
+  spatial augmentation (closer to the 1st-place recipe).
+GRL-off deferred: if the contrastive term works, the GRL may be redundant and that ablation becomes
+more informative.
+
 ---
 
 ## Pending Ideas (not yet implemented)

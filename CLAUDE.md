@@ -134,6 +134,7 @@ End-to-end supervised classification. Optional CTC pre-training on ASL Fingerspe
 | `model/conformer.py` | `ConformerBlock`, `SinusoidalPositionalEncoding` |
 | `model/normalization.py` | `WristNormalization` |
 | `model/grl.py` | `SignerDiscriminator`, `ganin_lambda` — GRL signer-invariance |
+| `model/supcon.py` | `CrossSignerSupCon` — cross-signer supervised contrastive loss with cross-batch memory |
 | `data/dataset.py` | `ASLDataset`, `BucketBatchSampler`, `get_data_loaders` |
 | `data/augmentation.py` | `AdvancedAugmentation` (7 types), `mixup_batch` |
 | `data/preprocessing.py` | `frame_stacked_data` — parquet → numpy array |
@@ -240,6 +241,10 @@ Columns: `frame`, `type`, `landmark_index`, `x`, `y`, `z`
 **Mixup & batching**: `mixup_batch` expects canonicalised clips, resamples each partner to its anchor's length (Δ1 rebuilt) and keeps the anchor mask. `BucketBatchSampler` re-draws batch membership every epoch (shuffle → pools of 50 batches → sort within pool).
 
 **Ablation flags** (defaults = Runs 001–005 behaviour): `--mixup-prob`, `--finger-drop-prob`, `--loss {focal,ce}`, `--zero-parts face,pose`, `--no-depth` (input ablations zero channels inside the model, train and eval; pass the same flags when evaluating a checkpoint; `pose` still feeds the shoulder scale).
+
+**Cross-signer contrastive loss** (`model/supcon.py`, `--supcon-weight`, default 0 = off): supervised contrastive term on a training-only `proj_head` over the CLS embedding. Positives = same sign by a *different* known signer; same-sign/same-signer pairs excluded; a FIFO queue (`--supcon-queue`, 4096) of recent embeddings supplies cross-signer candidates without changing batching. Computed on the canonicalised, unmixed clips in a second forward pass (~1.4× epoch time). Not a new architecture; inference unchanged.
+
+**Spatial affine** (`AdvancedAugmentation.spatial_affine`): rotation × shear × anisotropic scale on x, y of positions and Δ1 (`--aug-rotate 15 --aug-shear 0 --aug-scale 0 --aug-affine-prob 0.5` = previous rotation-only behaviour). No global shift or isotropic scale (nose-relative coordinates / shoulder normalisation make them nuisance or no-ops).
 
 **Training hygiene** (`train.py`): `--seed` (default 42; seeds Python/NumPy/torch incl. DataLoader workers; CPU runs reproduce exactly, GPU not bitwise). `--train-eval-size` (default 3000) evaluates a fixed un-augmented training subset in eval mode each epoch ("Clean Train") — the loop's train acc is on augmented mixup inputs and not comparable to val. `--loss {focal,ce}` (default focal).
 
