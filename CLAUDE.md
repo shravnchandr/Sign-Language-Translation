@@ -25,6 +25,7 @@ bash setup_runpod.sh                     # default: saved output of Kaggle noteb
 bash run_pipeline_cnn_transformer.sh --skip-pretrain --num-workers 8   # relaunches in tmux session "islr"
 tmux attach -t islr                      # logs also in logs/cnn_transformer_<timestamp>.log; --no-tmux = foreground
 bash run_pipeline_cnn_transformer.sh --skip-pretrain --val-fold 2   # validate on signer fold 2 of 7 (GroupKFold)
+PYTHONPATH=research/models uv run python -m cnn_transformer.signer_diagnostics --logs 'logs/fold*.log'   # per-signer data stats vs val acc (CPU)
 bash runpod_results.sh send run005       # on the pod, before stopping it (disk is erased on stop)
 bash runpod_results.sh receive <code>    # on your machine → runs/run005/ (gitignored)
 
@@ -139,6 +140,7 @@ End-to-end supervised classification. Optional CTC pre-training on ASL Fingerspe
 | `data/_cache_keys.py` | `CACHE_VERSION` hash, `lmdb_key`/`lmdb_length_key` helpers |
 | `pretrain_fingerspelling.py` | CTC pre-training loop — saves `backbone_best.pth` for fine-tuning |
 | `train.py` | Two-phase training loop with TTA evaluation |
+| `signer_diagnostics.py` | Per-signer data stats (hand detection, dominance, speed, framing) from the LMDB, rank-correlated with per-signer val acc parsed from training logs |
 
 ## Known Bugs
 
