@@ -99,8 +99,16 @@ class AdvancedAugmentation:
 
     @staticmethod
     def gaussian_noise(x, std=0.01):
+        """Coordinate noise, except on hands never detected in the clip
+        (they stay exactly zero, as in un-augmented data)."""
         x = x.clone()
-        x[..., :PRESENCE_START] += torch.randn_like(x[..., :PRESENCE_START]) * std
+        noise = torch.randn_like(x[..., :PRESENCE_START]) * std
+        width = N_LH * COORDS_PER_LM
+        for h, hs in enumerate((LH_START, RH_START)):
+            absent = x[..., PRESENCE_START + h].sum(1) == 0  # (B,)
+            for half in (0, COORD_FEAT):
+                noise[absent, :, half + hs : half + hs + width] = 0.0
+        x[..., :PRESENCE_START] += noise
         return x
 
     @staticmethod
@@ -119,45 +127,14 @@ class AdvancedAugmentation:
         return x, mask
 
     @staticmethod
-    def time_stretch(x, mask, min_stretch=0.8, max_stretch=1.3):
-        B, T, D = x.shape
-        new_len = int(T * np.random.uniform(min_stretch, max_stretch))
-        if new_len == T:
-            return x, mask
-        # x.permute(0,2,1) is already (B, D, T) — no reshape needed
-        x_stretched = F.interpolate(
-            x.permute(0, 2, 1), size=new_len, mode="linear", align_corners=False
-        ).permute(
-            0, 2, 1
-        )  # (B, new_len, D)
-        mask_stretched = (
-            F.interpolate(
-                mask.float().unsqueeze(1),
-                size=new_len,
-                mode="linear",
-                align_corners=False,
-            ).squeeze(1)
-            > 0.5
-        ).bool()
-        if new_len < T:
-            x_stretched = F.pad(x_stretched, (0, 0, 0, T - new_len))
-            mask_stretched = F.pad(mask_stretched, (0, T - new_len))
-        # Stretching (new_len > T) returns a longer batch rather than cropping
-        # back to T: BucketBatchSampler makes most samples ~T long, so cropping
-        # would cut the final 10–23% of nearly every sign.
-        return x_stretched, mask_stretched
+    def _resample_prefix(x, mask, factors):
+        """Resample each clip's valid frames by its own factor (None = keep).
 
-    @staticmethod
-    def resample_per_sample(x, mask, min_factor=0.5, max_factor=2.0, prob=0.8):
-        """Per-sample temporal resampling: each selected clip gets its own
-        speed factor f ~ U(min_factor, max_factor) (f > 1 = slower / longer).
-
-        Signers differ ~2× in sign duration at similar per-frame speed (hard
-        fold-0 signers: median 45–56 frames vs ~22 overall), which a single
-        batch-wide 0.8–1.3× stretch never covers. Δ1 velocity is recomputed
-        from the resampled positions (as in ASLDataset); presence flags are
-        interpolated like the rest. Valid frames must be a
-        mask prefix (true for collate_batch output); padding stays at the end.
+        Interpolates only the valid prefix — never across the valid/padding
+        boundary, which would pull the last real frames toward the origin —
+        and rebuilds Δ1 from the resampled positions exactly as ASLDataset
+        does, so all velocity scales agree. Presence flags are interpolated.
+        Valid frames must be a mask prefix (true for collate_batch output).
         """
         B, T, D = x.shape
         lengths = mask.sum(1).tolist()
@@ -165,17 +142,16 @@ class AdvancedAugmentation:
         for b in range(B):
             L = int(lengths[b])
             seq = x[b, :L]
-            if L >= 2 and np.random.random() < prob:
-                new_len = max(2, int(round(L * np.random.uniform(min_factor, max_factor))))
-                seq = F.interpolate(
-                    seq.T.unsqueeze(0), size=new_len, mode="linear", align_corners=True
-                )[0].T.clone()
-                # Recompute Δ1 from the resampled positions, exactly as
-                # ASLDataset builds it; interpolating the old Δ1 is only
-                # approximately consistent on noisy landmarks.
-                pos = seq[:, :COORD_FEAT]
-                seq[0, COORD_FEAT:PRESENCE_START] = 0.0
-                seq[1:, COORD_FEAT:PRESENCE_START] = pos[1:] - pos[:-1]
+            f = factors[b]
+            if f is not None and L >= 2:
+                new_len = max(2, int(round(L * f)))
+                if new_len != L:
+                    seq = F.interpolate(
+                        seq.T.unsqueeze(0), size=new_len, mode="linear", align_corners=True
+                    )[0].T.clone()
+                    pos = seq[:, :COORD_FEAT]
+                    seq[0, COORD_FEAT:PRESENCE_START] = 0.0
+                    seq[1:, COORD_FEAT:PRESENCE_START] = pos[1:] - pos[:-1]
             seqs.append(seq)
         T_new = max(len(s) for s in seqs)
         x_out = x.new_zeros(B, T_new, D)
@@ -184,6 +160,28 @@ class AdvancedAugmentation:
             x_out[b, : len(seq)] = seq
             m_out[b, : len(seq)] = True
         return x_out, m_out
+
+    @staticmethod
+    def time_stretch(x, mask, min_stretch=0.8, max_stretch=1.3):
+        """One stretch factor for the whole batch (f > 1 = slower / longer)."""
+        f = float(np.random.uniform(min_stretch, max_stretch))
+        return AdvancedAugmentation._resample_prefix(x, mask, [f] * x.shape[0])
+
+    @staticmethod
+    def resample_per_sample(x, mask, min_factor=0.5, max_factor=2.0, prob=0.8):
+        """Per-sample temporal resampling: each selected clip gets its own
+        speed factor f ~ U(min_factor, max_factor) (f > 1 = slower / longer).
+
+        Signers differ ~2× in sign duration (hard fold-0 signers: median 45–56
+        frames vs ~22 overall), which a single batch-wide 0.8–1.3× stretch
+        never covers.
+        """
+        factors = [
+            float(np.random.uniform(min_factor, max_factor))
+            if np.random.random() < prob else None
+            for _ in range(x.shape[0])
+        ]
+        return AdvancedAugmentation._resample_prefix(x, mask, factors)
 
     @staticmethod
     def finger_dropout(x, mask=None, dropout_prob=0.3):
@@ -231,19 +229,28 @@ class AdvancedAugmentation:
 
     @staticmethod
     def finger_dropout_batch(x, sample_prob=0.5, dropout_prob=0.25):
-        """Vectorized finger dropout: batch mask replaces per-sample clone + loop."""
-        B, T, D = x.shape
+        """Drop whole fingers by collapsing them onto their wrist.
+
+        Runs on model input, i.e. before WristNormalization. Zeroing a finger
+        there would make it −wrist after the wrist subtraction — an invented
+        location that also corrupts the joint-angle geometry. Setting it (and
+        its Δ1) to the wrist's makes it exactly zero in the wrist frame, the
+        same as an undetected landmark.
+        """
+        B = x.shape[0]
         device = x.device
-        dmask = x.new_ones(B, D)
+        x = x.clone()
         sample_gate = torch.rand(B, device=device) < sample_prob  # (B,)
-        for hand_label in ("left", "right"):
+        for hand_label, hs in (("left", LH_START), ("right", RH_START)):
             for fi in range(len(FINGER_LM_RANGES)):
                 drop = sample_gate & (torch.rand(B, device=device) < dropout_prob)
                 if not drop.any():
                     continue
-                for feat_lo, feat_hi in FINGER_COORD_SLICES[(hand_label, fi)]:
-                    dmask[drop, feat_lo:feat_hi] = 0.0
-        return x * dmask.unsqueeze(1)
+                idx = drop.nonzero().flatten()
+                for half, (lo, hi) in zip((0, COORD_FEAT), FINGER_COORD_SLICES[(hand_label, fi)]):
+                    wrist = x[idx, :, half + hs : half + hs + COORDS_PER_LM]
+                    x[idx, :, lo:hi] = wrist.repeat(1, 1, (hi - lo) // COORDS_PER_LM)
+        return x
 
     @staticmethod
     def random_scale(x, min_scale=0.9, max_scale=1.1):

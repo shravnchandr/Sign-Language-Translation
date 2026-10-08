@@ -290,26 +290,8 @@ def predict_with_tta(model, x, mask, n_augmentations=5):
         if np.random.random() > 0.5:
             x_aug = AdvancedAugmentation.gaussian_noise(x_aug, std=0.001)
         if np.random.random() > 0.5:
-            B_tta, T_tta, D_tta = x_aug.shape
-            new_len = min(int(T_tta * np.random.uniform(0.9, 1.1)), T_tta)
-            if new_len < T_tta:
-                x_aug = F.interpolate(
-                    x_aug.permute(0, 2, 1),
-                    size=new_len,
-                    mode="linear",
-                    align_corners=False,
-                ).permute(0, 2, 1)
-                x_aug = F.pad(x_aug, (0, 0, 0, T_tta - new_len))
-                mask_aug = (
-                    F.interpolate(
-                        mask_aug.float().unsqueeze(1),
-                        size=new_len,
-                        mode="linear",
-                        align_corners=False,
-                    ).squeeze(1)
-                    > 0.5
-                )
-                mask_aug = F.pad(mask_aug, (0, T_tta - new_len))
+            # Mild tempo jitter: resamples each clip's valid frames and rebuilds Δ1.
+            x_aug, mask_aug = AdvancedAugmentation.time_stretch(x_aug, mask_aug, 0.9, 1.1)
         if np.random.random() > 0.5:
             x_aug = AdvancedAugmentation.spatial_rotation(x_aug, max_angle=10)
         if np.random.random() > 0.5:

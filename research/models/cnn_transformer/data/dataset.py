@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Tuple
 from sklearn.model_selection import GroupKFold, GroupShuffleSplit, train_test_split
 from .augmentation import augment_sample, hand_dropout
 from .preprocessing import frame_stacked_data, hand_presence
+from ..config import COORDS_PER_LM, LH_START, N_LH, RH_START
 from ._cache_keys import (
     CACHE_VERSION,
     lmdb_key as _lmdb_key,
@@ -268,6 +269,11 @@ class ASLDataset(Dataset):
                 # Before noise and velocity, so a dropped span looks like a real gap.
                 coords, presence = hand_dropout(coords, presence, *self.hand_drop)
             coords = torch.tensor(augment_sample(coords.numpy()), dtype=torch.float32)
+            # Hands never detected in the clip stay exactly zero, as at validation:
+            # noise / shift would otherwise give them random geometry in training.
+            for h, hs in enumerate((LH_START, RH_START)):
+                if not presence[:, h].any():
+                    coords[:, hs : hs + N_LH * COORDS_PER_LM] = 0.0
 
         if coords.shape[0] > self.max_frames:
             idxs = torch.linspace(0, coords.shape[0] - 1, self.max_frames).long()
