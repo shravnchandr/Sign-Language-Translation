@@ -281,6 +281,43 @@ batch guard, and separate sign/adv loss logging. Default val split; 80 epochs;
 
 ---
 
+## Signer-fold validation & per-signer diagnostics (2026-10-07)
+**Setup:** Run 005 recipe, `--val-fold k` (GroupKFold by signer, 7 folds × 3 signers), per-signer val
+accuracy logged every epoch. Folds 0–1 run; fold 1 was interrupted at epoch 33/80.
+
+| Split | Val signers | Best val | Per-signer |
+|---|---|---|---|
+| default (Run 005) | 2044, 37779, 53618 | 0.7665 | (not logged) |
+| fold 0 | 34503, 49445, 62590 | **0.6680** (TTA 0.6674) | 0.557 / 0.654 / 0.794 |
+| fold 1 (ep 33, partial) | 27610, 37055, 61333 | ~0.70 | 0.659 / 0.687 / 0.789 |
+
+- **Signer variance dominates:** ~24 pt spread inside fold 0; the default split scores ~10 pt above fold 0 with
+  the same recipe — it happens to hold the shortest-clip signers (median 9–16 frames). Fold 0 also shows a
+  14 pt train–val gap (0.81 vs 0.67) that the default split did not.
+- **`signer_diagnostics`** (500 clips/signer): every signer effectively uses one hand (the other is almost never
+  detected; `dom_ratio` ≈ 1.0). Google clips end exactly at the last hand frame (`idle_trail` = 0 for all).
+- **Spearman ρ with val acc over the 6 signers:** `no_hand` (frames with no hand detected) **−0.94**,
+  `shoulder_w` −0.94, clip length −0.83, speed +0.20. `no_hand` ranks the six almost exactly and explains
+  61333 (long clips but well tracked → 0.789), which broke the clip-length-only hypothesis (predicted to be
+  fold 1's weakest; it was its strongest). n=6 and fold 1 partial — leads, not conclusions.
+- Clip lengths over all 94,477 samples: median 22, 95th pct 135, 5.6% > 128 (subsampled), 0.3% > 256;
+  highest over-128 share for 49445 (17.6%).
+
+### Fold 0 + per-clip time stretch (`--stretch-mode sample --stretch-min 0.5 --stretch-max 2.0 --stretch-prob 0.8`)
+| | Best | TTA | avg ep 61–70 | avg ep 71–80 |
+|---|---|---|---|---|
+| pooled | **0.6802** (+1.2) | 0.6786 (+1.1) | +1.3 | +1.1 |
+| 34503 (slowest signer) | 0.5773 (+2.0) | +2.0 | +2.3 | +1.9 |
+| 49445 | 0.6614 (+0.7) | +0.6 | +1.1 | +1.1 |
+| 62590 | 0.8032 (+0.9) | +0.7 | +0.5 | +0.5 |
+
+Consistent small gain on every signer and every summary, largest for the slowest signer; single seed vs
+single seed (~1 pt run-to-run noise) so modest but likely real. Cost: 1m45s vs 1m21s per epoch (+29%).
+Duration is a minor factor — it does not close 34503's ~22 pt gap to 62590. Next: hand dropout on top
+(`--hand-drop-prob 0.5`), compared against this run.
+
+---
+
 ## Pending Ideas (not yet implemented)
 
 ### High priority
