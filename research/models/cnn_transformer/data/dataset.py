@@ -468,3 +468,38 @@ def get_data_loaders(
         **worker_kwargs,
     )
     return train_loader, test_loader, n_signers
+
+
+def clean_subset_loader(
+    train_dataset: "ASLDataset",
+    n: int,
+    batch_size: int = 64,
+    num_workers: int = 0,
+    seed: int = 0,
+) -> DataLoader:
+    """Fixed random subset of the training set without augmentation.
+
+    Evaluated in eval mode, it gives a training accuracy that is comparable to
+    validation accuracy. The training-loop number is measured on augmented,
+    mixup-mixed inputs and cannot show over- or underfitting on its own.
+    """
+    sub = train_dataset.df.sample(n=min(n, len(train_dataset.df)), random_state=seed)
+    ds = ASLDataset(
+        sub,
+        str(train_dataset.base_path),
+        cache_dir=str(train_dataset.cache_dir) if train_dataset.cache_dir else None,
+        lmdb_path=train_dataset.lmdb_path,
+        max_frames=train_dataset.max_frames,
+        augment=False,
+    )
+    worker_kwargs = (
+        dict(persistent_workers=True, prefetch_factor=2) if num_workers > 0 else {}
+    )
+    return DataLoader(
+        ds,
+        batch_sampler=BucketBatchSampler(ds.lengths, batch_size),
+        collate_fn=collate_batch,
+        num_workers=num_workers,
+        pin_memory=True,
+        **worker_kwargs,
+    )

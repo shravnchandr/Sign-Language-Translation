@@ -2,6 +2,7 @@ import argparse
 import json
 import math
 import os
+import random
 import time
 import numpy as np
 import pandas as pd
@@ -12,7 +13,7 @@ import torch.optim as optim
 from torch.amp.autocast_mode import autocast
 from torch.amp.grad_scaler import GradScaler
 from tqdm import tqdm
-from .data.dataset import get_data_loaders
+from .data.dataset import clean_subset_loader, get_data_loaders
 from .data.augmentation import AdvancedAugmentation, mixup_batch
 from .model.landmark_conformer import LandmarkConformer
 from .model.grl import ganin_lambda
@@ -411,6 +412,23 @@ def main():
         help="Max GRL adversarial weight for signer-invariance (0 = disabled). "
         "Ramped from 0 via Ganin schedule.",
     )
+    parser.add_argument("--seed", type=int, default=42,
+                        help="Seeds Python, NumPy and torch (incl. DataLoader workers). "
+                        "Not bitwise-deterministic on GPU (cudnn.benchmark).")
+    parser.add_argument(
+        "--train-eval-size",
+        type=int,
+        default=3000,
+        help="Fixed un-augmented training subset evaluated each epoch in eval mode "
+        "('Clean Train'), comparable to val accuracy. 0 = off.",
+    )
+    parser.add_argument(
+        "--loss",
+        choices=["focal", "ce"],
+        default="focal",
+        help="focal: FocalLoss with inverse-frequency class weights (Runs 001–005). "
+        "ce: label-smoothed cross-entropy, no class weights (class counts 299–415).",
+    )
     parser.add_argument(
         "--max-frames",
         type=int,
@@ -489,6 +507,10 @@ def main():
         help="Backbone LR as a fraction of head LR after warmup unfreezes (default 0.1 = 10× lower).",
     )
     args = parser.parse_args()
+
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)  # also seeds CUDA and DataLoader worker seeds
 
     os.makedirs(args.checkpoint_dir, exist_ok=True)
     p1_ckpt = os.path.join(args.checkpoint_dir, "best_phase1.pth")
@@ -577,7 +599,24 @@ def main():
     _weights = (1.0 / _counts.clip(lower=1).values).astype("float32")
     _weights = _weights / _weights.mean()
     class_weights = torch.tensor(_weights).to(device)
-    criterion = FocalLoss(class_weights=class_weights)
+    if args.loss == "ce":
+        criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+    else:
+        criterion = FocalLoss(class_weights=class_weights)
+    print(f"Loss        : {args.loss}  | seed {args.seed}")
+    train_eval_loader = (
+        clean_subset_loader(
+            train_loader.dataset, args.train_eval_size, args.batch_size,
+            args.num_workers, seed=args.seed,
+        )
+        if args.train_eval_size > 0 else None
+    )
+
+    def _clean_train_str() -> str:
+        if train_eval_loader is None:
+            return ""
+        _, acc, _ = evaluate_epoch(model, train_eval_loader, criterion)
+        return f"Clean Train: {acc:.4f} | "
     # Head params: whatever the pre-trained checkpoint did not provide (always
     # head/cls_token/signer_disc; plus any layer added after the backbone was
     # saved). Backbone params: everything that was loaded. Used to freeze the
@@ -670,12 +709,13 @@ def main():
                 grl_lambda=0.0, n_signers=0, **aug_kw,
             )
             v_loss, v_acc, v_signers = evaluate_epoch(model, test_loader, criterion)
+            ct_str = _clean_train_str()
             epoch_secs = time.perf_counter() - t_epoch
             p1_epochs_run += 1
             print(
                 f"Epoch {epoch_idx + 1:3d}/{NUM_EPOCHS_PHASE1} [warmup] | "
                 f"{_train_str(tr)} | "
-                f"Val Acc: {v_acc:.4f} | "
+                f"Val Acc: {v_acc:.4f} | {ct_str}"
                 f"LR: {wu_optimizer.param_groups[0]['lr']:.2e} | "
                 f"Time: {_fmt_time(epoch_secs)}"
             )
@@ -770,13 +810,14 @@ def main():
             **aug_kw,
         )
         v_loss, v_acc, v_signers = evaluate_epoch(model, test_loader, criterion)
+        ct_str = _clean_train_str()
         epoch_secs = time.perf_counter() - t_epoch
         p1_epochs_run += 1
         disc_str = f" | Disc Acc: {tr['disc_acc']:.4f}" if tr["disc_acc"] is not None else ""
         print(
             f"Epoch {epoch_idx + 1:3d}/{NUM_EPOCHS_PHASE1} | "
             f"{_train_str(tr)} | "
-            f"Val Acc: {v_acc:.4f} | LR: {optimizer.param_groups[0]['lr']:.2e} | "
+            f"Val Acc: {v_acc:.4f} | {ct_str}LR: {optimizer.param_groups[0]['lr']:.2e} | "
             f"Time: {_fmt_time(epoch_secs)}" + disc_str
         )
         if v_signers:
@@ -841,12 +882,13 @@ def main():
             **aug_kw,
         )
         v_loss, v_acc, v_signers = evaluate_epoch(model, test_loader, criterion)
+        ct_str = _clean_train_str()
         epoch_secs = time.perf_counter() - t_epoch
         disc_str = f" | Disc Acc: {tr['disc_acc']:.4f}" if tr["disc_acc"] is not None else ""
         print(
             f"P2 Epoch {p2_epoch + 1:3d}/{NUM_EPOCHS_PHASE2} | "
             f"{_train_str(tr)} | "
-            f"Val Acc: {v_acc:.4f} | LR: {optimizer.param_groups[0]['lr']:.2e} | "
+            f"Val Acc: {v_acc:.4f} | {ct_str}LR: {optimizer.param_groups[0]['lr']:.2e} | "
             f"Time: {_fmt_time(epoch_secs)}" + disc_str,
             flush=True,
         )
@@ -871,6 +913,12 @@ def main():
     split = "default split" if args.val_fold is None else f"fold {args.val_fold}/{args.n_folds}"
     print(f"Validation: {split}")
     print(f"Best val accuracy (deterministic): {best_acc:.4f}")
+    if train_eval_loader is not None:
+        _, ct_acc, _ = evaluate_epoch(model, train_eval_loader, criterion)
+        print(
+            f"Clean train accuracy (best ckpt, {len(train_eval_loader.dataset)} clips, "
+            f"no aug): {ct_acc:.4f}  → train−val gap {ct_acc - best_acc:+.4f}"
+        )
     if best_signers:
         print(_signer_str(best_signers))
     print(f"Best val accuracy (TTA):           {tta_acc:.4f}")
