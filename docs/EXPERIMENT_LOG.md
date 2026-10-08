@@ -418,6 +418,25 @@ Implemented for the next two runs (both off by default, compared against `fold0_
 GRL-off deferred: if the contrastive term works, the GRL may be redundant and that ablation becomes
 more informative.
 
+### Fold 0 + cross-signer contrastive loss (`fold0_supcon`, `--supcon-weight 0.2`, τ 0.1, queue 4096) — stopped at epoch 37
+Same config as `fold0_fixed` (seed 42) plus the contrastive term (BN running stats frozen in its
+pass). Behaved as designed: 100% of anchors had a cross-signer positive from epoch 1, Con Loss
+8.23 → 3.98 by epoch 37, no non-finite batches, ~2m25s/epoch (1.3×).
+
+| avg | ep 8–12 fixed / supcon | ep 22–27 fixed / supcon | ep 28–37 fixed / supcon |
+|---|---|---|---|
+| val | 0.552 / 0.538 (−1.3) | 0.633 / 0.638 (+0.5) | 0.649 / 0.647 (−0.2) |
+| clean train | — | 0.850 / 0.860 (+1.0) | 0.895 / 0.903 (+0.8) |
+| gap (pt) | 11.5 / 13.6 (+2.1) | 21.7 / 22.2 (+0.5) | 24.6 / 25.6 (+1.0) |
+| 34503 / 49445 / 62590 | −3.1 / −0.3 / −0.6 | +1.1 / +0.9 / −0.6 | −0.7 / +0.4 / −0.5 |
+
+Best val by epoch 37: 0.660 (fixed: 0.658). **Null at this setting**, stopped by the pre-agreed
+epoch-35 rule (val not above fixed, gap not narrower) to fund the spatial-affine run. The
+objective is learned — the 18 training signers' executions of each sign are pulled together — but
+that alignment is itself a fit to the training signers and does not transfer: clean train rises
+slightly faster and the gap is slightly wider. One setting only (w 0.2, τ 0.1, single seed);
+other weights untested.
+
 ---
 
 ## Pending Ideas (not yet implemented)
