@@ -12,7 +12,8 @@ Two approaches are under active development, both under `research/models/`:
 |---|---|---|
 | Factorized VQ-VAE → Conformer translator | `research/models/vqvae_seq2seq/` | Primary pipeline |
 | LandmarkConformer (end-to-end) | `research/models/cnn_transformer/` | Kaggle training target |
-| ST-GCN (baseline) | `research/models/st_gcn/` | Experimental |
+| GraphConformer (hand-skeleton graph encoder) | `research/models/cnn_transformer/` (`--arch graph`) | Implemented, fold-0 run pending |
+| ST-GCN (legacy) | `research/models/st_gcn/` | Superseded by `--arch graph` — wrong graph indexing, by-sign split; not comparable |
 
 ## Commands
 
@@ -29,6 +30,7 @@ PYTHONPATH=research/models uv run python -m cnn_transformer.signer_diagnostics -
 bash run_pipeline_cnn_transformer.sh --skip-pretrain --val-fold 0 --stretch-mode sample --stretch-min 0.5 --stretch-max 2.0 --stretch-prob 0.8   # per-clip tempo aug
 bash run_pipeline_cnn_transformer.sh --skip-pretrain --max-frames 256   # longer cap (default 128; 5.6% of clips > 128, 0.3% > 256)
 bash run_pipeline_cnn_transformer.sh --skip-pretrain --val-fold 0 --hand-drop-prob 0.5   # simulate hand-tracking gaps (default off)
+bash run_pipeline_cnn_transformer.sh --skip-pretrain --val-fold 0 --arch graph   # GraphConformer (hand-skeleton graph encoder)
 bash runpod_results.sh send run005       # on the pod, before stopping it (disk is erased on stop)
 bash runpod_results.sh receive <code>    # on your machine → runs/run005/ (gitignored)
 
@@ -134,6 +136,7 @@ End-to-end supervised classification. Optional CTC pre-training on ASL Fingerspe
 | `model/conformer.py` | `ConformerBlock`, `SinusoidalPositionalEncoding` |
 | `model/normalization.py` | `WristNormalization` |
 | `model/grl.py` | `SignerDiscriminator`, `ganin_lambda` — GRL signer-invariance |
+| `model/graph_conformer.py` | `GraphConformer` — `LandmarkConformer` with hand streams from a shared hand-skeleton graph encoder (`--arch graph`) |
 | `model/supcon.py` | `CrossSignerSupCon` — cross-signer supervised contrastive loss with cross-batch memory |
 | `data/dataset.py` | `ASLDataset`, `BucketBatchSampler`, `get_data_loaders` |
 | `data/augmentation.py` | `AdvancedAugmentation` (7 types), `mixup_batch` |
@@ -241,6 +244,8 @@ Columns: `frame`, `type`, `landmark_index`, `x`, `y`, `z`
 **Mixup & batching**: `mixup_batch` expects canonicalised clips, resamples each partner to its anchor's length (Δ1 rebuilt) and keeps the anchor mask. `BucketBatchSampler` re-draws batch membership every epoch (shuffle → pools of 50 batches → sort within pool).
 
 **Ablation flags** (defaults = Runs 001–005 behaviour): `--mixup-prob`, `--finger-drop-prob`, `--loss {focal,ce}`, `--zero-parts face,pose`, `--no-depth` (input ablations zero channels inside the model, train and eval; pass the same flags when evaluating a checkpoint; `pose` still feeds the shoulder scale).
+
+**GraphConformer** (`--arch graph`, `--graph-hidden 64`, `--graph-layers 3`): overrides `LandmarkConformer._hand_streams` only. Per frame and hand slot, a shared graph encoder (skeleton + knuckle-web adjacency + learned zero-init residual adjacency, pre-norm residual layers, LayerNorm — no padding statistics, joint embeddings, flattened per joint) over wrist-relative positions, bone vectors and Δ1/Δ2/Δ5; the non-dominant slot is x-negated so both hands share weights with one chirality; the wrist location (position + Δ1/Δ2/Δ5) bypasses the graph. Per-slot `lh/rh_hand_out` → `d_model//2`, split into the parent's pos/vel slots. Everything else inherited. Same LMDB, no rebuild.
 
 **Cross-signer contrastive loss** (`model/supcon.py`, `--supcon-weight`, default 0 = off): supervised contrastive term on a training-only `proj_head` over the CLS embedding. Positives = same sign by a *different* known signer; same-sign/same-signer pairs excluded; a FIFO queue (`--supcon-queue`, 4096) of recent embeddings supplies cross-signer candidates without changing batching. Computed on the canonicalised, unmixed clips in a second forward pass (~1.4× epoch time) with BatchNorm running-stat updates frozen (`_frozen_bn_stats`), so enabling it changes only the objective. Non-finite embeddings are dropped and never enqueued; `--supcon-queue 0` = in-batch only. Not a new architecture; inference unchanged.
 

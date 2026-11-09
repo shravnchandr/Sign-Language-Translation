@@ -437,6 +437,35 @@ that alignment is itself a fit to the training signers and does not transfer: cl
 slightly faster and the gap is slightly wider. One setting only (w 0.2, τ 0.1, single seed);
 other weights untested.
 
+### GraphConformer (`--arch graph`) — implemented, not yet run (2026-11-09)
+The old `research/models/st_gcn/` pipeline was not salvageable as a comparison: its skeleton graph
+was indexed for a face → LH → pose → RH layout while its data was LH → pose → RH → face (almost every
+edge on the wrong joints), the mask downsampling crashed on most odd batch lengths, it used a
+random by-sign split (signers shared with val), 2D positions only, and none of the input fixes above.
+
+Instead the graph is a drop-in backbone on this pipeline (same LMDB, folds, augmentation, GRL,
+logging). `GraphConformer` subclasses `LandmarkConformer` and replaces **only** the four flat hand
+projections (`lh/rh_proj`, `lh/rh_vel_proj`) with:
+- a **shared hand graph encoder** (21 joints, skeleton + knuckle-web adjacency plus a learned
+  zero-initialised residual adjacency per layer, 3 pre-norm residual layers × 64, joint embeddings,
+  flattened per joint — not pooled) over wrist-relative positions, bone vectors and Δ1/Δ2/Δ5;
+  the non-dominant slot is x-negated first so both hands share weights with the same chirality;
+- the **wrist location** (body-relative position + Δ1/Δ2/Δ5) kept outside the graph;
+- per-slot output projections to the same `d_model//2` per hand.
+Pose, face, geometry and distance streams, fusion, Conformer blocks and heads are unchanged, so the
+comparison with `fold0_fixed` isolates the graph encoder. 6.68 M params (vs 6.61 M; graph 18 k);
+~1.1× step time on CPU.
+
+Checked: default `LandmarkConformer` logits bit-identical to before the refactor; padding
+(+50 frames), input mutation, mirror canonicalisation all exact (Δlogit 0); mirrored hands reach
+the shared encoder identically.
+
+Run: `--arch graph --val-fold 0 --stretch-mode sample --stretch-min 0.5 --stretch-max 2.0
+--stretch-prob 0.8 --checkpoint-dir checkpoints/fold0_graph` (fold0_fixed's flags + `--arch graph`).
+Success = val ≥ +2 pt over 0.6771 or a narrower clean-train gap; otherwise the per-part
+projections already capture what the skeleton prior adds (the 1A "GCN stem" hypothesis).
+Either way, compare the per-signer ranking (34503 < 49445 < 62590) across architectures.
+
 ---
 
 ## Pending Ideas (not yet implemented)
@@ -457,7 +486,7 @@ other weights untested.
 |----|------|--------|-------|
 | 2A | Multi-Scale Velocity (Δ2/Δ5) | Done (Run 003) | Implemented; contributed to run but converged slightly lower — may need more epochs |
 | 2B | Fingertip distance features | Done (Run 004 prep) | Implemented as part of geometry stream |
-| 1A | GCN stem | Skipped | Per-part projections already encode topology; GCN adds minor edge-level priors |
+| 1A | GCN stem | Implemented (`--arch graph`) | Shared hand-graph encoder replacing the flat hand projections; see GraphConformer entry |
 | 3B | STN (Spatial Transformer) | Skipped | WristNorm + geometry stream covers same invariance more cheaply |
 
 ---
