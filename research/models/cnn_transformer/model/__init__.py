@@ -6,6 +6,7 @@ from .conformer import (
     SinusoidalPositionalEncoding,
 )
 from .landmark_conformer import LandmarkConformer, HandDominanceModule
+from .graph_conformer import GraphConformer
 from .grl import SignerDiscriminator, ganin_lambda
 
 __all__ = [
@@ -16,6 +17,7 @@ __all__ = [
     "SinusoidalPositionalEncoding",
     "LandmarkConformer",
     "HandDominanceModule",
+    "GraphConformer",
     "SignerDiscriminator",
     "ganin_lambda",
 ]

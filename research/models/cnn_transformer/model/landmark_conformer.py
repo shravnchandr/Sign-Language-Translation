@@ -274,6 +274,21 @@ class LandmarkConformer(nn.Module):
 
         return features
 
+    @staticmethod
+    def _vcat(vel1, vel2, vel5, s):
+        return torch.cat([vel1[:, :, s], vel2[:, :, s], vel5[:, :, s]], dim=-1)
+
+    def _hand_streams(self, pos, vel1, vel2, vel5):
+        """Hand position and velocity features, (B, T, d_model//4) each:
+        (lh_pos, rh_pos, lh_vel, rh_vel). Overridden by GraphConformer."""
+        lh_s, rh_s = slice(LH_START, POSE_START), slice(RH_START, FACE_START)
+        return (
+            self.lh_proj(pos[:, :, lh_s]),
+            self.rh_proj(pos[:, :, rh_s]),
+            self.lh_vel_proj(self._vcat(vel1, vel2, vel5, lh_s)),
+            self.rh_vel_proj(self._vcat(vel1, vel2, vel5, rh_s)),
+        )
+
     def forward(
         self, x, mask, grl_lambda: float = 0.0, canonical: bool = False,
         return_embedding: bool = False,
@@ -366,21 +381,15 @@ class LandmarkConformer(nn.Module):
             f"eyebrow_proj expects {self.eyebrow_proj.in_features} features "
             f"but SELECTED_FACE_INDICES gives {_eb} — check config.py ordering"
         )
-        lh = self.lh_proj(pos[:, :, LH_START:POSE_START])
+        lh, rh, lh_v, rh_v = self._hand_streams(pos, vel1, vel2, vel5)
         ps = self.pose_proj(pos[:, :, POSE_START:RH_START])
-        rh = self.rh_proj(pos[:, :, RH_START:FACE_START])
         eb = self.eyebrow_proj(pos[:, :, FACE_START : FACE_START + _eb])
         mo = self.mouth_proj(pos[:, :, FACE_START + _eb :])
         pos_feat = torch.cat([lh, ps, rh, eb, mo], dim=-1)  # (B, T, d_model)
 
         # Per-part multi-scale velocity features (Δ1∥Δ2∥Δ5 concatenated per part)
-        def _vcat(s):
-            return torch.cat([vel1[:, :, s], vel2[:, :, s], vel5[:, :, s]], dim=-1)
-
-        lh_v = self.lh_vel_proj(_vcat(slice(LH_START, POSE_START)))
-        ps_v = self.pose_vel_proj(_vcat(slice(POSE_START, RH_START)))
-        rh_v = self.rh_vel_proj(_vcat(slice(RH_START, FACE_START)))
-        fc_v = self.face_vel_proj(_vcat(slice(FACE_START, None)))
+        ps_v = self.pose_vel_proj(self._vcat(vel1, vel2, vel5, slice(POSE_START, RH_START)))
+        fc_v = self.face_vel_proj(self._vcat(vel1, vel2, vel5, slice(FACE_START, None)))
         vel_feat = torch.cat([lh_v, ps_v, rh_v, fc_v], dim=-1)  # (B, T, d_model)
 
         x = self.feat_fuse(torch.cat([pos_feat, vel_feat, geo_feat, dist_feat], dim=-1))

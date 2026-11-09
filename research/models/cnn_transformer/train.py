@@ -16,6 +16,7 @@ from tqdm import tqdm
 from .data.dataset import clean_subset_loader, get_data_loaders
 from .data.augmentation import AdvancedAugmentation, mixup_batch
 from .model.landmark_conformer import HandDominanceModule, LandmarkConformer
+from .model.graph_conformer import GraphConformer
 from .model.grl import ganin_lambda
 from .model.supcon import CrossSignerSupCon
 
@@ -453,6 +454,11 @@ def main():
     parser.add_argument(
         "--d-model", type=int, default=256, help="Conformer model width"
     )
+    parser.add_argument("--arch", choices=["conformer", "graph"], default="conformer",
+                        help="graph = GraphConformer: hand streams from a shared hand-skeleton "
+                        "graph encoder, everything else as conformer.")
+    parser.add_argument("--graph-hidden", type=int, default=64, help="Hand graph width (--arch graph).")
+    parser.add_argument("--graph-layers", type=int, default=3, help="Hand graph layers (--arch graph).")
     parser.add_argument("--n-heads", type=int, default=4, help="Attention heads")
     parser.add_argument("--n-layers", type=int, default=4, help="Conformer layers")
     parser.add_argument("--dropout", type=float, default=0.2, help="Dropout rate")
@@ -618,7 +624,12 @@ def main():
     )
 
     grl_active = args.grl_lambda > 0.0 and n_signers > 0
-    model = LandmarkConformer(
+    graph_kw = (
+        dict(graph_hidden=args.graph_hidden, graph_layers=args.graph_layers)
+        if args.arch == "graph" else {}
+    )
+    model = (GraphConformer if args.arch == "graph" else LandmarkConformer)(
+        **graph_kw,
         num_classes=NUM_CLASSES,
         d_model=args.d_model,
         n_heads=args.n_heads,
@@ -665,7 +676,10 @@ def main():
     print(
         f"Num signers : {n_signers} ({'GRL active' if grl_active else 'GRL disabled'})"
     )
-    print(f"Model params: {sum(p.numel() for p in model.parameters()):,}")
+    print(
+        f"Model params: {sum(p.numel() for p in model.parameters()):,} | arch {args.arch}"
+        + (f" (graph {args.graph_layers}×{args.graph_hidden})" if args.arch == "graph" else "")
+    )
 
     # Per-class weights: inverse frequency, normalised so mean weight == 1.
     # From the training split only (labels already mapped to indices).
