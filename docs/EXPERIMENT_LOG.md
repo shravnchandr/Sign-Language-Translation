@@ -466,6 +466,17 @@ Success = val ≥ +2 pt over 0.6771 or a narrower clean-train gap; otherwise the
 projections already capture what the skeleton prior adds (the 1A "GCN stem" hypothesis).
 Either way, compare the per-signer ranking (34503 < 49445 < 62590) across architectures.
 
+On the pod (bf16) the graph costs **~2m58s/epoch vs 1m54s** (1.55×, not the 1.1×
+measured on CPU), so a full 80-epoch run is ~4 h. First 10 epochs: val 0.5865 vs 0.550 at epoch 10,
+clean-train gap 10.8 vs 13.4 pt — early, but ahead on both.
+
+**Next (implemented, off by default): bone-length augmentation** (`--bone-aug-prob 0.5`,
+hand ±0.15, per-bone ±0.1). Hand size and finger proportions are a per-signer trait that shoulder
+scaling does not remove; scaling bones along their own direction changes fingertip distances and
+absolute joint positions but keeps every joint angle, so hand shape (the sign) is preserved.
+Intended run: the `fold0_graph` command + `--bone-aug-prob 0.5`, compared against `fold0_graph`
+(one change). Success = clean-train gap narrower with val ≥ `fold0_graph`.
+
 ---
 
 ## Pending Ideas (not yet implemented)

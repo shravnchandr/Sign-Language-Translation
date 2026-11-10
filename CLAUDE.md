@@ -31,6 +31,7 @@ bash run_pipeline_cnn_transformer.sh --skip-pretrain --val-fold 0 --stretch-mode
 bash run_pipeline_cnn_transformer.sh --skip-pretrain --max-frames 256   # longer cap (default 128; 5.6% of clips > 128, 0.3% > 256)
 bash run_pipeline_cnn_transformer.sh --skip-pretrain --val-fold 0 --hand-drop-prob 0.5   # simulate hand-tracking gaps (default off)
 bash run_pipeline_cnn_transformer.sh --skip-pretrain --val-fold 0 --arch graph   # GraphConformer (hand-skeleton graph encoder)
+bash run_pipeline_cnn_transformer.sh --skip-pretrain --val-fold 0 --arch graph --bone-aug-prob 0.5   # + hand-proportion augmentation (default off)
 bash runpod_results.sh send run005       # on the pod, before stopping it (disk is erased on stop)
 bash runpod_results.sh receive <code>    # on your machine → runs/run005/ (gitignored)
 
@@ -246,6 +247,8 @@ Columns: `frame`, `type`, `landmark_index`, `x`, `y`, `z`
 **Ablation flags** (defaults = Runs 001–005 behaviour): `--mixup-prob`, `--finger-drop-prob`, `--loss {focal,ce}`, `--zero-parts face,pose`, `--no-depth` (input ablations zero channels inside the model, train and eval; pass the same flags when evaluating a checkpoint; `pose` still feeds the shoulder scale).
 
 **GraphConformer** (`--arch graph`, `--graph-hidden 64`, `--graph-layers 3`): overrides `LandmarkConformer._hand_streams` only. Per frame and hand slot, a shared graph encoder (skeleton + knuckle-web adjacency + learned zero-init residual adjacency, pre-norm residual layers, LayerNorm — no padding statistics, joint embeddings, flattened per joint) over wrist-relative positions, bone vectors and Δ1/Δ2/Δ5; the non-dominant slot is x-negated so both hands share weights with one chirality; the wrist location (position + Δ1/Δ2/Δ5) bypasses the graph. Per-slot `lh/rh_hand_out` → `d_model//2`, split into the parent's pos/vel slots. Everything else inherited. Same LMDB, no rebuild.
+
+**Bone-length augmentation** (`augmentation.bone_scale`, `--bone-aug-prob` default 0 = off, `--bone-aug-hand 0.15`, `--bone-aug-bone 0.1`): per training clip, every hand bone (joint − parent, `config.HAND_PARENT`) is scaled by U(1 ± hand) · U(1 ± bone) and the hand rebuilt outward from the fixed wrist; one draw shared by both hands and all frames (a signer trait). Joint angles are exactly preserved (geometry cosines unchanged), fingertip distances change, the wrist location is untouched. Applied in `ASLDataset` after `hand_presence()`/hand dropout and before noise and Δ1; held frames stay exact repeats (presence round-trips) and never-detected hands stay zero.
 
 **Cross-signer contrastive loss** (`model/supcon.py`, `--supcon-weight`, default 0 = off): supervised contrastive term on a training-only `proj_head` over the CLS embedding. Positives = same sign by a *different* known signer; same-sign/same-signer pairs excluded; a FIFO queue (`--supcon-queue`, 4096) of recent embeddings supplies cross-signer candidates without changing batching. Computed on the canonicalised, unmixed clips in a second forward pass (~1.4× epoch time) with BatchNorm running-stat updates frozen (`_frozen_bn_stats`), so enabling it changes only the objective. Non-finite embeddings are dropped and never enqueued; `--supcon-queue 0` = in-batch only. Not a new architecture; inference unchanged.
 
