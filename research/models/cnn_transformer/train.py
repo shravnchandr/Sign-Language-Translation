@@ -651,6 +651,23 @@ def main():
 
     missing: list = []
     if args.pretrained_backbone:
+        # pretrain_fingerspelling.py records the backbone's architecture; a
+        # mismatch would load only part of it without failing (strict=False).
+        meta_path = os.path.join(os.path.dirname(args.pretrained_backbone), "backbone_meta.json")
+        if os.path.exists(meta_path):
+            with open(meta_path) as f:
+                bb = json.load(f)
+            want = {"arch": args.arch, "d_model": args.d_model,
+                    "n_layers": args.n_layers, "n_heads": args.n_heads}
+            if args.arch == "graph":
+                want.update(graph_hidden=args.graph_hidden, graph_layers=args.graph_layers)
+            diff = {k: (bb.get(k), v) for k, v in want.items() if bb.get(k) != v}
+            if diff:
+                raise SystemExit(
+                    f"Pretrained backbone architecture differs from this run "
+                    f"(backbone, run): {diff}. Pre-train with the same flags."
+                )
+            print(f"Backbone meta OK: {bb}")
         ckpt = torch.load(
             args.pretrained_backbone, map_location="cpu", weights_only=True
         )

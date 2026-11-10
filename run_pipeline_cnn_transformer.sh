@@ -24,10 +24,17 @@
 #   bash run_pipeline_cnn_transformer.sh --aug-rotate 30 --aug-shear 0.15 --aug-scale 0.2 --aug-affine-prob 0.75
 #   bash run_pipeline_cnn_transformer.sh --arch graph               # GraphConformer: hand-skeleton graph encoder
 #   bash run_pipeline_cnn_transformer.sh --arch graph --bone-aug-prob 0.5   # + bone-length (hand proportion) augmentation
+#   bash run_pipeline_cnn_transformer.sh --arch graph --val-fold 0  # FS pre-train (same arch/seed) then fine-tune
+#   bash run_pipeline_cnn_transformer.sh --arch graph --fs-cleanup  # ... and delete the FS LMDB (~18 GB) after pre-training
+#
+# Fingerspelling data is fetched only when pre-training actually runs (not with
+# --skip-pretrain or --pretrained-backbone): if the FS LMDB is not at its default
+# path, setup_runpod.sh --with-fs downloads it from shravnchandr/asl-fs-lmdb and
+# verifies it, after checking there is enough free disk.
 #
 # Recommended (downloaded LMDB datasets, skip all local builds):
 #   bash run_pipeline_cnn_transformer.sh --skip-pretrain
-#   bash run_pipeline_cnn_transformer.sh --skip-fs-lmdb --pretrain-epochs 40  # pre-train from downloaded FS LMDB
+#   bash run_pipeline_cnn_transformer.sh --pretrain-epochs 40   # pre-train from the downloaded FS LMDB
 #
 # tmux: started outside tmux, the pipeline relaunches itself in a detached tmux
 # session (default name "islr") so it survives a closed terminal / browser tab,
@@ -80,6 +87,7 @@ BACKBONE_LR_RATIO=0.1       # backbone LR as fraction of head LR after warmup
 VAL_FOLD=""        # empty = default split (Runs 001–005); 0..N_FOLDS-1 = signer fold
 N_FOLDS=7
 TRAIN_EXTRA_ARGS=()  # forwarded to train.py only when set (stretch / max-frames; train.py defaults otherwise)
+PRETRAIN_EXTRA_ARGS=()  # forwarded to pretrain_fingerspelling.py (arch / seed)
 USE_TMUX=true
 TMUX_SESSION="islr"
 
@@ -92,8 +100,10 @@ PRETRAIN_EPOCHS=40
 PRETRAIN_PATIENCE=10
 PRETRAINED_BACKBONE=""
 SKIP_PRETRAIN=false
-SKIP_FS_LMDB=true  # FS LMDB pre-built; set false only when building from raw parquets
+SKIP_FS_LMDB=true  # FS LMDB pre-built (downloaded on demand); false = build from raw parquets
 FS_MAP_SIZE_GB=""   # empty = 1 TiB default
+FS_CLEANUP=false    # delete the FS LMDB after pre-training to free ~18 GB
+FS_DEFAULT_LMDB="$FS_LMDB_PATH"
 
 # ── Parse args ───────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -123,13 +133,17 @@ while [[ $# -gt 0 ]]; do
         --skip-fs-lmdb)            SKIP_FS_LMDB=true;            shift ;;
         --build-fs-lmdb)           SKIP_FS_LMDB=false;           shift ;;
         --fs-map-size-gb)          FS_MAP_SIZE_GB="$2";          shift 2 ;;
+        --fs-cleanup)              FS_CLEANUP=true;              shift ;;
         --compile)                 COMPILE=true;                  shift ;;
         --backbone-warmup-epochs)  BACKBONE_WARMUP_EPOCHS="$2";  shift 2 ;;
         --backbone-lr-ratio)       BACKBONE_LR_RATIO="$2";       shift 2 ;;
         --val-fold)                VAL_FOLD="$2";                shift 2 ;;
         --n-folds)                 N_FOLDS="$2";                 shift 2 ;;
-        --stretch-mode|--stretch-min|--stretch-max|--stretch-prob|--max-frames|--hand-drop-prob|--hand-drop-min|--hand-drop-max|--seed|--train-eval-size|--loss|--mixup-prob|--finger-drop-prob|--zero-parts|--supcon-weight|--supcon-temp|--supcon-queue|--supcon-dim|--aug-rotate|--aug-shear|--aug-scale|--aug-affine-prob|--grl-lambda|--dropout|--drop-path-max|--arch|--graph-hidden|--graph-layers|--bone-aug-prob|--bone-aug-hand|--bone-aug-bone)
+        --stretch-mode|--stretch-min|--stretch-max|--stretch-prob|--max-frames|--hand-drop-prob|--hand-drop-min|--hand-drop-max|--train-eval-size|--loss|--mixup-prob|--finger-drop-prob|--zero-parts|--supcon-weight|--supcon-temp|--supcon-queue|--supcon-dim|--aug-rotate|--aug-shear|--aug-scale|--aug-affine-prob|--grl-lambda|--dropout|--drop-path-max|--bone-aug-prob|--bone-aug-hand|--bone-aug-bone)
                                    TRAIN_EXTRA_ARGS+=("$1" "$2"); shift 2 ;;
+        # Architecture and seed must match between pre-training and fine-tuning.
+        --arch|--graph-hidden|--graph-layers|--seed)
+                                   TRAIN_EXTRA_ARGS+=("$1" "$2"); PRETRAIN_EXTRA_ARGS+=("$1" "$2"); shift 2 ;;
         --no-depth)                TRAIN_EXTRA_ARGS+=("$1");   shift ;;
         --no-tmux)                 USE_TMUX=false;               shift ;;
         --tmux-session)            TMUX_SESSION="$2";            shift 2 ;;
@@ -194,6 +208,7 @@ if [ "$SKIP_PRETRAIN" = false ]; then
     echo "  Pretrain ckpt dir:  $PRETRAIN_CHECKPOINT_DIR"
     echo "  Pretrain epochs:    $PRETRAIN_EPOCHS"
     echo "  FS LMDB map size:   ${FS_MAP_SIZE_GB:-1 TiB (default)}"
+    echo "  FS LMDB cleanup:    $FS_CLEANUP"
 elif [ -n "$PRETRAINED_BACKBONE" ]; then
     echo "  Pretrained backbone: $PRETRAINED_BACKBONE"
 else
@@ -214,9 +229,17 @@ if [ "$SKIP_PRETRAIN" = false ]; then
             $( [ -n "$FS_MAP_SIZE_GB" ] && echo "--map-size-gb $FS_MAP_SIZE_GB" ) \
             $( [ -n "$LMDB_WORKERS" ]   && echo "--num-workers $LMDB_WORKERS" ) \
             $( [ "$ALLOW_ERRORS" = true ] && echo "--allow-errors" )
-    else
+    elif [ "$FS_LMDB_PATH" = "$FS_DEFAULT_LMDB" ]; then
+        # Default location: verify it, or download it (only now that it is needed).
         echo ""
-        echo "[FS LMDB] Skipped (--skip-fs-lmdb). Using pre-built LMDB at $FS_LMDB_PATH."
+        echo "[FS LMDB] Verifying / downloading the pre-built fingerspelling LMDB..."
+        bash setup_runpod.sh --skip-env --with-fs
+    elif [ -f "$FS_LMDB_PATH" ]; then
+        echo ""
+        echo "[FS LMDB] Using pre-built LMDB at $FS_LMDB_PATH."
+    else
+        echo "FS LMDB not found at $FS_LMDB_PATH (custom path — not downloaded automatically)." >&2
+        exit 1
     fi
 
     # ── Stage 0b: CTC pre-training ───────────────────────────────────────────
@@ -230,11 +253,17 @@ if [ "$SKIP_PRETRAIN" = false ]; then
         --out-dir    "$PRETRAIN_CHECKPOINT_DIR" \
         --epochs     "$PRETRAIN_EPOCHS" \
         --patience   "$PRETRAIN_PATIENCE" \
-        --num-workers "$NUM_WORKERS"
+        --num-workers "$NUM_WORKERS" \
+        "${PRETRAIN_EXTRA_ARGS[@]}"
 
     PRETRAINED_BACKBONE="$PRETRAIN_CHECKPOINT_DIR/backbone_best.pth"
     echo ""
     echo "[Pretrain] Backbone saved → $PRETRAINED_BACKBONE"
+
+    if [ "$FS_CLEANUP" = true ]; then
+        echo "[FS LMDB] --fs-cleanup: deleting $FS_LMDB_PATH (fine-tuning does not need it)"
+        rm -f "$FS_LMDB_PATH"
+    fi
 fi
 
 # ── Stage 1: ASL LMDB ────────────────────────────────────────────────────────

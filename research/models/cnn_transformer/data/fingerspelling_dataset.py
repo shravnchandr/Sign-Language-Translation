@@ -9,12 +9,14 @@ Tensor layout matches ASLDataset: (T, IN_FEAT) = [positions | Δ1 velocities | h
 import io
 import json
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import lmdb
 import torch
 from torch.utils.data import Dataset
 
+from ..config import COORDS_PER_LM, LH_START, N_LH, RH_START
+from .augmentation import augment_sample, bone_scale
 from .dataset import _open_lmdb_env  # reuse the fork-safe env cache
 from .preprocessing import hand_presence
 
@@ -35,12 +37,19 @@ class FingerspellingDataset(Dataset):
         csv_path: str,
         char_to_idx: Dict[str, int],
         max_frames: int = 384,
+        augment: bool = False,
+        bone_aug: Optional[Tuple[float, float, float]] = None,
     ):
+        """augment: coordinate noise + rigid shift (augment_sample) and, when
+        bone_aug = (prob, hand_range, bone_range) is set, bone_scale() — the
+        same per-clip steps as ASLDataset, in the same order. Training only."""
         import pandas as pd
 
         self.lmdb_path = str(Path(lmdb_path).resolve())
         self.char_to_idx = char_to_idx
         self.max_frames = max_frames
+        self.augment = augment
+        self.bone_aug = bone_aug
 
         df = pd.read_csv(csv_path)
         self.sequence_ids = df["sequence_id"].tolist()
@@ -81,6 +90,17 @@ class FingerspellingDataset(Dataset):
         # The FS LMDB stores missing hands as 0 per frame; this flags them and
         # holds the last detection through gaps, matching ASLDataset.
         coords, presence = hand_presence(coords)  # presence: (T, 2)
+
+        if self.augment:
+            # As ASLDataset: before noise and velocity. No hand dropout or finger
+            # dropout here — hiding the hand mid-phrase would delete letters the
+            # CTC target still contains.
+            if self.bone_aug and self.bone_aug[0] > 0:
+                coords = bone_scale(coords, *self.bone_aug)
+            coords = torch.tensor(augment_sample(coords.numpy()), dtype=torch.float32)
+            for h, hs in enumerate((LH_START, RH_START)):
+                if not presence[:, h].any():  # never detected → stays exactly zero
+                    coords[:, hs : hs + N_LH * COORDS_PER_LM] = 0.0
 
         # Temporal downsampling to max_frames (same as ASLDataset)
         if coords.shape[0] > self.max_frames:
