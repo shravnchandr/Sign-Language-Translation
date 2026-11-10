@@ -437,7 +437,7 @@ that alignment is itself a fit to the training signers and does not transfer: cl
 slightly faster and the gap is slightly wider. One setting only (w 0.2, τ 0.1, single seed);
 other weights untested.
 
-### GraphConformer (`--arch graph`) — implemented, not yet run (2026-11-09)
+### GraphConformer (`--arch graph`) — design (2026-11-09); result in the `fold0_graph` entry below
 The old `research/models/st_gcn/` pipeline was not salvageable as a comparison: its skeleton graph
 was indexed for a face → LH → pose → RH layout while its data was LH → pose → RH → face (almost every
 edge on the wrong joints), the mask downsampling crashed on most odd batch lengths, it used a
@@ -484,6 +484,35 @@ model logits within 3e-7 of 2.9.1 on CPU, so runs stay comparable). On CPU, comp
 the bone-length run uses `--compile` and its it/s from epoch 2 on is compared with `fold0_graph`'s
 ~7.2 it/s (epoch 1 includes compilation). Speed only — no effect on the comparison beyond float
 rounding.
+
+### Fold 0 GraphConformer (`fold0_graph`, `fold0_fixed` flags + `--arch graph`) — stopped at epoch 64, final extrapolated
+Same config and seed as `fold0_fixed`; only the hand streams differ. ~2m57s/epoch (1.55×).
+Stopped after epoch 64 to fund the bone-length run: LR had decayed to 5.9e-5 and val had been on
+a plateau since ~epoch 54.
+
+| | `fold0_fixed` | graph | Δ |
+|---|---|---|---|
+| val ep 10 / 20 | 0.550 / 0.612 | 0.587 / 0.635 | +3.7 / +2.3 |
+| val ep 28–35 avg | ~0.645 | 0.660 | ~+1.5 |
+| val ep 49–64 avg | ~0.670 | 0.679 | ~+0.9 |
+| best (measured) | 0.6771 (ep 72) | **0.6859** (ep 56) | +0.9 |
+| clean-train gap ep 50 / 60 | 28.1 / 29.2 pt | 27.4 / 28.9 pt | ~0.5 narrower |
+| per-signer at best: 34503 / 49445 / 62590 | 0.574 / 0.656 / 0.803 | 0.583 / 0.664 / 0.813 | +0.9 / +0.8 / +1.0 |
+
+`fold0_fixed` values between its logged epochs are interpolated. **Extrapolated final (not
+measured):** `fold0_fixed` gained ~+0.6 pt of best from epoch 64 to its peak at 72 and its
+epoch-71–80 average sat ~0.3 below its best; applied here → best ≈ 0.686–0.690, avg ep 71–80
+≈ 0.680. No TTA number (the run was stopped before the final evaluation; TTA has matched the
+deterministic score within ±0.3 in every run so far).
+
+**Reading.** A small, steady gain (~+1 pt from epoch 35 on, single seed), below the +2 pt success
+bar. It is uniform across the three val signers, does not target the hard signer, and the
+clean-train gap is essentially unchanged (clean train still → 0.97): the explicit hand graph
+models hand shape slightly better but does not reduce overfitting to the 18 training signers —
+consistent with every other result pointing at signer variety, not architecture. Kept as the
+base for the next runs (bone-length augmentation, then fingerspelling pre-training), which target
+the gap directly. Comparisons with it use matching epochs (curves), since its endpoint is
+extrapolated.
 
 ---
 
