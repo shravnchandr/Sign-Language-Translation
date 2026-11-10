@@ -678,6 +678,9 @@ def main():
             print("torch.compile enabled (fullgraph=False)")
         except Exception as e:
             print(f"torch.compile failed, falling back to eager mode: {e}")
+    # Checkpoints are saved from / loaded into the uncompiled module, so their
+    # keys never carry the "_orig_mod." prefix and load with or without --compile.
+    raw_model = getattr(model, "_orig_mod", model)
 
     print(f"Num classes : {NUM_CLASSES}")
     print(
@@ -852,7 +855,7 @@ def main():
                 print(_signer_str(v_signers))
             if v_acc > best_acc:
                 best_acc, best_signers = v_acc, v_signers
-                torch.save(model.state_dict(), p1_ckpt)
+                torch.save(raw_model.state_dict(), p1_ckpt)
                 p1_saved = True
                 print(f"  → Saved best P1 model ({best_acc:.4f})")
 
@@ -954,7 +957,7 @@ def main():
         if v_acc > best_acc:
             best_acc, best_signers = v_acc, v_signers
             patience = 0
-            torch.save(model.state_dict(), p1_ckpt)
+            torch.save(raw_model.state_dict(), p1_ckpt)
             p1_saved = True
             print(f"  → Saved best P1 model ({best_acc:.4f})")
         else:
@@ -976,7 +979,7 @@ def main():
 
     # Load the best Phase 1 checkpoint from THIS run (not a stale file).
     if p1_saved:
-        model.load_state_dict(torch.load(p1_ckpt, weights_only=True))
+        raw_model.load_state_dict(torch.load(p1_ckpt, weights_only=True))
 
     # CosineAnnealing warmdown from 1e-4 → 1e-6 over Phase 2.
     # accumulation_steps matches Phase 1 so T_max counts the same unit.
@@ -1025,7 +1028,7 @@ def main():
             print(_signer_str(v_signers))
         if v_acc > best_acc:
             best_acc, best_signers = v_acc, v_signers
-            torch.save(model.state_dict(), final_ckpt)
+            torch.save(raw_model.state_dict(), final_ckpt)
             final_saved = True
             print(f"  → Saved FINAL best model ({best_acc:.4f})")
 
@@ -1035,9 +1038,9 @@ def main():
     print("-" * 80)
     # Final TTA evaluation — load from whichever checkpoint THIS run produced.
     if final_saved:
-        model.load_state_dict(torch.load(final_ckpt, weights_only=True))
+        raw_model.load_state_dict(torch.load(final_ckpt, weights_only=True))
     elif p1_saved:
-        model.load_state_dict(torch.load(p1_ckpt, weights_only=True))
+        raw_model.load_state_dict(torch.load(p1_ckpt, weights_only=True))
     _, tta_acc, tta_signers = evaluate_epoch_tta(model, test_loader, criterion)
     split = "default split" if args.val_fold is None else f"fold {args.val_fold}/{args.n_folds}"
     print(f"Validation: {split}")
