@@ -19,6 +19,7 @@ from .model.landmark_conformer import HandDominanceModule, LandmarkConformer
 from .model.graph_conformer import GraphConformer
 from .model.grl import ganin_lambda
 from .model.supcon import CrossSignerSupCon
+from .model.vq import EMAQuantizer
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 use_amp = device.type == "cuda"
@@ -69,11 +70,16 @@ def _frozen_bn_stats(model):
     saved = [m.momentum for m in bns]
     for m in bns:
         m.momentum = 0.0
+    vqs = [m for m in model.modules() if isinstance(m, EMAQuantizer)]
+    for m in vqs:  # VQ codebook EMA is running state too
+        m.update = False
     try:
         yield
     finally:
         for m, mom in zip(bns, saved):
             m.momentum = mom
+        for m in vqs:
+            m.update = True
 
 
 def train_epoch(
@@ -125,9 +131,12 @@ def train_epoch(
     # protects the weights but not these buffers — snapshot and restore them.
     bn_buffers = [
         b for n, b in model.named_buffers()
-        if n.endswith(("running_mean", "running_var", "num_batches_tracked"))
-    ]
+        if n.endswith(("running_mean", "running_var", "num_batches_tracked",
+                       "codebook", "ema_count", "ema_sum", "ema_steps"))
+    ]  # + VQ codebook state, also updated during the forward
     nonfinite = 0
+    vq_mod = getattr(getattr(model, "_orig_mod", model), "vq", None)
+    vq_sum, vq_ppl = 0.0, {}
     canon = HandDominanceModule().to(device)  # mirrors clips before mixup
 
     pbar = tqdm(data_loader, desc=f"Epoch {epoch + 1}/{total_epochs}")
@@ -236,6 +245,12 @@ def train_epoch(
             else:
                 loss = sign_loss
 
+            vq_loss = None
+            if vq_mod is not None:
+                vq_loss = vq_mod.aux_loss  # already β-weighted (commitment)
+                loss = loss + vq_loss
+                vq_stats = {k: v.item() for k, v in vq_mod.stats.items()}
+
             con_loss = None
             if supcon is not None and supcon_weight > 0:
                 # Contrastive term on the unmixed clips (a mixture belongs to
@@ -270,6 +285,10 @@ def train_epoch(
         if adv_loss is not None:
             adv_sum += adv_loss.item()
             adv_n += 1
+        if vq_loss is not None:
+            vq_sum += vq_loss.item()
+            for k, v in vq_stats.items():
+                vq_ppl[k] = vq_ppl.get(k, 0.0) + v
         if con_loss is not None:
             con_sum += con_loss.detach().item()
             con_pos += pos_frac
@@ -321,6 +340,8 @@ def train_epoch(
         "con_pos": con_pos / con_n if con_n else None,
         "acc": correct / max(total, 1),
         "disc_acc": disc_correct / disc_total if disc_total > 0 else None,
+        "vq_loss": vq_sum / n_ok if vq_mod is not None else None,
+        "vq_ppl": {k: v / n_ok for k, v in vq_ppl.items()} if vq_mod is not None else None,
     }
 
 
@@ -331,6 +352,9 @@ def _train_str(stats: dict) -> str:
         out += f" | Adv Loss: {stats['adv_loss']:.4f}"
     if stats.get("con_loss") is not None:
         out += f" | Con Loss: {stats['con_loss']:.4f} (pos {stats['con_pos']:.0%})"
+    if stats.get("vq_loss") is not None:
+        ppl = "/".join(f"{v:.0f}" for v in stats["vq_ppl"].values())
+        out += f" | VQ commit: {stats['vq_loss']:.4f} codes {ppl}"
     return out + f" | Train Acc: {stats['acc']:.4f}"
 
 
@@ -458,6 +482,11 @@ def main():
                         help="graph = GraphConformer: hand streams from a shared hand-skeleton "
                         "graph encoder, everything else as conformer.")
     parser.add_argument("--graph-hidden", type=int, default=64, help="Hand graph width (--arch graph).")
+    parser.add_argument("--vq-codes", type=int, default=0,
+                        help="Per-frame discrete bottleneck: codes per body-part codebook "
+                        "(dominant hand / other hand / body / face); 0 = off.")
+    parser.add_argument("--vq-beta", type=float, default=0.25, help="VQ commitment weight.")
+    parser.add_argument("--vq-decay", type=float, default=0.99, help="VQ codebook EMA decay.")
     parser.add_argument("--graph-layers", type=int, default=3, help="Hand graph layers (--arch graph).")
     parser.add_argument("--n-heads", type=int, default=4, help="Attention heads")
     parser.add_argument("--n-layers", type=int, default=4, help="Conformer layers")
@@ -647,6 +676,9 @@ def main():
         zero_parts=tuple(p for p in args.zero_parts.split(",") if p),
         use_depth=not args.no_depth,
         supcon_dim=args.supcon_dim if args.supcon_weight > 0 else 0,
+        vq_codes=args.vq_codes,
+        vq_beta=args.vq_beta,
+        vq_decay=args.vq_decay,
     ).to(device)
 
     missing: list = []
@@ -706,6 +738,8 @@ def main():
     print(
         f"Model params: {sum(p.numel() for p in model.parameters()):,} | arch {args.arch}"
         + (f" (graph {args.graph_layers}×{args.graph_hidden})" if args.arch == "graph" else "")
+        + (f" | VQ {args.vq_codes} codes × 4 parts, β {args.vq_beta}, decay {args.vq_decay}"
+           if args.vq_codes > 0 else "")
     )
 
     # Per-class weights: inverse frequency, normalised so mean weight == 1.

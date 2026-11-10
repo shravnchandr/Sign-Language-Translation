@@ -3,6 +3,7 @@ import torch.nn as nn
 from .conformer import ConformerBlock, SinusoidalPositionalEncoding
 from .normalization import WristNormalization
 from .grl import SignerDiscriminator
+from .vq import PartVQ
 from ..config import (
     POSE_START,
     COORDS_PER_LM,
@@ -103,6 +104,9 @@ class LandmarkConformer(nn.Module):
         zero_parts=(),
         use_depth=True,
         supcon_dim=0,
+        vq_codes=0,
+        vq_beta=0.25,
+        vq_decay=0.99,
     ):
         """zero_parts ⊆ {"face", "pose"} and use_depth=False are input ablations
         (inputs zeroed inside the model, train and eval alike; no new params):
@@ -160,6 +164,33 @@ class LandmarkConformer(nn.Module):
             nn.LayerNorm(d_model),
             nn.GELU(),
         )
+
+        # Optional discrete bottleneck (vq_codes > 0): each frame's part features
+        # are snapped to one code per body-part group before fusion. Groups are
+        # index ranges into the fusion input, whose layout is
+        #   pos [lh, ps, rh, eb, mo] | vel [lh, ps, rh, face] | geo [lh, rh] | dist
+        # (LH slot = dominant hand after HandDominanceModule).
+        self.vq = None
+        if vq_codes > 0:
+            q, e = d_model // 4, d_model // 8
+            sizes = [("lh", q), ("ps", q), ("rh", q), ("eb", e), ("mo", e),
+                     ("lh_v", q), ("ps_v", q), ("rh_v", q), ("fc_v", q),
+                     ("lh_geo", e), ("rh_geo", e), ("dist", e)]
+            span, o = {}, 0
+            for name, w in sizes:
+                span[name] = list(range(o, o + w))
+                o += w
+            assert o == self.feat_fuse[0].in_features
+            parts = {
+                "dom_hand": ["lh", "lh_v", "lh_geo"],
+                "nondom_hand": ["rh", "rh_v", "rh_geo"],
+                "body": ["ps", "ps_v", "dist"],
+                "face": ["eb", "mo", "fc_v"],
+            }
+            self.vq = PartVQ(
+                {g: sum((span[n] for n in ns), []) for g, ns in parts.items()},
+                n_codes=vq_codes, beta=vq_beta, decay=vq_decay,
+            )
 
         self.pos_enc = SinusoidalPositionalEncoding(d_model, dropout=dropout)
         self.cls_token = nn.Parameter(torch.randn(1, 1, d_model))
@@ -392,7 +423,10 @@ class LandmarkConformer(nn.Module):
         fc_v = self.face_vel_proj(self._vcat(vel1, vel2, vel5, slice(FACE_START, None)))
         vel_feat = torch.cat([lh_v, ps_v, rh_v, fc_v], dim=-1)  # (B, T, d_model)
 
-        x = self.feat_fuse(torch.cat([pos_feat, vel_feat, geo_feat, dist_feat], dim=-1))
+        feats = torch.cat([pos_feat, vel_feat, geo_feat, dist_feat], dim=-1)
+        if self.vq is not None:
+            feats = self.vq(feats, mask)  # aux (commitment) loss → self.vq.aux_loss
+        x = self.feat_fuse(feats)
 
         x = self.pos_enc(x)
 

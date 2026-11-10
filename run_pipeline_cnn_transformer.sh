@@ -139,7 +139,7 @@ while [[ $# -gt 0 ]]; do
         --backbone-lr-ratio)       BACKBONE_LR_RATIO="$2";       shift 2 ;;
         --val-fold)                VAL_FOLD="$2";                shift 2 ;;
         --n-folds)                 N_FOLDS="$2";                 shift 2 ;;
-        --stretch-mode|--stretch-min|--stretch-max|--stretch-prob|--max-frames|--hand-drop-prob|--hand-drop-min|--hand-drop-max|--train-eval-size|--loss|--mixup-prob|--finger-drop-prob|--zero-parts|--supcon-weight|--supcon-temp|--supcon-queue|--supcon-dim|--aug-rotate|--aug-shear|--aug-scale|--aug-affine-prob|--grl-lambda|--dropout|--drop-path-max|--bone-aug-prob|--bone-aug-hand|--bone-aug-bone)
+        --stretch-mode|--stretch-min|--stretch-max|--stretch-prob|--max-frames|--hand-drop-prob|--hand-drop-min|--hand-drop-max|--train-eval-size|--loss|--mixup-prob|--finger-drop-prob|--zero-parts|--supcon-weight|--supcon-temp|--supcon-queue|--supcon-dim|--aug-rotate|--aug-shear|--aug-scale|--aug-affine-prob|--grl-lambda|--dropout|--drop-path-max|--bone-aug-prob|--bone-aug-hand|--bone-aug-bone|--vq-codes|--vq-beta|--vq-decay)
                                    TRAIN_EXTRA_ARGS+=("$1" "$2"); shift 2 ;;
         # Architecture and seed must match between pre-training and fine-tuning.
         --arch|--graph-hidden|--graph-layers|--seed)
