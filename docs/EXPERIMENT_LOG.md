@@ -608,6 +608,29 @@ cosines are scale-free and fingertip distances are divided by each hand's own si
 proportions add no signer variety that matters. Low value as an ensemble member: it tracks
 `fold0_graph` epoch by epoch (same seed and order), unlike `fold0_fixed` (26 % disagreement).
 
+
+### VQ bottleneck (`--vq-codes`) — implemented, not yet run (2026-11-10)
+Test (c) of the VQ-VAE plan: does a discrete bottleneck, trained end-to-end with classification,
+help signer generalisation? The hypothesis that would make VQ useful here: snapping each frame to a
+small codebook is an information bottleneck that may drop signer-specific detail — the 29-pt gap.
+Kept from the old `vqvae_seq2seq/`: factorised codebooks per body part, EMA codebook updates,
+dead-code reset. Dropped: its data pipeline and the seq2seq/CTC/beam-search decoder.
+
+Design: the fusion input of each valid frame is quantised by four EMA codebooks (dominant hand,
+non-dominant hand, body, face; 160/160/160/128 dims) → 4 codes per frame (≈32 bits at 256 codes),
+straight-through gradient, commitment β 0.25, per-part code perplexity logged each epoch. Same
+initial weights as the matching non-VQ run. Checked: default model unchanged; groups tile the fusion
+input exactly; codebooks seeded from data, frozen in eval; eval output is a function of the codes
+only (residual 1e-7 differences traced to two near-duplicate seed codes — now seeded from distinct
+frames); `train.py` end-to-end on a synthetic fold.
+
+Run: `fold0_graph` flags + `--vq-codes 256` (no pre-training, so it compares with `fold0_graph`).
+**Reading:** gap narrower with val holding (≥ 0.6859 − 1) → quantisation helps; then the
+reconstruction-trained tokenizer (b), possibly pre-trained on FS without labels, is worth building.
+Val clearly lower (> 2 pt) → the bottleneck discards needed information; (b) — frozen tokens learned
+for reconstruction — would be worse, so the VQ-VAE line stops there. Code perplexity far below 256
+for a part means that codebook collapsed and the test is not fair for it (raise β or lower K).
+
 ---
 
 ## Pending Ideas (not yet implemented)
