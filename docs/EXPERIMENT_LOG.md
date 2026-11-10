@@ -531,7 +531,18 @@ through `hand_presence()` (0/27,339 flag errors), so it shares the presence/gap 
    (`kaggle datasets download shravnchandr/asl-fs-lmdb`) is much larger than the IS LMDB — size the
    volume before downloading.
 
-**Plan.** (a) Close gaps 1–4. (b) Pre-train for the chosen arch (whichever of `fold0_fixed` /
+**Gaps 1–4 and 6 closed (2026-11-09):** `--arch/--graph-*` (+ `backbone_meta.json`, checked by
+`train.py`), bf16 + non-finite guard, augmentation (noise/shift, bone scale, per-clip stretch
+0.8–1.25×, affine; no mixup/hand/finger dropout) + `--seed`, val CER with best-by-CER selection,
+`setup_runpod.sh --with-fs`; the pipeline forwards `--arch/--graph-*/--seed` to both stages.
+Facts measured on the local sample: FS has **94 signers** (none sharing an ID with ASL Signs' 21;
+ID schemes may differ), 67,208 phrases, median 17 chars; the LMDB is ~18 GB (263 MB per 998
+phrases). The Kaggle FS build logic (script and notebook) is unchanged since May and produces
+exactly `config.ALL_COLUMNS` — no rebuild needed. CPU smoke tests on 998 local phrases: loss
+4.84 → 3.10 in 8 epochs, CER leaving 1.0 at epoch 5 (normal CTC blank phase); fine-tune with a
+graph backbone + `--compile` + bone aug ran end to end; an arch mismatch exits with an error.
+
+**Plan.** (a) ~~Close gaps 1–4.~~ (b) Pre-train for the chosen arch (whichever of `fold0_fixed` /
 `fold0_graph` / `fold0_graph_bone` is best), checking held-out-signer CER. (c) Fine-tune on fold 0
 with the same flags + `--pretrained-backbone`, compared against that run (one change).
 **Success** = val ≥ +2 pt, or the clean-train gap narrower, with gains reaching the hard signer
