@@ -285,11 +285,18 @@ class LandmarkConformer(nn.Module):
                 angles.append(cos_a.clamp(-1.0, 1.0))  # (B, T)
 
         tips = hand[:, :, [4, 8, 12, 16, 20]]  # (B, T, 5, c)
-        hand_scale = (
-            hand[:, :, [5, 9, 13, 17]].norm(dim=-1).mean(dim=-1) + 1e-6
-        )  # (B, T) mean MCP distance
+        hand_scale = hand[:, :, [5, 9, 13, 17]].norm(dim=-1).mean(dim=-1)  # (B, T) mean MCP distance
+        # A hand with no measurable size gets zero distance features. Finger
+        # dropout collapses fingers onto the wrist: with all four MCPs collapsed
+        # but the thumb tip intact, dividing by a ~1e-6 floor gave features up to
+        # 2.6e5 (0.15% of training clips ≈ 9% of batches, each batch's update
+        # then dominated by that clip under gradient clipping). Detected hands
+        # measure ≥ 0.036 (fold-0 training frames; median 0.29), so 0.02 never
+        # touches a real hand; never-detected hands (all zero) were 0 already.
+        has_size = hand_scale > 0.02
+        safe_scale = torch.where(has_size, hand_scale, torch.ones_like(hand_scale))
         dists = [
-            (tips[:, :, i] - tips[:, :, j]).norm(dim=-1) / hand_scale
+            torch.where(has_size, (tips[:, :, i] - tips[:, :, j]).norm(dim=-1) / safe_scale, 0.0)
             for i in range(5)
             for j in range(i + 1, 5)
         ]
