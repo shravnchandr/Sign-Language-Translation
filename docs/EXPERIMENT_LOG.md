@@ -492,7 +492,59 @@ rounding.
 ### High priority
 | ID | Idea | Expected impact | Notes |
 |----|------|----------------|-------|
-| 4A | Pre-training on fingerspelling data | High | Leverage unlabeled data for better hand-shape representations; fingerspelling has 30 distinct hand configs forcing fine-grained learning |
+| 4A | Pre-training on fingerspelling data | High | Leverage unlabeled data for better hand-shape representations; fingerspelling has 30 distinct hand configs forcing fine-grained learning — see notes below |
+
+#### 4A — fingerspelling CTC pre-training: status and plan (2026-11-09)
+
+**Why it is the top idea now.** Every fold-0 result points at signer generalisation, not capacity:
+clean train 0.97 vs val 0.68 with 18 training signers; GRL, contrastive loss and augmentation
+have not closed the gap. Google DeepMind's SL2T (Pixel 11, Aug 2026) is the external data point:
+the same input (MediaPipe Holistic landmarks), but >100k h over 50+ sign languages (~¼ ASL), and
+DeepMind reports joint training across languages/dialects beat single-language models (no numbers
+published). The lever that works at scale is *more signers and more varied data*, even from a
+related task. The ASL Fingerspelling set is the cheapest such source we already have (separate
+participants from ASL Signs; signer count to be read from its `train.csv`).
+
+**Status: implemented, never run.** `pretrain_fingerspelling.py` trains `LandmarkConformer` with
+a per-frame CTC head (60 chars + blank) on `data/asl-fs-lmdb`, signer-held-out 10% val
+(`GroupShuffleSplit` on `participant_id`), early stopping on val CTC loss, and saves
+`backbone_best.pth`. `train.py --pretrained-backbone` loads it (`strict=False`), freezes it for
+`--backbone-warmup-epochs` (5) while new params train, then unfreezes at `--backbone-lr-ratio`
+(0.1). All Runs 001–005 and every fold-0 run used `--skip-pretrain`. The FS LMDB already goes
+through `hand_presence()` (0/27,339 flag errors), so it shares the presence/gap convention.
+
+**Gaps to close before spending GPU time on it** (pretraining has fallen behind `train.py`):
+1. **No `--arch graph`.** It always builds `LandmarkConformer`; a `GraphConformer` fine-tune would
+   load no hand-graph weights (they would train from scratch at head LR — the part pretraining is
+   meant to improve). Needs the same `--arch/--graph-*` flags.
+2. **fp16 + GradScaler, no non-finite guard.** The Run 004 failure mode (one NaN batch poisoning
+   BatchNorm running stats) applies here too: bf16 on Ampere+ and the BN snapshot/restore from
+   `train_epoch` are missing.
+3. **No augmentation at all** (no noise, affine, stretch, bone scaling, finger/hand dropout) and
+   **no `--seed`**. Without augmentation the backbone may learn FS-signer specifics — the very thing
+   we are trying to dilute.
+4. **Only CTC loss is reported.** Add greedy-decoded character error rate on the held-out signers,
+   so we know the backbone learned hand shapes before paying for a fine-tune.
+5. **Input conventions differ from fine-tuning:** `max_frames` 384 vs 128 (fine — sinusoidal PE),
+   dropout 0.1 vs 0.2 and drop-path 0.05 vs 0.1 (fine-tune values apply after loading).
+6. **Pod setup:** `setup_runpod.sh` is ISLT-only (FS handling was removed); the FS LMDB
+   (`kaggle datasets download shravnchandr/asl-fs-lmdb`) is much larger than the IS LMDB — size the
+   volume before downloading.
+
+**Plan.** (a) Close gaps 1–4. (b) Pre-train for the chosen arch (whichever of `fold0_fixed` /
+`fold0_graph` / `fold0_graph_bone` is best), checking held-out-signer CER. (c) Fine-tune on fold 0
+with the same flags + `--pretrained-backbone`, compared against that run (one change).
+**Success** = val ≥ +2 pt, or the clean-train gap narrower, with gains reaching the hard signer
+(34503). A null here would be strong evidence that the 18-signer limit is not fixable with
+hand-shape pretraining alone, and that only more ASL-Signs-style signers (or other isolated-sign
+data, e.g. `data/WLASL_Landmarks/`) would move it.
+**Cost:** two runs (pretrain + fine-tune); pretraining time unmeasured (clips are longer —
+`max_frames` 384 — and the dataset larger than ASL Signs).
+
+**Note on SL2T's stated weaknesses** — rapid fingerspelling, rare signs, left-handed and
+one-handed signers, low light / signer partly out of frame (i.e. tracking loss). These overlap
+with what our per-signer diagnostics measured (hand-detection gaps rank per-signer accuracy,
+Spearman −0.94; dominance mirroring). SL2T publishes no per-signer or per-condition numbers.
 
 ### Medium priority
 | ID | Idea | Expected impact | Notes |
