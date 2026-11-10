@@ -691,6 +691,31 @@ mostly wasted, in all runs alike (relative comparisons stand; absolute numbers m
 and the VQ commitment loss ~0.02. Consequence: a VQ run with the fix must be compared with a graph
 run *with* the fix (`fold0_graph` had the bug), so the clean order is graph+fix, then VQ+fix.
 
+
+### Per-signer BatchNorm adaptation (AdaBN), offline on fold 0 (2026-11-10)
+For each val signer, every BatchNorm layer's running mean/var (4 layers: the Conformer conv modules)
+is replaced by the cumulative batch average over that signer's *unlabelled* clips; the model then
+predicts with the adapted statistics. Fixed length-sorted batches so all models see the same order.
+**Held-out protocol** (statistics from a random half of each signer's clips, accuracy on the other
+half; baseline on the same half):
+
+| | base | AdaBN | Δ | 34503 | 49445 | 62590 |
+|---|---|---|---|---|---|---|
+| fixed | 0.6774 | 0.6858 | +0.8 | .571→.585 | .657→.665 | .805→.809 |
+| graph | 0.6855 | 0.6967 | +1.1 | .581→.597 | .662→.674 | .815→.821 |
+| fs | 0.6511 | 0.6609 | +1.0 | .538→.560 | .640→.644 | .776→.780 |
+| fixed+graph | 0.6990 | 0.7139 | +1.5 | .599→.623 | .680→.691 | .819→.830 |
+| **fixed+graph+fs** | 0.7059 | **0.7210** | **+1.5** | .602→.626 | .696→.707 | .820→.832 |
+
+Transductive (stats and predictions on all clips): graph 0.6861 → 0.6977, 3-model 0.7079 → 0.7210.
+Same gains in both protocols → not fitting the scored clips. Every model, every signer improves,
+most on the hardest (34503). Stacks with ensembling: **0.7210** best fold-0 result (needs ≥ a batch of
+unlabelled clips per signer — fine for a per-user app, not comparable to Kaggle's per-clip scoring).
+**Reading:** part of the cross-signer gap is a per-signer shift in feature statistics that simple
+renormalisation removes — direct evidence for the signer-shift diagnosis. Next along this line:
+per-signer input normalisation (train and test), and test-time adaptation of BN affine parameters
+(e.g. entropy minimisation, TENT).
+
 ---
 
 ## Pending Ideas (not yet implemented)
