@@ -49,8 +49,9 @@ DL_DIR="data/.kaggle_download"   # same filesystem as $DEST → mv is a rename; 
 WITH_FS=false
 FS_DATASET="shravnchandr/asl-fs-lmdb"
 FS_DEST="data/asl-fs-lmdb"
-# Peak disk for the FS download: the dataset zip and the extracted LMDB (~16 GiB)
-# coexist until unzip finishes. Estimate — the zip size is not measured.
+FS_FILES=(character_to_prediction_index.json train.csv fs.lmdb.mdb)
+# Peak disk for the FS download: fs.lmdb.mdb is 17.1 GB; if Kaggle serves it zipped,
+# the zip and the extracted file coexist until extraction finishes.
 FS_NEED_GB=35
 
 while [[ $# -gt 0 ]]; do
@@ -228,8 +229,18 @@ if [ "$WITH_FS" = true ]; then
         echo "[fs] Free disk: $FREE GB (need ~$FS_NEED_GB GB: zip + extracted LMDB coexist until unzip ends)"
         [ "$FREE" -ge "$FS_NEED_GB" ] || die "not enough disk for the fingerspelling LMDB ($FREE GB free, ~$FS_NEED_GB GB needed).
      Free space (e.g. old checkpoints, data/cache) or use a bigger volume."
-        echo "[fs] Downloading dataset $FS_DATASET ..."
-        uv run kaggle datasets download "$FS_DATASET" -p "$FS_SRC" --unzip
+        # File by file: Kaggle returns 404 for the whole-dataset zip of this 16 GiB
+        # dataset (2026-11-10), while single-file downloads work.
+        for f in "${FS_FILES[@]}"; do
+            echo "[fs] Downloading $FS_DATASET/$f ..."
+            uv run kaggle datasets download "$FS_DATASET" -f "$f" -p "$FS_SRC"
+        done
+        # A file may arrive zipped (<name>.zip); extract with Python (no unzip dependency).
+        for z in "$FS_SRC"/*.zip; do
+            [ -e "$z" ] || continue
+            echo "[fs] Extracting $(basename "$z") ..."
+            uv run python -m zipfile -e "$z" "$FS_SRC" && rm -f "$z"
+        done
         MDB=$(find "$FS_SRC" -type f -name '*.mdb' ! -name 'lock.mdb' -exec ls -S {} + 2>/dev/null | head -1)
         CSV=$(find "$FS_SRC" -type f -name 'train.csv' | head -1)
         JSON=$(find "$FS_SRC" -type f -name 'character_to_prediction_index.json' | head -1)
