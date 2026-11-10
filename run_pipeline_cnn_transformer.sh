@@ -25,7 +25,7 @@
 #   bash run_pipeline_cnn_transformer.sh --arch graph               # GraphConformer: hand-skeleton graph encoder
 #   bash run_pipeline_cnn_transformer.sh --arch graph --bone-aug-prob 0.5   # + bone-length (hand proportion) augmentation
 #   bash run_pipeline_cnn_transformer.sh --arch graph --val-fold 0  # FS pre-train (same arch/seed) then fine-tune
-#   bash run_pipeline_cnn_transformer.sh --arch graph --fs-cleanup  # ... and delete the FS LMDB (~18 GB) after pre-training
+#   bash run_pipeline_cnn_transformer.sh --arch graph --fs-cleanup  # ... and delete the FS LMDB (~16 GiB) after pre-training
 #
 # Fingerspelling data is fetched only when pre-training actually runs (not with
 # --skip-pretrain or --pretrained-backbone): if the FS LMDB is not at its default
@@ -34,7 +34,7 @@
 #
 # Recommended (downloaded LMDB datasets, skip all local builds):
 #   bash run_pipeline_cnn_transformer.sh --skip-pretrain
-#   bash run_pipeline_cnn_transformer.sh --pretrain-epochs 40   # pre-train from the downloaded FS LMDB
+#   bash run_pipeline_cnn_transformer.sh --pretrain-epochs 30   # pre-train longer (default 20, patience 5)
 #
 # tmux: started outside tmux, the pipeline relaunches itself in a detached tmux
 # session (default name "islr") so it survives a closed terminal / browser tab,
@@ -96,13 +96,13 @@ FS_DATA_DIR="data/asl-fs-lmdb"       # downloaded from shravnchandr/asl-fs-lmdb
 FS_LMDB_PATH="data/asl-fs-lmdb/fs.lmdb.mdb"
 FS_LMDB_CSV="data/asl-fs-lmdb/train.csv"
 PRETRAIN_CHECKPOINT_DIR="checkpoints/pretrain_fs"
-PRETRAIN_EPOCHS=40
-PRETRAIN_PATIENCE=10
+PRETRAIN_EPOCHS=20
+PRETRAIN_PATIENCE=5
 PRETRAINED_BACKBONE=""
 SKIP_PRETRAIN=false
 SKIP_FS_LMDB=true  # FS LMDB pre-built (downloaded on demand); false = build from raw parquets
 FS_MAP_SIZE_GB=""   # empty = 1 TiB default
-FS_CLEANUP=false    # delete the FS LMDB after pre-training to free ~18 GB
+FS_CLEANUP=false    # delete the FS LMDB after pre-training to free ~16 GiB
 FS_DEFAULT_LMDB="$FS_LMDB_PATH"
 
 # ── Parse args ───────────────────────────────────────────────────────────────

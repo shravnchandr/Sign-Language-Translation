@@ -43,6 +43,7 @@ from tqdm import tqdm
 from torch.utils.data import DataLoader, Subset
 
 from .data.augmentation import AdvancedAugmentation
+from .data.dataset import BucketBatchSampler
 from .data.fingerspelling_dataset import (
     FingerspellingDataset,
     collate_ctc,
@@ -130,18 +131,20 @@ def train(args):
     train_ds = Subset(train_full, train_idx.tolist())
     val_ds = Subset(val_full, val_idx.tolist())
 
+    # Length bucketing, as in fine-tuning: FS phrases run 160 frames on average
+    # (cap 384), so random batches padded every clip to ~357 frames — 2.2× the
+    # real work. Batch membership is re-drawn every epoch (BucketBatchSampler).
+    lengths = train_full.lengths()
     train_loader = DataLoader(
         train_ds,
-        batch_size=args.batch_size,
-        shuffle=True,
+        batch_sampler=BucketBatchSampler([lengths[i] for i in train_idx], args.batch_size),
         num_workers=args.num_workers,
         collate_fn=collate_ctc,
         pin_memory=(device.type == "cuda"),
     )
     val_loader = DataLoader(
         val_ds,
-        batch_size=args.batch_size,
-        shuffle=False,
+        batch_sampler=BucketBatchSampler([lengths[i] for i in val_idx], args.batch_size),
         num_workers=args.num_workers,
         collate_fn=collate_ctc,
         pin_memory=(device.type == "cuda"),
@@ -368,9 +371,11 @@ def main():
     p.add_argument("--dropout", type=float, default=0.1)
     p.add_argument("--drop-path-max", type=float, default=0.05)
     # Training
-    p.add_argument("--epochs", type=int, default=40)
+    # Pre-training only has to teach hand shapes, not converge on fingerspelling;
+    # ~8 min/epoch (graph, bucketed) makes 40 epochs ~5.5 h.
+    p.add_argument("--epochs", type=int, default=20)
     p.add_argument(
-        "--patience", type=int, default=10, help="Early stopping patience on val CER"
+        "--patience", type=int, default=5, help="Early stopping patience on val CER"
     )
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--accum-steps", type=int, default=4)

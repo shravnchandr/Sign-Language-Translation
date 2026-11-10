@@ -71,6 +71,15 @@ class FingerspellingDataset(Dataset):
             raise KeyError(f"sequence_id {sequence_id} not found in LMDB")
         return torch.load(io.BytesIO(bytes(val)), weights_only=True)  # (T, COORD_FEAT)
 
+    def lengths(self) -> List[int]:
+        """Frame count per sequence after the max_frames cap, from the LMDB's
+        fs:len: keys (no tensor decoding) — for BucketBatchSampler."""
+        with self._get_env().begin() as txn:
+            return [
+                min(int(txn.get(f"fs:len:{sid}".encode())), self.max_frames)
+                for sid in self.sequence_ids
+            ]
+
     # ------------------------------------------------------------------
     # Character encoding
     # ------------------------------------------------------------------

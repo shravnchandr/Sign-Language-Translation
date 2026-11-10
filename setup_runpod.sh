@@ -49,7 +49,7 @@ DL_DIR="data/.kaggle_download"   # same filesystem as $DEST → mv is a rename; 
 WITH_FS=false
 FS_DATASET="shravnchandr/asl-fs-lmdb"
 FS_DEST="data/asl-fs-lmdb"
-# Peak disk for the FS download: the dataset zip and the extracted LMDB (~18 GB)
+# Peak disk for the FS download: the dataset zip and the extracted LMDB (~16 GiB)
 # coexist until unzip finishes. Estimate — the zip size is not measured.
 FS_NEED_GB=35
 
