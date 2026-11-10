@@ -609,6 +609,49 @@ proportions add no signer variety that matters. Low value as an ensemble member:
 `fold0_graph` epoch by epoch (same seed and order), unlike `fold0_fixed` (26 % disagreement).
 
 
+### Fold 0 GraphConformer + fingerspelling pre-training (`fold0_graph_fs`) — no gain, stopped at epoch 35
+**Pre-training** (graph arch, seed 42, bucketed, augmented): 59,342 phrases / 84 signers, val 7,866 /
+10 held-out signers; 5m30s/epoch (est. was ~8 min); CER 0.997 → 0.485 (ep 2) → 0.379 (5) → 0.331 (10)
+→ **0.3098** (ep 20, best; ran all 20). Val loss flat from ~ep 12 (mild FS overfit; selection is by CER).
+
+**Fine-tune** = `fold0_graph` flags + `--pretrained-backbone` (the standard recipe: 5 warmup epochs with
+the backbone frozen, then 75 joint epochs with **backbone LR = 0.1 × head LR**). Warmup alone (frozen
+FS features, new head) reached val 0.26 — real transfer. Then:
+
+| | FS-pretrained | graph, same joint epochs | graph, same epochs |
+|---|---|---|---|
+| val ep 31–35 avg | **0.650** (best 0.652, ep 34) | 0.661 (ep 26–30) | 0.659 |
+| clean-train gap | 16.0 pt | 20.9 pt | 24.0 pt |
+| 34503 | 0.538 | 0.559 | 0.559 |
+| signer-disc acc | ~0.19 | ~0.12 | ~0.12 |
+
+At matched val (~0.65; graph ep 19/25/31) the FS gap is a little narrower (16.0 vs 17.4–23.9) and
+34503 equal (0.538 vs 0.537–0.548); at ep 22 the FS gap had been the wider one. **Reading:** ~1 pt
+behind at matched training, no hard-signer gain, features carry more signer identity — no support
+for "84 extra FS signers fix signer generalisation" *with this recipe*. **Confound:** the 0.1× backbone
+LR weakens both the backbone's adaptation and the GRL's reversed gradient on it (≈10× weaker
+signer-invariance pressure), which fits the higher discriminator accuracy. Clean test still open:
+re-fine-tune from the same `pretrain_fs/backbone_best.pth` with `--backbone-lr-ratio 1.0`
+(fine-tune only, ~4 h). Checkpoint (0.652) kept as a candidate ensemble member — a backbone
+pre-trained on other data may err differently from `fold0_fixed` and `fold0_graph`.
+
+**Ensemble check (offline, Mac CPU, same 14,076 fold-0 val clips, equal-weight probability average):**
+the FS model reproduces 0.6520 and is the *most different* member — prediction disagreement 32 % with
+`fold0_fixed` and 30 % with `fold0_graph` (fixed/graph: 26 %); error overlap (both wrong / either
+wrong) 0.58–0.60 vs 0.65 for fixed/graph.
+
+| members | pooled | 34503 | 49445 | 62590 |
+|---|---|---|---|---|
+| graph + fs | 0.6971 | 0.592 | 0.682 | 0.819 |
+| fixed + fs | 0.6920 | 0.583 | 0.682 | 0.811 |
+| fixed + graph | 0.7025 | 0.605 | 0.684 | 0.820 |
+| **fixed + graph + fs** | **0.7079** | **0.608** | **0.694** | **0.822** |
+
+graph + fs beats graph alone by +1.1 (net +156 clips, McNemar p = 2e-11) although fs is 3.4 pt worse
+alone; adding fs to fixed + graph: +0.5 (net +76, p = 6e-5). **Best fold-0 result so far: 0.7079.**
+Revised reading: FS pre-training does not make a better single model (with this recipe) but yields a
+genuinely different one — useful as an ensemble member. The fs member was stopped at epoch 34 of 80.
+
 ### VQ bottleneck (`--vq-codes`) — implemented, not yet run (2026-11-10)
 Test (c) of the VQ-VAE plan: does a discrete bottleneck, trained end-to-end with classification,
 help signer generalisation? The hypothesis that would make VQ useful here: snapping each frame to a
@@ -630,6 +673,23 @@ reconstruction-trained tokenizer (b), possibly pre-trained on FS without labels,
 Val clearly lower (> 2 pt) → the bottleneck discards needed information; (b) — frozen tokens learned
 for reconstruction — would be worse, so the VQ-VAE line stops there. Code perplexity far below 256
 for a part means that codebook collapsed and the test is not fair for it (raise β or lower K).
+
+
+### VQ run (`fold0_graph_vq`) aborted at epoch 5 — exposed a geometry-stream bug (2026-11-10)
+The VQ commitment loss logged 54,745 / 15,220 / 19,133 / 11,837 for epochs 1–4 (expected ~0.02), val
+0.160 at epoch 4 vs 0.290 for `fold0_graph`: the β-weighted squared error dominated every clipped
+update. Not the quantiser: on real fold-0 clips the fusion features are ≤ 4.9 without augmentation.
+**Cause:** `_hand_geometry` divided fingertip distances by the mean MCP distance + 1e-6. Finger
+dropout (default p 0.5, in every run since Run 004) collapses dropped fingers onto the wrist; with all
+four MCPs collapsed and the thumb intact the divisor is ~1e-6 → features up to **2.6e5 in 0.15 % of
+training clips ≈ 9 % of batches**. The fusion LayerNorm hid it in the forward pass, but each such
+batch's gradient was dominated by one corrupted clip and then clipped — roughly 1 update in 11
+mostly wasted, in all runs alike (relative comparisons stand; absolute numbers may be depressed).
+**Fix:** distance features are 0 when the hand scale ≤ 0.02 (detected hands: min 0.036, 0.01st pct
+0.077, median 0.29 over 44k fold-0 training frames). Existing checkpoints on fold-0 val: max
+|Δlogit| 3e-5, no prediction changes. With the full augmentation set the max fusion feature is 4.97
+and the VQ commitment loss ~0.02. Consequence: a VQ run with the fix must be compared with a graph
+run *with* the fix (`fold0_graph` had the bug), so the clean order is graph+fix, then VQ+fix.
 
 ---
 
