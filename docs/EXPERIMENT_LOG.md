@@ -485,6 +485,16 @@ the bone-length run uses `--compile` and its it/s from epoch 2 on is compared wi
 ~7.2 it/s (epoch 1 includes compilation). Speed only — no effect on the comparison beyond float
 rounding.
 
+**Update (2026-11-10): `--compile` crashes on the GPU.** First backward pass of `fold0_graph_bone`
+(torch 2.10, bf16): `RuntimeError: (*bias): last dimension must be contiguous` in
+`_scaled_dot_product_efficient_attention_backward`. `nn.MultiheadAttention` turns the key padding
+mask into a broadcast (stride-0) bias; eager handles it, but the compiled graph passes it as is to
+the CUDA memory-efficient attention backward, which needs a contiguous last dimension. CPU uses a
+different SDPA kernel, so the local tests could not catch it. Not pursued: a fix (exclude the
+attention call from compilation, or build a contiguous mask) can only be verified on a GPU, for an
+unmeasured speed-up. Runs continue without `--compile`. torch stays at 2.10 (needed for compile,
+harmless otherwise).
+
 ### Fold 0 GraphConformer (`fold0_graph`, `fold0_fixed` flags + `--arch graph`) — stopped at epoch 64, final extrapolated
 Same config and seed as `fold0_fixed`; only the hand streams differ. ~2m57s/epoch (1.55×).
 Stopped after epoch 64 to fund the bone-length run: LR had decayed to 5.9e-5 and val had been on

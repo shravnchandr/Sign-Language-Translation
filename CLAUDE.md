@@ -24,7 +24,7 @@ uv sync
 # LandmarkConformer on a fresh RunPod pod: env + tmux + LMDB download/verify, then train
 bash setup_runpod.sh                     # default: saved output of Kaggle notebook shravnchandr/build-islt-lmdb
 bash setup_runpod.sh --with-fs           # also the fingerspelling LMDB (~18 GB) for CTC pre-training
-bash run_pipeline_cnn_transformer.sh --arch graph --val-fold 0 --fs-cleanup   # FS pre-train → fine-tune; the FS LMDB is downloaded only when pre-training runs (disk check: ~35 GB peak), --fs-cleanup deletes it afterwards
+bash run_pipeline_cnn_transformer.sh --arch graph --val-fold 0 --fs-cleanup   # (no --compile: crashes on GPU) FS pre-train → fine-tune; the FS LMDB is downloaded only when pre-training runs (disk check: ~35 GB peak), --fs-cleanup deletes it afterwards
 bash run_pipeline_cnn_transformer.sh --skip-pretrain --num-workers 8   # relaunches in tmux session "islr"
 tmux attach -t islr                      # logs also in logs/cnn_transformer_<timestamp>.log; --no-tmux = foreground
 bash run_pipeline_cnn_transformer.sh --skip-pretrain --val-fold 2   # validate on signer fold 2 of 7 (GroupKFold)
@@ -260,7 +260,7 @@ Columns: `frame`, `type`, `landmark_index`, `x`, `y`, `z`
 
 **Training hygiene** (`train.py`): `--seed` (default 42; seeds Python/NumPy/torch incl. DataLoader workers; CPU runs reproduce exactly, GPU not bitwise). `--train-eval-size` (default 3000) evaluates a fixed un-augmented training subset in eval mode each epoch ("Clean Train") — the loop's train acc is on augmented mixup inputs and not comparable to val. `--loss {focal,ce}` (default focal).
 
-**torch.compile** (`--compile`): needs torch ≥ 2.10 on Python 3.14 (2.9.1 raised and `train.py` silently fell back to eager — every earlier `--compile` was a no-op). Pinned `torch>=2.10.0,<2.11`: 2.11+ PyPI wheels are CUDA 13 (driver ≥ 580); 2.10 keeps CUDA 12.8 like 2.9.1. Verified on CPU: compiled = eager to 4e-7, no recompiles across bucket lengths or the per-epoch GRL λ (floats are not specialised); stochastic depth's `.item()` causes one graph break per block. Checkpoints are saved from/loaded into the unwrapped module (`raw_model`), so they never carry the `_orig_mod.` prefix.
+**torch.compile** (`--compile`) — **currently crashes on GPU** (first backward: `(*bias): last dimension must be contiguous` in the CUDA memory-efficient SDPA backward; `nn.MultiheadAttention`'s key-padding mask becomes a broadcast bias that compiled code passes through un-materialised; CPU uses another kernel, so CPU tests pass). Do not use it until attention is excluded from compilation or given a contiguous mask, verified on a GPU. Needs torch ≥ 2.10 on Python 3.14 (2.9.1 raised and `train.py` silently fell back to eager — every earlier `--compile` was a no-op). Pinned `torch>=2.10.0,<2.11`: 2.11+ PyPI wheels are CUDA 13 (driver ≥ 580); 2.10 keeps CUDA 12.8 like 2.9.1. Verified on CPU: compiled = eager to 4e-7, no recompiles across bucket lengths or the per-epoch GRL λ (floats are not specialised); stochastic depth's `.item()` causes one graph break per block. Checkpoints are saved from/loaded into the unwrapped module (`raw_model`), so they never carry the `_orig_mod.` prefix.
 
 **AMP training**: `torch.amp.autocast` wraps every forward pass — bf16 on Ampere+ (no `GradScaler` needed), fp16 + `GradScaler` otherwise. Disabled automatically when not on CUDA. `train_epoch` skips non-finite-loss batches and restores BatchNorm running stats from a pre-forward snapshot (a NaN forward would otherwise permanently break eval).
 
