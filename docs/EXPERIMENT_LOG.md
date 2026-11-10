@@ -589,6 +589,25 @@ Cost: 2× inference. **Open question:** whether the gain comes from *architectur
 just from averaging two independently trained models — a 2-seed ensemble of one architecture would
 separate the two (it would also give the missing seed-noise estimate).
 
+
+### Fold 0 GraphConformer + bone-length augmentation (`fold0_graph_bone`, `--bone-aug-prob 0.5`) — null, stopped at epoch 32
+`fold0_graph` + `--bone-aug-prob 0.5` (hand ±0.15, bone ±0.1); same seed and batch order, so the two
+curves are tightly coupled and small effects would show.
+
+| epochs | val Δ vs graph | clean-train gap graph → bone | 34503 Δ |
+|---|---|---|---|
+| 10–14 | +0.3 | 12.5 → 12.1 | +0.8 |
+| 15–20 | +0.1 | 16.4 → 16.3 | +0.5 |
+| 21–26 | +0.3 | 19.7 → 19.3 | +1.1 |
+| 27–32 | −0.2 | 22.1 → 22.2 | +0.1 |
+
+Best by epoch 32: 0.6609 (graph: 0.6665). **Null**: the gap grows at the same rate and the early
+hard-signer edge vanished; stopped by the epoch-35 rule to fund fingerspelling pre-training.
+Likely reason (untested): the model is already largely invariant to hand proportions — joint-angle
+cosines are scale-free and fingertip distances are divided by each hand's own size — so simulated
+proportions add no signer variety that matters. Low value as an ensemble member: it tracks
+`fold0_graph` epoch by epoch (same seed and order), unlike `fold0_fixed` (26 % disagreement).
+
 ---
 
 ## Pending Ideas (not yet implemented)
