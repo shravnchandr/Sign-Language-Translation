@@ -549,6 +549,46 @@ Reading: the residual adjacency extracts explicit hand-shape structure (curl, sp
 attributing the ~+1 pt to better hand-shape modelling — and it overlaps the hand-crafted geometry
 stream (joint-angle cosines), which may now be partly redundant (untested).
 
+**Offline re-evaluation on fold 0** (Mac CPU, fp32, both `best_phase1.pth`, 14,076 val clips, one pass
+with both models per batch):
+
+| | logged (pod, bf16) | re-run | TTA |
+|---|---|---|---|
+| `fold0_fixed` | 0.6771 | 0.6769 | 0.6773 |
+| `fold0_graph` | 0.6859 | 0.6861 | **0.6858** |
+
+Reproduces within 2–3 clips. TTA again adds nothing.
+- **Paired test:** graph right / fixed wrong 1,030 clips, the reverse 901 → net +129; exact McNemar
+  **p = 0.0036**. The two trained models differ significantly on this fold — but the test does not
+  include training randomness, so "the architecture is better" still needs a second seed or fold.
+  The models disagree on **26 %** of clips: a lot of churn for a net +0.9.
+- **Per sign:** 129 up, 92 down, 29 unchanged (mean +1.0, sd 6.6 pt). Largest gains: thankyou
+  0.56→0.78, grandma 0.55→0.75, like 0.72→0.91, child 0.43→0.59; largest losses: think 0.86→0.67,
+  dryer 0.50→0.33, that 0.69→0.53, car 0.67→0.53.
+- **Much of the churn is within near-identical pairs**, resolved one way and broken the other:
+  duck↔goose (8 resolved / 14 introduced), wake↔awake (7 / 11), home↔kiss (7 / 6), plus dryer→dry,
+  grandpa→dad. Some resolved confusions differ mainly in hand shape (thankyou vs taste, hen vs pen),
+  but new ones (think→penny) cut the other way — **only weak support** for "the gain is hand shape".
+- Side finding: part of the remaining error is concentrated in near-identical sign pairs —
+  possibly a dataset-level ambiguity ceiling (not yet quantified).
+
+**Ensemble `fold0_fixed` + `fold0_graph`** (average of softmax probabilities, equal weights, same
+14,076 clips; offline, no retraining):
+
+| | pooled | 34503 | 49445 | 62590 | top-5 |
+|---|---|---|---|---|---|
+| `fold0_fixed` | 0.6769 | 0.574 | 0.656 | 0.803 | 0.856 |
+| `fold0_graph` | 0.6861 | 0.583 | 0.664 | 0.813 | 0.864 |
+| **ensemble** | **0.7025** | **0.605** | **0.684** | **0.820** | **0.874** |
+
+**First fold-0 result above 0.70**: +1.6 pt over the graph alone (net +231 clips, McNemar
+p = 4e-14), +2.6 over `fold0_fixed`, and the largest gain on the hardest signer (34503 +2.2 over
+graph). Averaging logits instead: 0.7041. Equal weights are also the optimum of a weight sweep
+(w_graph 0.4 / 0.5 / 0.6 → 0.699 / 0.703 / 0.701), so the number is not inflated by tuning on val.
+Cost: 2× inference. **Open question:** whether the gain comes from *architectural* diversity or
+just from averaging two independently trained models — a 2-seed ensemble of one architecture would
+separate the two (it would also give the missing seed-noise estimate).
+
 ---
 
 ## Pending Ideas (not yet implemented)
