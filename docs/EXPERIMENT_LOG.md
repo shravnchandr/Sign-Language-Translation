@@ -477,6 +477,14 @@ absolute joint positions but keeps every joint angle, so hand shape (the sign) i
 Intended run: the `fold0_graph` command + `--bone-aug-prob 0.5`, compared against `fold0_graph`
 (one change). Success = clean-train gap narrower with val ≥ `fold0_graph`.
 
+**Speed: `--compile`.** It had never worked: torch 2.9.1 refuses `torch.compile` on Python 3.14 and
+`train.py` fell back to eager silently. Upgraded to torch 2.10.0 (same CUDA 12.8 wheels; default
+model logits within 3e-7 of 2.9.1 on CPU, so runs stay comparable). On CPU, compiled = eager to
+4e-7 and nothing recompiles across lengths 19–128 or the per-epoch GRL λ. GPU speed-up unmeasured:
+the bone-length run uses `--compile` and its it/s from epoch 2 on is compared with `fold0_graph`'s
+~7.2 it/s (epoch 1 includes compilation). Speed only — no effect on the comparison beyond float
+rounding.
+
 ---
 
 ## Pending Ideas (not yet implemented)

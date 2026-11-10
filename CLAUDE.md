@@ -256,6 +256,8 @@ Columns: `frame`, `type`, `landmark_index`, `x`, `y`, `z`
 
 **Training hygiene** (`train.py`): `--seed` (default 42; seeds Python/NumPy/torch incl. DataLoader workers; CPU runs reproduce exactly, GPU not bitwise). `--train-eval-size` (default 3000) evaluates a fixed un-augmented training subset in eval mode each epoch ("Clean Train") — the loop's train acc is on augmented mixup inputs and not comparable to val. `--loss {focal,ce}` (default focal).
 
+**torch.compile** (`--compile`): needs torch ≥ 2.10 on Python 3.14 (2.9.1 raised and `train.py` silently fell back to eager — every earlier `--compile` was a no-op). Pinned `torch>=2.10.0,<2.11`: 2.11+ PyPI wheels are CUDA 13 (driver ≥ 580); 2.10 keeps CUDA 12.8 like 2.9.1. Verified on CPU: compiled = eager to 4e-7, no recompiles across bucket lengths or the per-epoch GRL λ (floats are not specialised); stochastic depth's `.item()` causes one graph break per block. Checkpoints are saved from/loaded into the unwrapped module (`raw_model`), so they never carry the `_orig_mod.` prefix.
+
 **AMP training**: `torch.amp.autocast` wraps every forward pass — bf16 on Ampere+ (no `GradScaler` needed), fp16 + `GradScaler` otherwise. Disabled automatically when not on CUDA. `train_epoch` skips non-finite-loss batches and restores BatchNorm running stats from a pre-forward snapshot (a NaN forward would otherwise permanently break eval).
 
 **Preprocessing cache**: `VQVAEDataset` accepts `cache_dir`. First access processes each parquet and saves a `.pt` tensor; subsequent accesses skip parquet parsing entirely. Default: `data/cache/`.
