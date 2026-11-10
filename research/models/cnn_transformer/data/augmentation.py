@@ -10,6 +10,7 @@ from ..config import (
     PRESENCE_START,
     FINGER_LM_RANGES,
     FINGER_COORD_SLICES,
+    HAND_PARENT,
 )
 
 
@@ -71,6 +72,48 @@ def hand_dropout(
         coords[s:e, start : start + width] = hold
         presence[s:e, h] = 0.0
     return coords, presence
+
+
+def bone_scale(
+    coords: torch.Tensor,
+    prob: float = 0.5,
+    hand_range: float = 0.15,
+    bone_range: float = 0.1,
+) -> torch.Tensor:
+    """Simulate another signer's hand proportions.
+
+    The clean-train gap (97% vs 68% val on fold 0) says the model fits its 18
+    training signers; hand size and finger proportions are a per-signer trait
+    that shoulder-width scaling does not remove. With probability `prob`, every
+    bone (joint − parent) is scaled by s_hand · s_bone, s_hand ~ U(1 ± hand_range)
+    for the whole hand and s_bone ~ U(1 ± bone_range) per bone, and the hand is
+    rebuilt outward from the fixed wrist. One draw per clip, shared by both
+    hands and all frames (a signer's proportions do not change mid-sign).
+    Bone directions are kept, so joint angles (and the geometry stream's
+    joint-angle cosines) are unchanged; the wrist location is untouched.
+
+    Run on hand_presence() output, before noise / velocity, so Δ1 matches.
+    Held (gap-filled) frames stay exact copies of their neighbours and a
+    never-detected (all-zero) hand stays zero. Uses torch's RNG.
+
+    coords: (T, COORD_FEAT) positions. Returns a modified copy.
+    """
+    if prob <= 0.0 or torch.rand(()) >= prob:
+        return coords
+    c = COORDS_PER_LM
+    s = 1.0 + hand_range * (2 * torch.rand(()) - 1)
+    s = s * (1.0 + bone_range * (2 * torch.rand(N_LH) - 1))  # (21,); s[0] unused
+    parent = torch.tensor(HAND_PARENT)
+    coords = coords.clone()
+    T = coords.shape[0]
+    for hs in (LH_START, RH_START):
+        hand = coords[:, hs : hs + N_LH * c].reshape(T, N_LH, c)
+        bones = (hand - hand[:, parent]) * s[None, :, None].to(hand.dtype)
+        new = hand.clone()
+        for j in range(1, N_LH):  # parents precede children
+            new[:, j] = new[:, HAND_PARENT[j]] + bones[:, j]
+        coords[:, hs : hs + N_LH * c] = new.reshape(T, N_LH * c)
+    return coords
 
 
 class AdvancedAugmentation:

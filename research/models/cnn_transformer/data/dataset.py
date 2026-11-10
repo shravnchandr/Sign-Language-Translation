@@ -9,7 +9,7 @@ from pathlib import Path
 from torch.utils.data import DataLoader, Dataset, Sampler
 from typing import Dict, List, Optional, Tuple
 from sklearn.model_selection import GroupKFold, GroupShuffleSplit, train_test_split
-from .augmentation import augment_sample, hand_dropout
+from .augmentation import augment_sample, bone_scale, hand_dropout
 from .preprocessing import frame_stacked_data, hand_presence
 from ..config import COORDS_PER_LM, LH_START, N_LH, RH_START
 from ._cache_keys import (
@@ -96,11 +96,14 @@ class ASLDataset(Dataset):
         augment: bool = False,
         signer_to_id: Optional[Dict[str, int]] = None,
         hand_drop: Optional[Tuple[float, float, float]] = None,
+        bone_aug: Optional[Tuple[float, float, float]] = None,
     ):
-        """hand_drop: (prob, min_frac, max_frac) for hand_dropout(), applied
-        only when augment=True; None or prob 0 disables it."""
+        """hand_drop: (prob, min_frac, max_frac) for hand_dropout(); bone_aug:
+        (prob, hand_range, bone_range) for bone_scale(). Both applied only when
+        augment=True; None or prob 0 disables them."""
         self.df = df.reset_index(drop=True)
         self.hand_drop = hand_drop
+        self.bone_aug = bone_aug
         self.base_path = Path(base_path)
         self.cache_dir = Path(cache_dir) if cache_dir else None
         self.max_frames = max_frames
@@ -268,6 +271,8 @@ class ASLDataset(Dataset):
             if self.hand_drop and self.hand_drop[0] > 0:
                 # Before noise and velocity, so a dropped span looks like a real gap.
                 coords, presence = hand_dropout(coords, presence, *self.hand_drop)
+            if self.bone_aug and self.bone_aug[0] > 0:
+                coords = bone_scale(coords, *self.bone_aug)
             coords = torch.tensor(augment_sample(coords.numpy()), dtype=torch.float32)
             # Hands never detected in the clip stay exactly zero, as at validation:
             # noise / shift would otherwise give them random geometry in training.
@@ -357,6 +362,7 @@ def get_data_loaders(
     val_fold: Optional[int] = None,
     n_folds: int = 7,
     hand_drop: Optional[Tuple[float, float, float]] = None,
+    bone_aug: Optional[Tuple[float, float, float]] = None,
 ) -> Tuple[DataLoader, DataLoader, int]:
     """
     Args:
@@ -374,6 +380,8 @@ def get_data_loaders(
                      matching the default split's size).
         hand_drop:   (prob, min_frac, max_frac) hand-dropout augmentation for
                      the training set only; None = off.
+        bone_aug:    (prob, hand_range, bone_range) bone-length augmentation
+                     for the training set only; None = off.
 
     Returns:
         (train_loader, test_loader, n_signers) where n_signers is the number of unique
@@ -444,6 +452,7 @@ def get_data_loaders(
         augment=True,
         signer_to_id=signer_to_id,
         hand_drop=hand_drop,
+        bone_aug=bone_aug,
     )
     test_dataset = ASLDataset(
         test_df,

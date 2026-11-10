@@ -527,6 +527,12 @@ def main():
         help="Per-hand probability of dropping a contiguous span of frames the way "
         "MediaPipe tracking gaps appear in the data (0 = off).",
     )
+    parser.add_argument("--bone-aug-prob", type=float, default=0.0,
+                        help="Bone-length augmentation probability per clip (0 = off).")
+    parser.add_argument("--bone-aug-hand", type=float, default=0.15,
+                        help="Whole-hand scale range: U(1 ± x).")
+    parser.add_argument("--bone-aug-bone", type=float, default=0.1,
+                        help="Extra per-bone scale range: U(1 ± x).")
     parser.add_argument("--hand-drop-min", type=float, default=0.1,
                         help="Min dropped span, as a fraction of the clip.")
     parser.add_argument("--hand-drop-max", type=float, default=0.4,
@@ -621,6 +627,7 @@ def main():
         n_folds=args.n_folds,
         max_frames=args.max_frames,
         hand_drop=(args.hand_drop_prob, args.hand_drop_min, args.hand_drop_max),
+        bone_aug=(args.bone_aug_prob, args.bone_aug_hand, args.bone_aug_bone),
     )
 
     grl_active = args.grl_lambda > 0.0 and n_signers > 0
@@ -759,6 +766,11 @@ def main():
         "Hand dropout: "
         + (f"p={args.hand_drop_prob}, span {args.hand_drop_min}–{args.hand_drop_max} of clip"
            if args.hand_drop_prob > 0 else "off")
+    )
+    print(
+        "Bone aug    : "
+        + (f"p={args.bone_aug_prob}, hand ±{args.bone_aug_hand}, bone ±{args.bone_aug_bone}"
+           if args.bone_aug_prob > 0 else "off")
     )
     print(
         f"Time stretch: {args.stretch_mode} {args.stretch_min}–{args.stretch_max}× "

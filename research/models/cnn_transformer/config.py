@@ -174,6 +174,19 @@ def _build_mirror_perm() -> List[int]:
 MIRROR_PERM = _build_mirror_perm()
 assert sorted(MIRROR_PERM) == list(range(IN_FEAT)), "mirror perm not a bijection"
 
+# MediaPipe hand skeleton (parent, child); node 0 = wrist. Children always have a
+# larger index than their parent, so ascending order is a valid traversal.
+HAND_TREE: List[Tuple[int, int]] = [
+    (0, 1), (1, 2), (2, 3), (3, 4),  # thumb
+    (0, 5), (5, 6), (6, 7), (7, 8),  # index
+    (0, 9), (9, 10), (10, 11), (11, 12),  # middle
+    (0, 13), (13, 14), (14, 15), (15, 16),  # ring
+    (0, 17), (17, 18), (18, 19), (19, 20),  # pinky
+]
+HAND_PARENT: List[int] = [0] * N_LH
+for _p, _c in HAND_TREE:
+    HAND_PARENT[_c] = _p
+
 FINGER_LM_RANGES: List[Tuple[int, int]] = [
     (1, 5),  # thumb
     (5, 9),  # index

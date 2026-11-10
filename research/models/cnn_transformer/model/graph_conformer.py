@@ -2,20 +2,9 @@ import torch
 import torch.nn as nn
 
 from .landmark_conformer import LandmarkConformer
-from ..config import COORDS_PER_LM, LH_START, RH_START
+from ..config import COORDS_PER_LM, HAND_PARENT, HAND_TREE, LH_START, RH_START
 
-# MediaPipe hand skeleton: (parent, child). Node 0 = wrist.
-HAND_TREE = [
-    (0, 1), (1, 2), (2, 3), (3, 4),  # thumb
-    (0, 5), (5, 6), (6, 7), (7, 8),  # index
-    (0, 9), (9, 10), (10, 11), (11, 12),  # middle
-    (0, 13), (13, 14), (14, 15), (15, 16),  # ring
-    (0, 17), (17, 18), (18, 19), (19, 20),  # pinky
-]
 PALM_EDGES = [(5, 9), (9, 13), (13, 17)]  # knuckle web
-HAND_PARENT = [0] * 21
-for _p, _c in HAND_TREE:
-    HAND_PARENT[_c] = _p
 
 
 def hand_adjacency() -> torch.Tensor:
