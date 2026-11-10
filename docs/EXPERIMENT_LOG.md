@@ -437,6 +437,17 @@ that alignment is itself a fit to the training signers and does not transfer: cl
 slightly faster and the gap is slightly wider. One setting only (w 0.2, τ 0.1, single seed);
 other weights untested.
 
+### Fold 0 + stronger spatial affine (`--aug-rotate 30 --aug-shear 0.15 --aug-scale 0.2 --aug-affine-prob 0.75`) — incomplete, no result
+Same config and seed as `fold0_fixed` plus the stronger rotation/shear/anisotropic-scale augmentation.
+The pod ran out of RunPod credit around epoch 30–40, before the log or checkpoint was retrieved, so
+there is **no final or best score**. Last numbers seen (vs `fold0_fixed` at the same epochs):
+neutral through epoch 12; epochs 13–16 val +0.4, clean train −1.0, **clean-train gap 1.4 pt
+narrower**, hard signer 34503 +1.4. That is the pattern the augmentation was meant to produce, but
+four early epochs are within noise (the gap is still small then). **Inconclusive — not a null.**
+Worth re-running on the current base (`--arch graph`) if budget allows; it targets the same
+signer-variation gap as bone-length augmentation (camera angle / body proportions vs hand
+proportions), so the two could be combined after each is measured alone.
+
 ### GraphConformer (`--arch graph`) — design (2026-11-09); result in the `fold0_graph` entry below
 The old `research/models/st_gcn/` pipeline was not salvageable as a comparison: its skeleton graph
 was indexed for a face → LH → pose → RH layout while its data was LH → pose → RH → face (almost every
@@ -495,9 +506,9 @@ attention call from compilation, or build a contiguous mask) can only be verifie
 unmeasured speed-up. Runs continue without `--compile`. torch stays at 2.10 (needed for compile,
 harmless otherwise).
 
-### Fold 0 GraphConformer (`fold0_graph`, `fold0_fixed` flags + `--arch graph`) — stopped at epoch 64, final extrapolated
+### Fold 0 GraphConformer (`fold0_graph`, `fold0_fixed` flags + `--arch graph`) — stopped at epoch 65, final extrapolated
 Same config and seed as `fold0_fixed`; only the hand streams differ. ~2m57s/epoch (1.55×).
-Stopped after epoch 64 to fund the bone-length run: LR had decayed to 5.9e-5 and val had been on
+Stopped after epoch 65 (val 0.6768; log and `best_phase1.pth` = epoch 56 kept locally) to fund the bone-length run: LR had decayed to 5.9e-5 and val had been on
 a plateau since ~epoch 54.
 
 | | `fold0_fixed` | graph | Δ |
@@ -523,6 +534,20 @@ consistent with every other result pointing at signer variety, not architecture.
 base for the next runs (bone-length augmentation, then fingerspelling pre-training), which target
 the gap directly. Comparisons with it use matching epochs (curves), since its endpoint is
 extrapolated.
+
+**What the learned adjacency added** (`best_phase1.pth`, epoch 56; symmetrised zero-initialised
+residual `adj_residual` per graph layer, links not in the fixed skeleton). Mean |residual| 0.05–0.06,
+max 0.27–0.33 — the same order as the fixed normalised skeleton weights (~0.31), so the layers were
+substantially rewired, not left near zero.
+- **Layer 0: a PIP–tip link on every finger** (two hops apart): index −0.28, middle −0.25, thumb
+  MCP–tip −0.24, ring −0.23, pinky −0.22. A negative link acts as a difference (tip − PIP), i.e. a
+  per-finger **curl** measure — learned, not given.
+- **Layers 1–2: same-level links between neighbouring fingers** (index–middle and middle–ring PIP,
+  index–middle, middle–ring and ring–pinky DIP; ±0.13–0.20) — finger **spread / adjacency**.
+- The thumb tip ↔ index tip link anticipated in the design (pinch shapes) did not emerge strongly.
+Reading: the residual adjacency extracts explicit hand-shape structure (curl, spread), consistent with
+attributing the ~+1 pt to better hand-shape modelling — and it overlaps the hand-crafted geometry
+stream (joint-angle cosines), which may now be partly redundant (untested).
 
 ---
 
@@ -581,6 +606,10 @@ exactly `config.ALL_COLUMNS` — no rebuild needed. CPU smoke tests on 998 local
 4.84 → 3.10 in 8 epochs, CER leaving 1.0 at epoch 5 (normal CTC blank phase); fine-tune with a
 graph backbone + `--compile` + bone aug ran end to end; an arch mismatch exits with an error.
 
+**FS LMDB rebuilt on Kaggle (2026-11-10)** with `notebooks/Build_FS_LMDB.ipynb`: 67,208 sequences,
+68 files, 94 signers, **0 errors, 4 min** on 4 CPU workers (column-subset reads), 15.9 GiB, built in
+`/kaggle/tmp`; published as a new version of `shravnchandr/asl-fs-lmdb`.
+
 **Plan.** (a) ~~Close gaps 1–4.~~ (b) Pre-train for the chosen arch (whichever of `fold0_fixed` /
 `fold0_graph` / `fold0_graph_bone` is best), checking held-out-signer CER. (c) Fine-tune on fold 0
 with the same flags + `--pretrained-backbone`, compared against that run (one change).
@@ -588,8 +617,11 @@ with the same flags + `--pretrained-backbone`, compared against that run (one ch
 (34503). A null here would be strong evidence that the 18-signer limit is not fixable with
 hand-shape pretraining alone, and that only more ASL-Signs-style signers (or other isolated-sign
 data, e.g. `data/WLASL_Landmarks/`) would move it.
-**Cost:** two runs (pretrain + fine-tune); pretraining time unmeasured (clips are longer —
-`max_frames` 384 — and the dataset larger than ASL Signs).
+**Cost:** two runs (pretrain + fine-tune). Estimated from measured FS lengths (median 146, mean
+162, 2.4 % > 384 frames) against the graph fine-tune's 2m50s/epoch: random batches padded every
+phrase to ~357 frames (2.2× the real 160) → ~18 min/epoch, 40 epochs ≈ 12 h. Now length-bucketed
+(→ ~164 frames) with defaults 20 epochs / patience 5 → ~8 min/epoch, ≈ 2.5–3.5 h, plus ~4 h for the
+fine-tune (estimates, ±30 %). CPU check on the local sample: same loss/CER behaviour as unbucketed.
 
 **Note on SL2T's stated weaknesses** — rapid fingerspelling, rare signs, left-handed and
 one-handed signers, low light / signer partly out of frame (i.e. tracking loss). These overlap
