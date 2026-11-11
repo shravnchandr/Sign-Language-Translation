@@ -846,6 +846,41 @@ signer-dependent on clean clips — consistent with the signer-generalisation di
 recipe ablations (finger dropout off first — the resolvable errors hinge on handshape detail; then GRL,
 mixup, depth), the 1st-place anchor, and optionally a fluent signer on the 54 unresolved items.
 
+### Phrases 01 — synthetic continuous CTC, fold 0 (`phrases_fold0_graph`, 2026-11-11)
+`train_phrases.py --val-fold 0 --arch graph --init <fold0_graph best_phase1.pth>`, all defaults
+(40k train phrases/epoch redrawn, 3k fixed val phrases from the 3 held-out signers, 1–5 signs,
+30 % random, holdout 10 %, lr 3e-4 OneCycle, 30 epochs). A40 bf16, ~4m40s/epoch, ~2.4 h.
+Val kinds: seen 2,065 / unseen 224 / random 711. Results in `results_phrases01/` (gitignored).
+
+| Epoch | Val WER | Exact | Single (n=194) | 34503 / 49445 / 62590 | random / seen / unseen |
+|---|---|---|---|---|---|
+| 1 | 0.842 | 0.003 | 0.036 | | 0.969 / 0.785 / 0.811 |
+| 6 | 0.392 | 0.342 | 0.412 | 0.480 / 0.487 / 0.210 | 0.528 / 0.332 / 0.358 |
+| 13 | 0.325 | 0.425 | 0.531 | 0.409 / 0.398 / 0.170 | 0.442 / 0.271 / 0.318 |
+| **24 (best)** | **0.294** | **0.466** | **0.624** | 0.391 / 0.352 / 0.141 | 0.383 / 0.252 / 0.296 |
+| 30 | 0.299 | 0.455 | 0.608 | 0.392 / 0.368 / 0.141 | 0.378 / 0.261 / 0.312 |
+
+Train loss 0.17 at the end vs val loss flat at ~1.5 from epoch 11 (CTC loss also penalises
+confidence; WER kept improving until the LR had decayed).
+
+**Error analysis** (`val_examples.jsonl` = the 300 *shortest* val phrases: 115 × 1 sign, 169 × 2,
+16 × 3 — not representative of longer phrases): 383 correct / 116 substitutions / 7 insertions /
+2 deletions over 501 reference signs; the hypothesis has the right number of signs in 291/300.
+**Segmentation is essentially solved on stitched data; errors are sign recognition.** Substitutions
+are diffuse (top pair there→up ×4), several are the near-synonyms / look-alikes from the isolated
+review (sleep→nap, mouth→chin, say→chin, frog see→look).
+
+**Reading:**
+- Single-sign accuracy in a phrase reached 0.62 vs 0.686 isolated (n=194, ±3.5 pts): the CTC
+  model loses little against the classifier, so phrase quality is bounded by isolated-sign accuracy
+  and the same signer gap (62590 0.14 vs ~0.37–0.39).
+- Unseen sequences cost ~4 pts WER over seen (0.296 vs 0.252); random sequences 0.383 (likely
+  also because they draw on signs the templates rarely use — not checked).
+  The model learns some sequence prior but mostly recognises signs.
+- Caveat: stitched citation-form clips with interpolated transitions are easier than real signing
+  (no coarticulation, no non-manuals). These numbers are an upper bound until tested on real
+  continuous signing.
+
 ---
 
 ## Pending Ideas (not yet implemented)
