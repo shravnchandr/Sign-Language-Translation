@@ -83,9 +83,11 @@ class HandDominanceModule(nn.Module):
             torch.full_like(total, 0.5),
         )  # (B,)
 
-        swap_idx = torch.where(rh_energy > lh_energy)[0]
-        if apply and swap_idx.numel() > 0:
-            x[swap_idx] = x[swap_idx][:, :, self.mirror_perm] * self.x_sign
+        if apply:
+            # Elementwise select, not boolean indexing: no data-dependent shapes,
+            # so the model exports to ONNX (identical output).
+            swap = (rh_energy > lh_energy)[:, None, None]
+            x = torch.where(swap, x[:, :, self.mirror_perm] * self.x_sign, x)
 
         return x, dom_ratio
 

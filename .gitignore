@@ -20,6 +20,7 @@ env/
 
 # Models & checkpoints
 checkpoints/
+exports/
 Saved_Models/
 *.pt
 *.pth
