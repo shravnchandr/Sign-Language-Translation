@@ -22,6 +22,10 @@ Metrics on held-out signers (greedy CTC decoding):
   exact   — share of phrases decoded exactly
   single  — exact accuracy on 1-sign phrases (comparable in spirit to
             isolated-sign accuracy, but clips are trimmed and decoded by CTC)
+  WER by kind — seen: sequences training also draws (other signers' clips);
+            unseen: template sequences held out of training (--holdout-frac,
+            fixed hash); random: random sign sequences (almost all unseen).
+            None of this replaces a test on natural continuous signing.
 Best checkpoint = lowest WER. Saves best_phrases.pth (full state dict) +
 phrases_meta.json, and val_examples.jsonl (reference / decoded / English).
 
@@ -92,7 +96,7 @@ def evaluate(model, loader, val_ds, device, amp_dtype, use_amp, blank, criterion
     model.eval()
     loss_sum, n_batches = 0.0, 0
     edits = refs_total = exact = n = single_ok = single_n = 0
-    per_signer = {}
+    per_signer, per_kind = {}, {}
     examples = []
     pos = 0  # loader is unshuffled (sequential batches), so phrase index = running position
     for coords, mask, targets, input_lengths, target_lengths in loader:
@@ -109,9 +113,10 @@ def evaluate(model, loader, val_ds, device, amp_dtype, use_amp, blank, criterion
             r = r.tolist()
             e = edit_distance(p, r)
             d = val_ds.describe(pos)
-            s = per_signer.setdefault(d["signer"], [0, 0])
-            s[0] += e
-            s[1] += len(r)
+            for s in (per_signer.setdefault(d["signer"], [0, 0]),
+                      per_kind.setdefault(d["kind"], [0, 0])):
+                s[0] += e
+                s[1] += len(r)
             edits += e
             refs_total += len(r)
             exact += p == r
@@ -120,7 +125,7 @@ def evaluate(model, loader, val_ds, device, amp_dtype, use_amp, blank, criterion
                 single_ok += p == r
                 single_n += 1
             if len(examples) < 300:
-                examples.append({"signer": d["signer"], "ref": d["glosses"],
+                examples.append({"signer": d["signer"], "kind": d["kind"], "ref": d["glosses"],
                                  "hyp": [val_ds.idx2sign[i] for i in p], "english": d["english"]})
             pos += 1
     return {
@@ -130,6 +135,7 @@ def evaluate(model, loader, val_ds, device, amp_dtype, use_amp, blank, criterion
         "single": single_ok / max(single_n, 1),
         "single_n": single_n,
         "per_signer": {k: v[0] / max(v[1], 1) for k, v in sorted(per_signer.items())},
+        "per_kind": {k: v[0] / max(v[1], 1) for k, v in sorted(per_kind.items())},
         "examples": examples,
     }
 
@@ -156,7 +162,7 @@ def train(args):
                                  val_fold=args.val_fold, n_folds=args.n_folds, max_frames=1 << 20)
     phrase_kw = dict(max_frames=args.max_frames, random_frac=args.random_frac,
                      max_signs=args.max_signs, transition=(args.trans_min, args.trans_max),
-                     min_detected=args.min_detected)
+                     min_detected=args.min_detected, holdout_frac=args.holdout_frac)
     train_ds, val_ds = phrase_datasets(
         tl.dataset, vl.dataset, idx2sign, args.train_phrases, args.val_phrases, seed=args.seed,
         tempo=(args.tempo_min, args.tempo_max),
@@ -165,8 +171,10 @@ def train(args):
     if args.max_val_signers:  # quick runs: keep the phrases of the first k held-out signers
         keep = set(val_ds.signers[: args.max_val_signers])
         val_ds.specs = [s for s in val_ds.specs if s[0] in keep]
+    kinds = {k: sum(s[5] == k for s in val_ds.specs) for k in ("seen", "unseen", "random")}
     print(f"Phrases: {len(train_ds):,}/epoch from {len(train_ds.signers)} training signers | "
-          f"val {len(val_ds):,} fixed phrases from {sorted({s[0] for s in val_ds.specs})}")
+          f"val {len(val_ds):,} fixed phrases from {sorted({s[0] for s in val_ds.specs})} "
+          f"(kinds {kinds}; 1-sign phrases count as seen)")
 
     worker_kw = dict(num_workers=args.num_workers, collate_fn=collate_ctc,
                      pin_memory=device.type == "cuda")
@@ -250,7 +258,8 @@ def train(args):
               f"single {r['single']:.4f} (n={r['single_n']}) | LR {scheduler.get_last_lr()[0]:.2e} | "
               f"Time {_fmt_time(time.perf_counter() - t0)}"
               + (f" | non-finite skipped {nonfinite}" if nonfinite else ""))
-        print(f"  per-signer WER: {signers}")
+        kinds = " ".join(f"{k}:{v:.3f}" for k, v in r["per_kind"].items())
+        print(f"  per-signer WER: {signers} | by kind: {kinds}")
         if r["wer"] < best_wer:
             best_wer, patience = r["wer"], 0
             torch.save(model.state_dict(), out_dir / "best_phrases.pth")
@@ -302,6 +311,8 @@ def main():
     p.add_argument("--tempo-min", type=float, default=0.8)
     p.add_argument("--tempo-max", type=float, default=1.25)
     p.add_argument("--min-detected", type=int, default=4)
+    p.add_argument("--holdout-frac", type=float, default=0.1,
+                   help="multi-sign sequences never trained on (validation: 'unseen')")
     p.add_argument("--max-frames", type=int, default=384)
     # Training
     p.add_argument("--epochs", type=int, default=30)

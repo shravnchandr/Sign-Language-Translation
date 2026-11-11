@@ -102,12 +102,18 @@ def clip_payload(dataset, idx):
     ever = presence.max(0)  # hand detected at least once — over all frames, before display sampling
     T = filled.shape[0]
     if T > _MAX_FRAMES:
-        # Show one frame per window; a hand counts as detected if it was detected anywhere
-        # in the window, so a brief detection is never sampled away.
+        # Show one real frame per window, with its own flags (a held pose never looks
+        # detected). Within a window prefer frames with more hands detected, then the
+        # hand detected in fewer of the window's frames (brief detections survive),
+        # then the frame nearest the window centre.
         edges = np.linspace(0, T, _MAX_FRAMES + 1).round().astype(int)
-        keep = (edges[:-1] + edges[1:]) // 2
-        presence = np.stack([presence[a:b].max(0) for a, b in zip(edges[:-1], edges[1:])])
-        filled = filled[keep]
+        keep = []
+        for a, b in zip(edges[:-1], edges[1:]):
+            win = presence[a:b].astype(float)
+            rare = (win / np.maximum(win.sum(0), 1)).sum(1)
+            centre = -np.abs(np.arange(b - a) - (b - a - 1) / 2)
+            keep.append(a + int(np.lexsort((centre, rare, win.sum(1)))[-1]))
+        filled, presence = filled[keep], presence[keep]
     pts = filled.numpy().reshape(filled.shape[0], -1, COORDS_PER_LM)[:, _DISPLAY_LMS, :2]  # (T, 123, 2)
     real = np.ones(pts.shape[1], dtype=bool)
     real[:21], real[21:42] = ever[0], ever[1]

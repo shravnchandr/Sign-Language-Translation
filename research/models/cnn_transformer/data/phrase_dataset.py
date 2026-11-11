@@ -32,7 +32,8 @@ Output matches FingerspellingDataset, so collate_ctc is reused:
   coords (T, IN_FEAT) = [positions | Δ1 | presence], mask (T,), gloss ids.
 """
 
-from typing import Dict, List, Optional, Sequence, Tuple
+import zlib
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -64,6 +65,9 @@ class SyntheticPhraseDataset(Dataset):
         tempo:       (min, max) per-clip resampling factor, training only.
         min_detected: clips with fewer frames with a detected hand are swapped.
         bone_aug:    (prob, hand_range, bone_range) for bone_scale(); None = off.
+        holdout_frac: share of multi-sign gloss sequences (by a fixed hash of the
+                     sequence) never drawn for training; validation reports them
+                     separately as unseen combinations. Single signs are never held out.
     """
 
     def __init__(
@@ -80,6 +84,7 @@ class SyntheticPhraseDataset(Dataset):
         tempo: Tuple[float, float] = (0.8, 1.25),
         min_detected: int = 4,
         bone_aug: Optional[Tuple[float, float, float]] = None,
+        holdout_frac: float = 0.1,
     ):
         self.source = source
         self.idx2sign = idx2sign
@@ -95,6 +100,7 @@ class SyntheticPhraseDataset(Dataset):
         self.tempo = tempo
         self.min_detected = min_detected
         self.bone_aug = bone_aug
+        self.holdout_frac = holdout_frac
 
         df = source.df
         self.clips: Dict[Tuple[str, int], List[int]] = {}
@@ -110,20 +116,33 @@ class SyntheticPhraseDataset(Dataset):
     # ------------------------------------------------------------------
     # Phrase specs
     # ------------------------------------------------------------------
+    def held_out(self, glosses: List[str]) -> bool:
+        """Fixed (seed-independent) membership of the held-out sequence set."""
+        if len(glosses) < 2:
+            return False
+        return zlib.crc32(" ".join(glosses).encode()) % 1000 < self.holdout_frac * 1000
+
     def set_epoch(self, epoch: int) -> None:
-        """Draw this epoch's phrases: (signer, glosses, english, clip ids, transitions)."""
+        """Draw this epoch's phrases: (signer, gloss ids, english, clip ids, transitions,
+        kind), kind = "seen" / "unseen" (held-out template sequence) / "random"."""
         self.epoch = epoch
         rng = np.random.default_rng([self.seed, epoch])
         specs = []
         for _ in range(self.n_phrases):
             signer = self.signers[rng.integers(len(self.signers))]
-            glosses, english = self.grammar.sample(
-                rng, self.available[signer], self.random_frac, self.max_signs
-            )
+            while True:
+                glosses, english = self.grammar.sample(
+                    rng, self.available[signer], self.random_frac, self.max_signs
+                )
+                held = self.held_out(glosses)
+                if not (self.augment and held):  # training never sees held-out sequences
+                    break
+            is_random = english == " ".join(g.upper() for g in glosses)
+            kind = "random" if is_random and len(glosses) > 1 else "unseen" if held else "seen"
             ids = [self.sign2idx[g] for g in glosses]
             clips = [int(rng.choice(self.clips[(signer, s)])) for s in ids]
             trans = rng.integers(self.transition[0], self.transition[1] + 1, len(ids) - 1).tolist()
-            specs.append((signer, ids, english, clips, trans))
+            specs.append((signer, ids, english, clips, trans, kind))
         self.specs = specs
 
     def lengths(self) -> List[int]:
@@ -131,7 +150,7 @@ class SyntheticPhraseDataset(Dataset):
         for BucketBatchSampler."""
         return [
             min(int(self.raw_lengths[c].sum()) + sum(t), self.max_frames)
-            for _, _, _, c, t in ((s[0], s[1], s[2], np.asarray(s[3]), s[4]) for s in self.specs)
+            for c, t in ((np.asarray(s[3]), s[4]) for s in self.specs)
         ]
 
     def __len__(self) -> int:
@@ -169,7 +188,7 @@ class SyntheticPhraseDataset(Dataset):
     def build(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """Stitched (coords (T, COORD_FEAT), presence (T, 2)) of phrase idx, no augmentation
         beyond tempo. Deterministic for a given (seed, epoch, idx) when augment=False."""
-        signer, ids, _, clips, trans = self.specs[idx]
+        signer, ids, _, clips, trans, _ = self.specs[idx]
         rng = np.random.default_rng([self.seed, self.epoch, idx, 1])
         segs = [self._clip(rng, signer, s, j) for s, j in zip(ids, clips)]
 
@@ -231,9 +250,9 @@ class SyntheticPhraseDataset(Dataset):
         return x, torch.ones(x.shape[0], dtype=torch.bool), list(ids)
 
     def describe(self, idx: int) -> Dict:
-        signer, ids, english, clips, _ = self.specs[idx]
+        signer, ids, english, clips, _, kind = self.specs[idx]
         return {"signer": signer, "glosses": [self.idx2sign[i] for i in ids],
-                "english": english, "clips": clips}
+                "english": english, "clips": clips, "kind": kind}
 
 
 def _hold_fill(block: torch.Tensor, present: torch.Tensor) -> torch.Tensor:
