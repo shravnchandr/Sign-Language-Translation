@@ -37,6 +37,7 @@ bash run_pipeline_cnn_transformer.sh --skip-pretrain --max-frames 256   # longer
 bash run_pipeline_cnn_transformer.sh --skip-pretrain --val-fold 0 --hand-drop-prob 0.5   # simulate hand-tracking gaps (default off)
 bash run_pipeline_cnn_transformer.sh --skip-pretrain --val-fold 0 --arch graph   # GraphConformer (hand-skeleton graph encoder)
 bash run_pipeline_cnn_transformer.sh --skip-pretrain --val-fold 0 --arch graph --bone-aug-prob 0.5   # + hand-proportion augmentation (default off)
+PYTHONPATH=research/models uv run python -m cnn_transformer.phrase_breakdown --checkpoint <best_phrases.pth> --iso-checkpoint <fold0 best_phase1.pth> --out results/<run>/breakdown.txt   # full val breakdown: WER/ops by length/kind/signer, downsampled vs full, emission timing, controlled single-sign vs classifier (CPU, ~15 min)
 PYTHONPATH=research/models uv run --with onnx --with onnxruntime --with onnxscript python -m cnn_transformer.export_onnx --checkpoint <best_phrases.pth> --out-dir exports/phrases01   # phrase CTC model → ONNX (onnxruntime-web) + labels.json + preprocess.json; verified against PyTorch on LMDB clips (CPU)
 bash runpod_results.sh send run005       # on the pod, before stopping it (disk is erased on stop)
 bash runpod_results.sh receive <code>    # on your machine → runs/run005/ (gitignored)
@@ -160,6 +161,7 @@ End-to-end supervised classification. Optional CTC pre-training on ASL Fingerspe
 | `data/phrase_grammar.py` | `PhraseGrammar` — ASL-style gloss templates over the 250 signs (+ English rendering) and random sign sequences |
 | `data/phrase_dataset.py` | `SyntheticPhraseDataset` — one-signer phrases stitched on the fly from ASL Signs clips (trim, per-clip tempo, interpolated transitions, phrase-level hold-fill) |
 | `train_phrases.py` | CTC training on synthetic phrases (gloss WER / exact / single-sign on held-out-signer phrases); `--init` from an isolated-sign or FS backbone |
+| `phrase_breakdown.py` | Rebuilds a phrase run's fixed val set and reports WER / sub / del / ins by length, kind and signer, deletions with vs without the `--max-frames` downsample, CTC emission timing vs clip spans, and a McNemar single-sign comparison against an isolated classifier on the same trimmed clips |
 | `export_onnx.py` | Exports a phrase (CTC) checkpoint to ONNX for the browser: input `features` (1, T, IN_FEAT), 8 ≤ T ≤ 512, all-valid mask built in; writes `labels.json` and `preprocess.json` (landmark order, origin, hold-fill, hand slots by pose wrist, Δ1); exits if ONNX ≠ PyTorch logits |
 
 ## Known Bugs

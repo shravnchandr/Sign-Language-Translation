@@ -14,7 +14,7 @@ all-True mask is built inside. Verified against PyTorch on real LMDB clips
 Usage:
   PYTHONPATH=research/models uv run --with onnx --with onnxruntime --with onnxscript \
     python -m cnn_transformer.export_onnx \
-    --checkpoint results_phrases01/checkpoints/phrases_fold0_graph/best_phrases.pth \
+    --checkpoint results/results_phrases01/checkpoints/phrases_fold0_graph/best_phrases.pth \
     --out-dir exports/phrases01
 """
 

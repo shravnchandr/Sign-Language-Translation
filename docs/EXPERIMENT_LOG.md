@@ -850,7 +850,7 @@ mixup, depth), the 1st-place anchor, and optionally a fluent signer on the 54 un
 `train_phrases.py --val-fold 0 --arch graph --init <fold0_graph best_phase1.pth>`, all defaults
 (40k train phrases/epoch redrawn, 3k fixed val phrases from the 3 held-out signers, 1–5 signs,
 30 % random, holdout 10 %, lr 3e-4 OneCycle, 30 epochs). A40 bf16, ~4m40s/epoch, ~2.4 h.
-Val kinds: seen 2,065 / unseen 224 / random 711. Results in `results_phrases01/` (gitignored).
+Val kinds: seen 2,065 / unseen 224 / random 711. Results in `results/results_phrases01/` (gitignored).
 
 | Epoch | Val WER | Exact | Single (n=194) | 34503 / 49445 / 62590 | random / seen / unseen |
 |---|---|---|---|---|---|
@@ -863,23 +863,49 @@ Val kinds: seen 2,065 / unseen 224 / random 711. Results in `results_phrases01/`
 Train loss 0.17 at the end vs val loss flat at ~1.5 from epoch 11 (CTC loss also penalises
 confidence; WER kept improving until the LR had decayed).
 
-**Error analysis** (`val_examples.jsonl` = the 300 *shortest* val phrases: 115 × 1 sign, 169 × 2,
-16 × 3 — not representative of longer phrases): 383 correct / 116 substitutions / 7 insertions /
-2 deletions over 501 reference signs; the hypothesis has the right number of signs in 291/300.
-**Segmentation is essentially solved on stitched data; errors are sign recognition.** Substitutions
-are diffuse (top pair there→up ×4), several are the near-synonyms / look-alikes from the isolated
-review (sleep→nap, mouth→chin, say→chin, frog see→look).
+**Short-phrase subset** (`val_examples.jsonl` = the 300 *shortest* val phrases, 1–3 signs, WER
+0.250 vs 0.294 overall): 383 correct / 116 substitutions / 7 insertions / 2 deletions over 501
+signs. Substitutions dominate *in this subset*; diffuse, several are the isolated review's
+look-alikes (sleep→nap, mouth→chin, say→chin, see→look). (An earlier version of this entry
+concluded "segmentation is essentially solved" from this subset — not supported; see below.)
+
+**Full 3,000-phrase breakdown** (`phrase_breakdown.py`, epoch-24 checkpoint, val rebuilt exactly as in training, CPU;
+reproduces WER 0.293 / exact 0.467). Rates per reference sign:
+
+| Signs | Phrases | WER | Exact | Sub | Del | Ins |
+|---|---|---|---|---|---|---|
+| 1 | 194 | 0.397 | 0.624 | 0.335 | 0.005 | 0.057 |
+| 2 | 882 | 0.279 | 0.557 | 0.243 | 0.015 | 0.021 |
+| 3 | 1,370 | 0.260 | 0.477 | 0.209 | 0.032 | 0.018 |
+| 4 | 361 | 0.317 | 0.305 | 0.252 | 0.055 | 0.010 |
+| 5 | 193 | 0.402 | 0.140 | 0.298 | 0.089 | 0.015 |
+
+- Substitutions dominate at every length, but **deletions grow with length** (0.5 % → 8.9 %), almost
+  all from the two weaker signers (5-sign del: 34503 0.170, 49445 0.100, 62590 0.016). On 4–5-sign
+  phrases, those downsampled to the 384-frame cap delete more (34503 0.210 vs 0.094 full-length;
+  49445 0.113 vs 0.075) — the cap contributes, but full-length phrases of these signers still delete
+  more than 62590 (0.010), and downsampled phrases are also the longest/slowest (confounded).
+  Candidate fix to test: `--max-frames 512`.
+- Correct sign count ≠ correct boundaries. Proxy check: the frame where CTC emits each correctly
+  recognised sign lies inside that sign's own clip span for 5,699/6,145 (92.7 %), substitutions
+  1,781/2,006 (88.8 %); the rest fire in transitions or a neighbouring clip. Emission timing, not a
+  boundary metric.
+- Signer: 62590 WER 0.140 vs 34503 0.390 / 49445 0.352; the gap widens with length.
+
+**Single sign, controlled** (same 194 trimmed clips, same input features; isolated classifier given
+its 128-frame cap): classifier 131/194 = 67.5 %, CTC 121/194 = 62.4 %; both right 106, classifier
+only 25, CTC only 15 (McNemar χ² 2.5, p ≈ 0.11 — not significant). Binomial 95 % CI for 62.4 % at
+n = 194 ≈ 55–69 % (the earlier "±3.5 pts" was one standard error).
 
 **Reading:**
-- Single-sign accuracy in a phrase reached 0.62 vs 0.686 isolated (n=194, ±3.5 pts): the CTC
-  model loses little against the classifier, so phrase quality is bounded by isolated-sign accuracy
-  and the same signer gap (62590 0.14 vs ~0.37–0.39).
-- Unseen sequences cost ~4 pts WER over seen (0.296 vs 0.252); random sequences 0.383 (likely
-  also because they draw on signs the templates rarely use — not checked).
-  The model learns some sequence prior but mostly recognises signs.
-- Caveat: stitched citation-form clips with interpolated transitions are easier than real signing
-  (no coarticulation, no non-manuals). These numbers are an upper bound until tested on real
-  continuous signing.
+- The run learns stitched sequences, including held-out combinations: unseen sequences cost ~4 pts
+  WER over seen (0.294 vs 0.251); random sequences 0.383 (possibly also because they use signs the
+  templates rarely use — not checked).
+- Isolated-sign accuracy is not established as a ceiling: context could resolve ambiguous signs in
+  natural phrases, and nothing here measures that.
+- Synthetic stitched phrases (citation-form clips, interpolated transitions, no coarticulation or
+  non-manuals) are an unvalidated proxy for natural signing — neither a demonstrated upper nor
+  lower bound until tested on real continuous signing.
 
 ---
 
