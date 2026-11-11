@@ -802,6 +802,18 @@ pairs where the reviewer beat chance — jump/stairs 3/3, cat/kitty 4/5, awake/w
 sleep/sleepy 2/2 (small handshape/movement details — relevant to the finger-dropout question).
 59/100 errors are shared by all three models (fixed, graph, fs).
 
+**Caveat — weak references (audit, same day):** the kit drew references at random with no tracking
+check: 69/206 reference clips had a hand in < 50 % of frames, 15 had ≤ 2 detected frames, and in
+58/100 items at least one true-sign reference was mostly hand-less. Restricted to items whose four
+references all have ≥ 3 detected frames the A/B result is still at chance (23/50 = 46 %, p = 0.67);
+with ≥ 30 % hand frames 11/26 (p = 0.56); with ≥ 50 % only 9 picks. So "at chance" is not refuted, but the
+review is underpowered and partly confounded — treat it as inconclusive, not as evidence of ambiguous
+landmarks. Fixed in `error_review.py` (references need a hand in ≥ 50 % of frames and ≥ 8 detected
+frames; detection kept through display downsampling; kit id carries an item fingerprint so a
+regenerated kit never inherits answers; `--n-heads` explicit). Regenerated kit
+`results/error_review/fold0_graph_errors_v2.html` (same 100 errors, 0/206 weak references, median hand
+fraction 0.67 → 0.83) — not yet reviewed.
+
 **Whole fold-0 val set** (`fold0_graph`, 14,076 clips, acc 0.6861; top-2 0.7905, top-3 0.8296, top-5 0.8639;
 predictions cached in `results/error_review/fold0_graph_val_probs.npz`):
 

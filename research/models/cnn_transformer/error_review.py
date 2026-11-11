@@ -29,6 +29,7 @@ Run from the repo root (CPU; a few minutes for 14k clips):
 
 import argparse
 import base64
+import hashlib
 import json
 import random
 import re
@@ -50,15 +51,20 @@ _DISPLAY_LMS = list(range(0, 21)) + list(range(54, 75)) + list(range(21, 46)) + 
 _MAX_FRAMES = 96
 
 
-def load_model(path: str):
-    """Rebuild the model from a best_phase1.pth state dict (architecture inferred from keys)."""
+def load_model(path: str, n_heads: int = 4):
+    """Rebuild the model from a best_phase1.pth state dict (architecture inferred from keys).
+
+    Head count is not recoverable from the weights (the attention projections have the
+    same shapes for any divisor of d_model) and fine-tune checkpoints do not record it,
+    so it must match the run's --n-heads (training default 4).
+    """
     sd = torch.load(path, map_location="cpu", weights_only=True)
     d_model = sd["head.3.weight"].shape[1]
     n_layers = len({k.split(".")[1] for k in sd if k.startswith("blocks.")})
     kw = dict(
         num_classes=sd["head.3.weight"].shape[0],
         d_model=d_model,
-        n_heads=4,
+        n_heads=n_heads,
         n_layers=n_layers,
         n_signers=sd["signer_disc.net.3.weight"].shape[0] if "signer_disc.net.3.weight" in sd else 0,
         supcon_dim=sd["proj_head.2.weight"].shape[0] if "proj_head.2.weight" in sd else 0,
@@ -92,19 +98,24 @@ def clip_payload(dataset, idx):
     """Stored landmarks of one clip → compact display record (xy, uint16, presence bits)."""
     coords = dataset._load_coords(idx)
     filled, presence = hand_presence(coords)  # presence: (T, 2) lh, rh
+    presence = presence.numpy() > 0
+    ever = presence.max(0)  # hand detected at least once — over all frames, before display sampling
     T = filled.shape[0]
     if T > _MAX_FRAMES:
-        keep = np.linspace(0, T - 1, _MAX_FRAMES).round().astype(int)
-        filled, presence = filled[keep], presence[keep]
+        # Show one frame per window; a hand counts as detected if it was detected anywhere
+        # in the window, so a brief detection is never sampled away.
+        edges = np.linspace(0, T, _MAX_FRAMES + 1).round().astype(int)
+        keep = (edges[:-1] + edges[1:]) // 2
+        presence = np.stack([presence[a:b].max(0) for a, b in zip(edges[:-1], edges[1:])])
+        filled = filled[keep]
     pts = filled.numpy().reshape(filled.shape[0], -1, COORDS_PER_LM)[:, _DISPLAY_LMS, :2]  # (T, 123, 2)
-    ever = presence.numpy().max(0) > 0  # hand detected at least once
     real = np.ones(pts.shape[1], dtype=bool)
     real[:21], real[21:42] = ever[0], ever[1]
     sel = pts[:, real].reshape(-1, 2)
     lo, hi = sel.min(0), sel.max(0)
     span = np.maximum(hi - lo, 1e-6)
     q = np.clip(np.round((pts - lo) / span * 65535), 0, 65535).astype("<u2")
-    bits = (presence.numpy()[:, 0] > 0).astype(np.uint8) | ((presence.numpy()[:, 1] > 0).astype(np.uint8) << 1)
+    bits = presence[:, 0].astype(np.uint8) | (presence[:, 1].astype(np.uint8) << 1)
     return {
         "t": int(pts.shape[0]),
         "lo": [float(lo[0]), float(lo[1])],
@@ -125,6 +136,10 @@ def main():
     ap.add_argument("--n", type=int, default=100, help="errors to review")
     ap.add_argument("--refs", type=int, default=2, help="reference clips per side")
     ap.add_argument("--top-pairs", type=int, default=20, help="confusion pairs counted as 'frequent'")
+    ap.add_argument("--min-ref-hand", type=float, default=0.5,
+                    help="reference clips need a detected hand in at least this fraction of frames")
+    ap.add_argument("--min-ref-frames", type=int, default=8, help="… and at least this many detected frames")
+    ap.add_argument("--n-heads", type=int, default=4, help="attention heads of every checkpoint (= training --n-heads)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default="results/error_review/error_review.html")
     args = ap.parse_args()
@@ -139,14 +154,14 @@ def main():
     y = val_ds.df["sign"].to_numpy()
     signer = val_ds.df["participant_id"].astype(str).to_numpy()
 
-    model, arch = load_model(args.checkpoint)
-    print(f"Predicting {len(val_ds):,} val clips with {args.checkpoint} ({arch})")
+    model, arch = load_model(args.checkpoint, args.n_heads)
+    print(f"Predicting {len(val_ds):,} val clips with {args.checkpoint} ({arch}, {args.n_heads} heads)")
     probs = predict(model, val_ds)
     pred = probs.argmax(1)
     print(f"  accuracy {np.mean(pred == y):.4f}")
     others = {}
     for path in args.also:
-        m, a = load_model(path)
+        m, a = load_model(path, args.n_heads)
         name = Path(path).parent.name
         print(f"Predicting with {path} ({a})")
         others[name] = predict(m, val_ds).argmax(1)
@@ -181,14 +196,30 @@ def main():
             clips[key] = clip_payload(ds, i)
         return key
 
+    def tracking(j):
+        """(fraction, count) of a training clip's frames with at least one hand detected."""
+        _, pr = hand_presence(train_ds._load_coords(j))
+        hand = pr.sum(1) > 0
+        return float(hand.float().mean()), int(hand.sum())
+
+    n_weak = 0
+
     def refs_for(sign):
+        """One well-tracked clip from each of --refs distinct signers; weakly tracked clips
+        only when a signer has nothing better, best-tracked first."""
+        nonlocal n_weak
         if sign not in ref_cache:
-            people = list(by_sign.get(sign, {}))
-            rng.shuffle(people)
-            ref_cache[sign] = [
-                add_clip(f"t{j}", train_ds, j)
-                for j in (rng.choice(by_sign[sign][p]) for p in people[: args.refs])
-            ]
+            picks = []
+            for p in by_sign.get(sign, {}):
+                cand = list(by_sign[sign][p])
+                rng.shuffle(cand)
+                scored = [(j, *tracking(j)) for j in cand[:12]]
+                good = [s for s in scored if s[1] >= args.min_ref_hand and s[2] >= args.min_ref_frames]
+                picks.append((bool(good), rng.random(), (good or [max(scored, key=lambda s: (s[1], s[2]))])[0]))
+            picks.sort(key=lambda t: (not t[0], t[1]))  # signers with a good clip first, random within
+            chosen_refs = picks[: args.refs]
+            n_weak += sum(not ok for ok, _, _ in chosen_refs)
+            ref_cache[sign] = [add_clip(f"t{j}", train_ds, j) for _, _, (j, _, _) in chosen_refs]
         return ref_cache[sign]
 
     items = []
@@ -225,7 +256,11 @@ def main():
         "topPairs": [[idx2sign[a], idx2sign[b], c] for (a, b), c in Counter(pair(i) for i in err).most_common(10)],
         "seed": args.seed,
     }
-    kit_id = re.sub(r"[^a-z0-9]+", "-", f"{meta['model']}-f{args.val_fold}-s{args.seed}".lower())
+    # Answers are stored per kit and indexed by item number, so the id carries a fingerprint
+    # of the items: a regenerated kit with different contents never inherits old answers.
+    fingerprint = hashlib.sha1(json.dumps(items, sort_keys=True).encode()).hexdigest()[:10]
+    kit_id = re.sub(r"[^a-z0-9]+", "-", f"{meta['model']}-f{args.val_fold}-s{args.seed}".lower()) + "-" + fingerprint
+    print(f"References: {len(clips) - len(items)} clips; {n_weak} below the tracking threshold (no better clip from that signer)")
     html = (Path(__file__).parent / "error_review_template.html").read_text()
     html = html.replace("__KIT_ID__", kit_id).replace(
         "__DATA__", json.dumps({"meta": meta, "items": items, "clips": clips}, separators=(",", ":"))
