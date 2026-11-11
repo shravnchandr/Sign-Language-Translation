@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign Error Review</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --text: #1d232b; --muted: #5d6875; --line: #dde2e8;
+  --accent: #2f6fde; --accent-soft: #e6eefc; --good: #1f8a5b; --warn: #b7791f; --bad: #c2413b;
+  --lh: #2f6fde; --rh: #d4622a; --body: #7d8794; --face: #9a6fc0; --canvas: #fbfcfd;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #12161b; --panel: #1b2027; --text: #e6eaef; --muted: #98a3b0; --line: #2c333c;
+  --accent: #6b9cf2; --accent-soft: #1f2b3f; --good: #4cc08a; --warn: #e0a84a; --bad: #ef7a73;
+  --lh: #6b9cf2; --rh: #f08a55; --body: #8b95a1; --face: #b796da; --canvas: #161a20;
+}}
+:root[data-theme="dark"] {
+  --bg: #12161b; --panel: #1b2027; --text: #e6eaef; --muted: #98a3b0; --line: #2c333c;
+  --accent: #6b9cf2; --accent-soft: #1f2b3f; --good: #4cc08a; --warn: #e0a84a; --bad: #ef7a73;
+  --lh: #6b9cf2; --rh: #f08a55; --body: #8b95a1; --face: #b796da; --canvas: #161a20;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif; }
+header { position: sticky; top: 0; z-index: 2; background: var(--panel); border-bottom: 1px solid var(--line); padding: 10px 16px; }
+.bar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; max-width: 1200px; margin: 0 auto; }
+h1 { font-size: 17px; margin: 0; }
+.muted { color: var(--muted); }
+.progress { flex: 1 1 160px; height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; min-width: 120px; }
+.progress > div { height: 100%; background: var(--accent); width: 0; transition: width .2s; }
+button, select { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: .45; cursor: default; }
+main { max-width: 1200px; margin: 0 auto; padding: 16px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+.intro p { margin: 4px 0; }
+.stage { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+@media (max-width: 860px) { .stage { grid-template-columns: 1fr; } }
+.col h3 { margin: 0 0 6px; font-size: 14px; letter-spacing: .02em; }
+.col .refs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+canvas { width: 100%; aspect-ratio: 1 / 1; background: var(--canvas); border: 1px solid var(--line); border-radius: 10px; display: block; }
+.hidden-refs { display: flex; align-items: center; justify-content: center; text-align: center; aspect-ratio: 2 / 1; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); padding: 12px; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+.legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px; color: var(--muted); margin-top: 8px; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+fieldset { border: 0; padding: 0; margin: 0 0 14px; }
+legend { font-weight: 600; margin-bottom: 6px; }
+.opts { display: flex; flex-wrap: wrap; gap: 8px; }
+.opts label { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; cursor: pointer; user-select: none; }
+.opts input { margin-right: 6px; }
+.opts label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+textarea, input[type=text] { width: 100%; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.reveal { border-left: 4px solid var(--accent); padding-left: 12px; }
+.verdict { font-weight: 600; }
+.verdict.info { color: var(--good); } .verdict.amb { color: var(--warn); } .verdict.pred { color: var(--bad); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 600; }
+.kbd { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1>Sign error review</h1>
+    <span id="meta" class="muted"></span>
+    <div class="progress" aria-label="progress"><div id="prog"></div></div>
+    <span id="progtxt" class="muted"></span>
+    <button id="prev" title="Previous (←)">‹ Prev</button>
+    <select id="jump" aria-label="Jump to item"></select>
+    <button id="next" title="Next (→)">Next ›</button>
+    <button id="nextOpen">First unanswered</button>
+  </div>
+</header>
+<main>
+  <section class="card intro">
+    <p><b>What you're judging:</b> the model misclassified the <b>query</b> clip. Sets <b>A</b> and <b>B</b> are other people signing two candidate signs — one is the correct sign, the other is what the model guessed (random order). Pick the set the query matches. No ASL knowledge needed; labels appear after you answer.</p>
+    <p class="muted">Faded, dashed hands = MediaPipe lost the hand on that frame (position held from the last detection). Keys: <span class="kbd">space</span> play/pause, <span class="kbd">←</span>/<span class="kbd">→</span> items, <span class="kbd">1</span>–<span class="kbd">5</span> answer.
+    <label style="margin-left:8px"><input type="checkbox" id="signerMode"> Signer mode (name the query sign before seeing A/B)</label></p>
+  </section>
+
+  <section class="card">
+    <div class="stage">
+      <div class="col">
+        <h3>Query <span id="qinfo" class="muted"></span></h3>
+        <canvas id="cq" width="520" height="520"></canvas>
+      </div>
+      <div class="col">
+        <h3>Set A</h3>
+        <div id="wrapA" class="refs"></div>
+      </div>
+      <div class="col">
+        <h3>Set B</h3>
+        <div id="wrapB" class="refs"></div>
+      </div>
+    </div>
+    <div class="controls">
+      <button id="play">Pause</button>
+      <label class="muted">Speed
+        <select id="speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option></select>
+      </label>
+      <button id="restart">Restart all</button>
+      <label class="muted"><input type="checkbox" id="mirror"> Mirror all</label>
+    </div>
+    <div class="legend">
+      <span><span class="sw" style="background:var(--lh)"></span>left-hand slot</span>
+      <span><span class="sw" style="background:var(--rh)"></span>right-hand slot</span>
+      <span><span class="sw" style="background:var(--body)"></span>body</span>
+      <span><span class="sw" style="background:var(--face)"></span>eyebrows / lips</span>
+    </div>
+  </section>
+
+  <section class="card" id="qs">
+    <fieldset id="f0" hidden>
+      <legend>0. What sign is the query? (signer mode)</legend>
+      <input type="text" id="guess" placeholder="English gloss, or leave blank">
+      <div class="controls"><button id="showRefs">Show A and B</button></div>
+    </fieldset>
+    <fieldset>
+      <legend>1. Which set shows the same sign as the query?</legend>
+      <div class="opts" id="q1">
+        <label><input type="radio" name="q1" value="A">Matches A <span class="kbd">1</span></label>
+        <label><input type="radio" name="q1" value="B">Matches B <span class="kbd">2</span></label>
+        <label><input type="radio" name="q1" value="both">A and B look the same <span class="kbd">3</span></label>
+        <label><input type="radio" name="q1" value="neither">Matches neither <span class="kbd">4</span></label>
+        <label><input type="radio" name="q1" value="unclear">Can't judge <span class="kbd">5</span></label>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>2. Is a hand missing or frozen during the important part of the query?</legend>
+      <div class="opts" id="q2">
+        <label><input type="radio" name="q2" value="yes">Yes</label>
+        <label><input type="radio" name="q2" value="no">No</label>
+        <label><input type="radio" name="q2" value="unsure">Unsure</label>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Notes (optional)</legend>
+      <textarea id="notes" rows="2" placeholder="What differs, what's missing…"></textarea>
+    </fieldset>
+    <div class="controls">
+      <button id="save" class="primary" disabled>Save and reveal</button>
+      <span id="savedNote" class="muted"></span>
+    </div>
+    <div id="reveal" class="reveal" hidden></div>
+  </section>
+
+  <section class="card">
+    <h3 style="margin-top:0">Summary so far</h3>
+    <div id="summary" class="muted">No answers yet.</div>
+    <div class="controls">
+      <button id="csv">Download CSV</button>
+      <button id="json">Download JSON</button>
+      <button id="reset">Clear all answers</button>
+    </div>
+    <p class="muted" style="margin-bottom:0">Answers are stored in this browser only. Download the CSV/JSON to keep or share them.</p>
+  </section>
+</main>
+
+<script type="application/json" id="data">__DATA__</script>
+<script>
+(() => {
+  "use strict";
+  const KIT = "__KIT_ID__";
+  const DATA = JSON.parse(document.getElementById("data").textContent);
+  const { meta, items, clips } = DATA;
+  const STORE = "error-review:" + KIT;
+
+  // ---------- persistence ----------
+  let answers = {};
+  try { answers = JSON.parse(localStorage.getItem(STORE) || "{}") || {}; } catch (e) { answers = {}; }
+  const persist = () => { try { localStorage.setItem(STORE, JSON.stringify(answers)); } catch (e) { /* storage unavailable */ } };
+
+  // ---------- clip decoding ----------
+  const decoded = {};
+  function decode(key) {
+    if (decoded[key]) return decoded[key];
+    const c = clips[key];
+    const raw = Uint8Array.from(atob(c.xy), ch => ch.charCodeAt(0));
+    const q = new Uint16Array(raw.buffer, raw.byteOffset, raw.byteLength / 2);
+    const pb = Uint8Array.from(atob(c.p), ch => ch.charCodeAt(0));
+    const n = 123, xy = new Float32Array(c.t * n * 2);
+    for (let i = 0; i < q.length; i++) xy[i] = q[i] / 65535;  // normalised 0..1 within the clip's box
+    return (decoded[key] = { t: c.t, xy, pres: pb, span: c.span, ever: c.ever });
+  }
+
+  // ---------- skeleton ----------
+  const HAND = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[0,17],[17,18],[18,19],[19,20]];
+  const POSE = [[11,12],[11,13],[13,15],[12,14],[14,16],[15,17],[15,19],[15,21],[17,19],[16,18],[16,20],[16,22],[18,20],[11,23],[12,24],[23,24]];
+  const P0 = 42, F0 = 67;  // pose / face offsets in the 123-point frame
+  const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  function drawFrame(ctx, clip, f, mirror) {
+    const W = ctx.canvas.width, H = ctx.canvas.height;
+    ctx.clearRect(0, 0, W, H);
+    const sx = clip.span[0], sy = clip.span[1];
+    const s = 0.88 * Math.min(W / sx, H / sy);
+    const ox = (W - s * sx) / 2, oy = (H - s * sy) / 2;
+    const base = f * 123 * 2;
+    const P = i => {
+      let x = clip.xy[base + 2 * i], y = clip.xy[base + 2 * i + 1];
+      if (mirror) x = 1 - x;
+      return [ox + x * s * sx, oy + y * s * sy];
+    };
+    const line = (a, b) => { const p = P(a), q = P(b); ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.stroke(); };
+    const dot = (i, r) => { const p = P(i); ctx.beginPath(); ctx.arc(p[0], p[1], r, 0, 6.283); ctx.fill(); };
+    const lw = Math.max(1.5, W / 220);
+
+    // body
+    ctx.strokeStyle = css("--body"); ctx.fillStyle = css("--body"); ctx.lineWidth = lw; ctx.globalAlpha = 0.9; ctx.setLineDash([]);
+    POSE.forEach(([a, b]) => line(P0 + a, P0 + b));
+    for (let i = 0; i <= 10; i++) dot(P0 + i, lw * 0.9);
+    // face: eyebrows as dots, lips as two closed loops
+    ctx.strokeStyle = css("--face"); ctx.fillStyle = css("--face"); ctx.lineWidth = lw * 0.8;
+    for (let i = 0; i < 16; i++) dot(F0 + i, lw * 0.8);
+    [[16, 36], [36, 56]].forEach(([a, b]) => { for (let i = a; i < b; i++) line(F0 + i, F0 + (i + 1 < b ? i + 1 : a)); });
+    // hands: solid when detected on this frame, faded + dashed when held
+    [[0, "--lh", 1], [21, "--rh", 2]].forEach(([off, color, bit], h) => {
+      if (!clip.ever[h]) return;
+      const live = (clip.pres[f] & bit) !== 0;
+      ctx.strokeStyle = css(color); ctx.fillStyle = css(color);
+      ctx.globalAlpha = live ? 1 : 0.28; ctx.lineWidth = live ? lw * 1.15 : lw;
+      ctx.setLineDash(live ? [] : [lw * 2.5, lw * 2]);
+      HAND.forEach(([a, b]) => line(off + a, off + b));
+      for (let i = 0; i < 21; i++) dot(off + i, live ? lw * 1.1 : lw * 0.8);
+    });
+    ctx.globalAlpha = 1; ctx.setLineDash([]);
+  }
+
+  // ---------- players ----------
+  let players = [], playing = true, speed = 1, mirror = false, last = 0;
+  function makePlayer(canvas, key) {
+    const clip = decode(key);
+    return { canvas, ctx: canvas.getContext("2d"), clip, f: 0, acc: 0 };
+  }
+  function tick(ts) {
+    const dt = last ? (ts - last) / 1000 : 0; last = ts;
+    players.forEach(p => {
+      if (playing) { p.acc += dt * 30 * speed; while (p.acc >= 1) { p.acc -= 1; p.f = (p.f + 1) % p.clip.t; } }
+      drawFrame(p.ctx, p.clip, p.f, mirror);
+    });
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+
+  // ---------- items ----------
+  const $ = id => document.getElementById(id);
+  let cur = 0;
+  const signerMode = () => $("signerMode").checked;
+
+  function refCanvases(wrap, keys, hide) {
+    wrap.innerHTML = "";
+    if (hide) { wrap.innerHTML = '<div class="hidden-refs" style="grid-column:1/-1">Hidden until you name the query sign.</div>'; return []; }
+    return keys.map(k => { const c = document.createElement("canvas"); c.width = 260; c.height = 260; wrap.appendChild(c); return makePlayer(c, k); });
+  }
+
+  function render() {
+    const it = items[cur], a = answers[it.id];
+    const hideRefs = signerMode() && !(a && a.saved) && !(a && a.refsShown);
+    players = [makePlayer($("cq"), it.query)]
+      .concat(refCanvases($("wrapA"), it.a, hideRefs), refCanvases($("wrapB"), it.b, hideRefs));
+    $("qinfo").textContent = `· item ${it.id} of ${items.length} · ${it.frames} frames`;
+    $("f0").hidden = !signerMode();
+    $("guess").value = (a && a.guess) || "";
+    document.querySelectorAll('input[name=q1]').forEach(r => { r.checked = !!(a && a.q1 === r.value); r.disabled = !!(a && a.saved); });
+    document.querySelectorAll('input[name=q2]').forEach(r => { r.checked = !!(a && a.q2 === r.value); r.disabled = !!(a && a.saved); });
+    $("notes").value = (a && a.notes) || "";
+    $("guess").disabled = !!(a && a.saved);
+    $("save").disabled = !!(a && a.saved) || !(a && a.q1) || hideRefs;
+    $("save").textContent = a && a.saved ? "Saved" : "Save and reveal";
+    $("savedNote").textContent = a && a.saved ? "Answer locked after reveal; notes stay editable." : "";
+    $("jump").value = String(cur);
+    showReveal();
+    updateProgress();
+  }
+
+  function verdict(it, a) {
+    if (!a || !a.saved) return null;
+    if (a.q1 === it.trueSide) return ["info", "Information present — you picked the true sign; the model missed it."];
+    if (a.q1 === "A" || a.q1 === "B") return ["pred", "Looks like the predicted sign — the landmarks favour the model's guess."];
+    if (a.q1 === "both") return ["amb", "Ambiguous — the two signs look the same in landmarks."];
+    if (a.q1 === "neither") return ["amb", "Matches neither — unusual execution, or label / tracking issue."];
+    return ["amb", "Can't judge from the landmarks."];
+  }
+
+  function showReveal() {
+    const it = items[cur], a = answers[it.id], box = $("reveal");
+    const v = verdict(it, a);
+    if (!v) { box.hidden = true; return; }
+    const sideOf = s => (s === it.trueSide ? `the true sign <b>${it.truth}</b>` : `the model's guess <b>${it.pred}</b>`);
+    const look = w => `<a href="https://www.signasl.org/sign/${encodeURIComponent(w.toLowerCase())}" target="_blank" rel="noopener">look up</a>`;
+    const others = Object.entries(it.others).map(([k, p]) => `${k}: ${p}${p === it.truth ? " ✓" : ""}`).join(" · ");
+    box.innerHTML = `
+      <p class="verdict ${v[0]}">${v[1]}</p>
+      <p>Set A was ${sideOf("A")}; Set B was ${sideOf("B")}. True: <b>${it.truth}</b> (${look(it.truth)}) · Predicted: <b>${it.pred}</b> (${look(it.pred)})</p>
+      <p class="muted">Model top-3: ${it.top3.map(([w, p]) => `${w} ${(p * 100).toFixed(0)}%`).join(", ")}${others ? " · Other models: " + others : ""}<br>
+      Signer ${it.signer} · no hand detected on ${(it.noHand * 100).toFixed(0)}% of frames · ${it.frequentPair ? "frequent confusion pair" : "less common confusion"}${a.guess ? ` · your guess: “${a.guess}”` : ""}</p>`;
+    box.hidden = false;
+  }
+
+  function updateProgress() {
+    const done = items.filter(it => answers[it.id] && answers[it.id].saved).length;
+    $("prog").style.width = (100 * done / items.length) + "%";
+    $("progtxt").textContent = `${done}/${items.length} answered`;
+    summarise();
+  }
+
+  function summarise() {
+    const rows = {}, cats = ["info", "pred", "amb"], names = { info: "Information present (learner)", pred: "Looks like predicted sign", amb: "Ambiguous / can't judge" };
+    let total = 0, missing = 0;
+    items.forEach(it => {
+      const a = answers[it.id], v = verdict(it, a); if (!v) return;
+      total++; if (a.q2 === "yes") missing++;
+      rows[it.signer] = rows[it.signer] || { info: 0, pred: 0, amb: 0, n: 0 };
+      rows[it.signer][v[0]]++; rows[it.signer].n++;
+    });
+    if (!total) { $("summary").textContent = "No answers yet."; return; }
+    const all = { info: 0, pred: 0, amb: 0, n: total };
+    Object.values(rows).forEach(r => cats.forEach(c => all[c] += r[c]));
+    const pct = (x, n) => `${x} (${Math.round(100 * x / n)}%)`;
+    const tr = (label, r) => `<tr><td>${label}</td>${cats.map(c => `<td>${pct(r[c], r.n)}</td>`).join("")}<td>${r.n}</td></tr>`;
+    $("summary").innerHTML = `<table><thead><tr><th>Signer</th>${cats.map(c => `<th>${names[c]}</th>`).join("")}<th>n</th></tr></thead><tbody>
+      ${Object.keys(rows).sort().map(s => tr(s, rows[s])).join("")}${tr("<b>All</b>", all)}</tbody></table>
+      <p>Hand missing or frozen at the key moment: ${pct(missing, total)}.</p>`;
+  }
+
+  function current() { const id = items[cur].id; return (answers[id] = answers[id] || {}); }
+  document.querySelectorAll('input[name=q1]').forEach(r => r.addEventListener("change", () => { current().q1 = r.value; persist(); render(); }));
+  document.querySelectorAll('input[name=q2]').forEach(r => r.addEventListener("change", () => { current().q2 = r.value; persist(); }));
+  $("notes").addEventListener("input", e => { current().notes = e.target.value; persist(); });
+  $("guess").addEventListener("input", e => { current().guess = e.target.value; persist(); });
+  $("showRefs").addEventListener("click", () => { current().refsShown = true; persist(); render(); });
+  $("save").addEventListener("click", () => { const a = current(); if (!a.q1) return; a.saved = true; a.savedAt = new Date().toISOString(); persist(); render(); });
+  $("signerMode").addEventListener("change", render);
+
+  const go = i => { cur = (i + items.length) % items.length; render(); window.scrollTo({ top: 0 }); };
+  $("prev").addEventListener("click", () => go(cur - 1));
+  $("next").addEventListener("click", () => go(cur + 1));
+  $("nextOpen").addEventListener("click", () => { const i = items.findIndex(it => !(answers[it.id] && answers[it.id].saved)); if (i >= 0) go(i); });
+  items.forEach((it, i) => { const o = document.createElement("option"); o.value = String(i); o.textContent = `Item ${it.id}`; $("jump").appendChild(o); });
+  $("jump").addEventListener("change", e => go(Number(e.target.value)));
+  $("play").addEventListener("click", () => { playing = !playing; $("play").textContent = playing ? "Pause" : "Play"; });
+  $("speed").addEventListener("change", e => { speed = Number(e.target.value); });
+  $("restart").addEventListener("click", () => players.forEach(p => { p.f = 0; p.acc = 0; }));
+  $("mirror").addEventListener("change", e => { mirror = e.target.checked; });
+  document.addEventListener("keydown", e => {
+    if (e.target.matches("input[type=text], textarea")) return;
+    if (e.key === " ") { e.preventDefault(); $("play").click(); }
+    else if (e.key === "ArrowLeft") go(cur - 1);
+    else if (e.key === "ArrowRight") go(cur + 1);
+    else if ("12345".includes(e.key) && e.key.length === 1) {
+      const r = document.querySelectorAll('input[name=q1]')[Number(e.key) - 1];
+      if (r && !r.disabled) { r.checked = true; r.dispatchEvent(new Event("change")); }
+    }
+  });
+
+  // ---------- export ----------
+  function rowsOut() {
+    return items.map(it => {
+      const a = answers[it.id] || {}, v = verdict(it, a);
+      return { item: it.id, signer: it.signer, sequence_id: it.sequenceId, truth: it.truth, pred: it.pred,
+        true_side: it.trueSide, answer: a.q1 || "", hand_missing: a.q2 || "", guess: a.guess || "",
+        verdict: v ? v[0] : "", frequent_pair: it.frequentPair, no_hand_frac: it.noHand, frames: it.frames,
+        top3: it.top3.map(([w, p]) => `${w}:${p}`).join(" "), others: Object.entries(it.others).map(([k, p]) => `${k}:${p}`).join(" "),
+        notes: a.notes || "", saved_at: a.savedAt || "" };
+    });
+  }
+  function download(name, text, type) {
+    const url = URL.createObjectURL(new Blob([text], { type }));
+    const link = document.createElement("a"); link.href = url; link.download = name; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  $("csv").addEventListener("click", () => {
+    const rs = rowsOut(), cols = Object.keys(rs[0]);
+    const esc = v => `"${String(v).replace(/"/g, '""')}"`;
+    download(`${KIT}.csv`, [cols.join(",")].concat(rs.map(r => cols.map(c => esc(r[c])).join(","))).join("\n"), "text/csv");
+  });
+  $("json").addEventListener("click", () => download(`${KIT}.json`, JSON.stringify({ meta, answers: rowsOut() }, null, 2), "application/json"));
+  $("reset").addEventListener("click", () => { if (confirm("Clear all answers in this browser?")) { answers = {}; persist(); render(); } });
+
+  $("meta").textContent = `${meta.model} (${meta.arch}) · fold ${meta.fold} · val acc ${(meta.accuracy * 100).toFixed(1)}% · ${meta.nErrors.toLocaleString()} errors`;
+  render();
+})();
+</script>
+</body>
+</html>
