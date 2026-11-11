@@ -691,6 +691,29 @@ mostly wasted, in all runs alike (relative comparisons stand; absolute numbers m
 and the VQ commitment loss ~0.02. Consequence: a VQ run with the fix must be compared with a graph
 run *with* the fix (`fold0_graph` had the bug), so the clean order is graph+fix, then VQ+fix.
 
+**Graph + fix (`fold0_graph_fixed`), stopped at epoch 22 to start the VQ run:** indistinguishable from
+`fold0_graph` — epochs 16–22 val 0.6353 vs 0.6359 (−0.06), clean-train gap 17.9 vs 17.8 pt, the same
+per-epoch dips (same seed and order). The corrupted batches cost nothing measurable (clipping
+contained them), so all earlier results stand, and the VQ + fix run is compared with `fold0_graph`
+directly. VQ + fix first epochs: commitment 0.0139 / 0.0119 (was 54,745 / 15,220), codes in use
+52/50/128/97 → 71/38/126/98 (dom hand / non-dom hand / body / face).
+
+**VQ + fix (`fold0_graph_vq`, `--vq-codes 256`) — negative, stopped at epoch 17:**
+
+| epochs | val graph → VQ | clean-train gap graph → VQ |
+|---|---|---|
+| 12–14 | 0.614 → 0.456 (−15.8) | 13.0 → 12.4 pt |
+| 15–17 | 0.629 → 0.478 (−15.1) | 15.5 → 14.2 pt |
+
+At matched val (~0.48; graph epochs 6–7, gap ~9 pt) the VQ gap is wider (14–15 pt): the bottleneck
+discards sign-relevant information without removing signer-specific detail. Codes in use: dom hand
+~118/256, body ~127, face ~108, non-dom hand collapsed to 10–25 (little information there — most
+signers are one-handed — so not the cause). Commitment loss healthy (0.17). **Conclusion (planned
+decision point): the VQ-VAE line stops.** The end-to-end, classification-trained bottleneck is the
+most favourable case for quantisation; a frozen reconstruction-trained tokenizer (the old pipeline)
+would be expected to do worse. Untested variants (bigger codebooks, several codes per part) could
+narrow the loss but not rescue the hypothesis that quantisation reduces signer overfitting.
+
 
 ### Per-signer BatchNorm adaptation (AdaBN), offline on fold 0 (2026-11-10)
 For each val signer, every BatchNorm layer's running mean/var (4 layers: the Conformer conv modules)
@@ -715,6 +738,101 @@ unlabelled clips per signer — fine for a per-user app, not comparable to Kaggl
 renormalisation removes — direct evidence for the signer-shift diagnosis. Next along this line:
 per-signer input normalisation (train and test), and test-time adaptation of BN affine parameters
 (e.g. entropy minimisation, TENT).
+
+**Follow-up: input normalisation and TENT** (same held-out halves; clips canonicalised first):
+
+| | base | AdaBN | input norm | input norm + AdaBN | TENT |
+|---|---|---|---|---|---|
+| fixed | 0.6774 | 0.6858 | 0.6511 | 0.6605 | **0.6897** |
+| graph | 0.6855 | 0.6967 | 0.6720 | 0.6778 | **0.6990** |
+| fixed+graph | 0.6990 | 0.7139 | 0.6840 | 0.6900 | **0.7164** |
+
+- **Per-signer input normalisation hurts (−1.4 to −2.6)**: each position feature mapped to the
+  training-population mean/std using the signer's calibration clips (hands on detected frames only,
+  missing hands untouched, Δ1 rebuilt). Standardising every coordinate independently moves joints by
+  different amounts — distorting hand shape — and removes the signer's typical hand locations, which
+  partly carry meaning. Not pursued (a train-and-test version could differ, but the test-time form
+  is clearly negative).
+- **TENT** (AdaBN statistics, then BN + LayerNorm affine params minimise prediction entropy on the
+  calibration half, 2 passes, Adam 1e-4): small, consistent extra over AdaBN — +0.4 / +0.2 / +0.25.
+  The gain is in re-estimating normalisation statistics, not in input rescaling or affine tuning.
+
+
+### 1st-place anchor on fold 0 — notebooks ready (2026-11-10)
+Question: is our ~0.69 single-model fold-0 accuracy a property of these signers, or of our recipe/
+pipeline? Run the published 1st-place solution on the same held-out signers. Kaggle's 0.89 is a
+4-seed ensemble trained on all 21 signers and scored on a hidden test set (signer overlap unknown),
+so it does not answer this.
+- `Build_ISLR_TFRecords_SignerFolds.ipynb` (CPU): 1st-place record format, our 7 signer folds;
+  ~18.5 GiB (3.58 M frames × ~5.5 KB; floats barely compress).
+- `Train_1st_Place_Fold0.ipynb` (GPU): original cells verbatim except environment pins, data paths,
+  GPU strategy (batch 64 × GPUs, lr 5e-4 × GPUs — the original's scaling of 64 × 8 TPU replicas),
+  mixed_float16 on non-bf16 GPUs, `EPOCHS` + 11 h time limit, and a per-signer evaluation cell.
+- Local smoke test (TF 2.15, CPU, 560 synthetic records, AWP + late dropout forced on from epoch 0):
+  trains, holds out fold 0, saves best/last weights and `fold0_val_probs.npz`. Caught on the way:
+  TF 2.15 needs numpy < 2, which breaks current pandas/pyarrow → pinned in the install cell.
+**Reading:** ≥ 0.75 on fold 0 → our recipe/pipeline is the gap; ≈ 0.69 → the signers are; either way
+its predictions are an ensemble candidate. Deviation to note: 300 epochs may not fit the 12 h
+session on a T4 — the first epoch prints how many fit.
+
+### Error review + fold-0 val breakdown (`fold0_graph`, 2026-11-11)
+**Tool:** `python -m cnn_transformer.error_review` (commit `848d687`) — 100 `fold0_graph` val errors
+(34/33/33 across signers 34503/49445/62590; 49 from the 20 most frequent confusion pairs), each shown as
+an animated landmark clip next to two unlabelled reference sets (2 training clips each, distinct
+signers) of the true and the predicted sign in random order; undetected-hand frames drawn faded.
+Reviewed by a **non-signer** (no ASL knowledge), answers before reveal; 12 flagged low confidence,
+1 seen with labels. Answers: `results/error_review/fold0_graph_errors_answers.tsv`.
+
+| answer | n | |
+|---|---|---|
+| picked the true sign ("information present") | 35 | |
+| picked the predicted sign | 39 | |
+| A and B look the same | 15 | lips/mouth 7/7, say/chin 3, say/mouth 2 — mouth-region pointing signs |
+| can't judge | 10 | 5 of them are **6-frame** clips; median 83 % of frames with no hand |
+| neither | 1 | |
+
+**The A/B picks are at chance:** true sign in 35/74 = 47 % (chance 50 %, exact binomial p = 0.73);
+frequent pairs 22/36 = 61 % (p = 0.24); other errors 13/38 = 34 % (p = 0.07, leaning towards the model's
+guess). For a non-signer the landmark animations of these errors do not separate the two signs, so the
+review **does not** establish a learner-fixable share. It also cannot show the information is absent —
+fine handshape/movement differences may need a fluent signer (the kit's signer mode; not done).
+Patterns: consistent mismatches judged as the predicted sign, made by all three models —
+glasswindow→tooth 3/3, yes→carrot 2/2, cut→scissors 2/2 (likely signer-specific / regional variants);
+pairs where the reviewer beat chance — jump/stairs 3/3, cat/kitty 4/5, awake/wake 3/4, dry/dryer 2/2,
+sleep/sleepy 2/2 (small handshape/movement details — relevant to the finger-dropout question).
+59/100 errors are shared by all three models (fixed, graph, fs).
+
+**Whole fold-0 val set** (`fold0_graph`, 14,076 clips, acc 0.6861; top-2 0.7905, top-3 0.8296, top-5 0.8639;
+predictions cached in `results/error_review/fold0_graph_val_probs.npz`):
+
+| clip length | clips | acc | % of errors | | no-hand frames | clips | acc | % of errors |
+|---|---|---|---|---|---|---|---|---|
+| ≤ 6 | 7.6 % | **0.402** | 14.4 % | | 0 | 18.6 % | 0.787 | 12.6 % |
+| 7–10 | 5.2 % | 0.634 | 6.0 % | | ≤ 25 % | 26.2 % | 0.759 | 20.1 % |
+| 11–20 | 24.7 % | 0.763 | 18.6 % | | 25–50 % | 24.6 % | 0.703 | 23.2 % |
+| 21–40 | 20.6 % | 0.739 | 17.1 % | | 50–75 % | 21.0 % | 0.607 | 26.2 % |
+| 41–80 | 22.6 % | 0.683 | 22.8 % | | > 75 % | 9.7 % | **0.426** | 17.8 % |
+| > 80 | 19.4 % | 0.660 | 21.0 % | | | | | |
+
+- **Degraded clips** (≤ 6 frames or > 75 % no-hand frames): 14.9 % of val, acc 0.443 (not unrecognisable —
+  partly recoverable); the other 85.1 % reach 0.7286. Even perfect accuracy on them would give 0.769, so
+  they cost at most ~8 pts and realistically a few. Training has 13.7 % clips ≤ 6 frames too.
+- **Tracking explains only part of the signer spread:** degraded-clip share 34503 / 49445 / 62590 =
+  high / high / low (> 75 % no-hand: 13.5 / 12.7 / 2.8 %; median no-hand 0.35 / 0.48 / 0.08), but on
+  non-degraded clips accuracy is still 0.632 / 0.706 / 0.834 (overall 0.583 / 0.664 / 0.813): the 23-pt
+  spread shrinks only to 20.
+- **Near-synonyms are a small ceiling:** merging the review's look-alike group {lips, mouth, say, chin}
+  +0.4 pt; 13 a-priori near-synonym groups (wake/awake, sleep/sleepy/nap, cat/kitty, dog/puppy,
+  dry/dryer, hear/listen, see/look, pen/pencil, cut/scissors, tooth/toothbrush, bed/bedroom,
+  duck/goose, lips/mouth) +2.2 pt; merging the top-N confused pairs chosen on val (optimistic):
+  +1.3 / +2.2 / +3.4 / +5.7 pt for N = 5 / 10 / 20 / 50. Errors are diffuse: 2,311 distinct
+  (true, pred) pairs; the top 20 cover only 10.7 % of errors.
+
+**Reading:** no single data defect explains the gap. Degraded clips (a few pts) and near-synonym labels
+(~2 pts) are real but bounded; most errors are spread over thousands of sign pairs and remain
+signer-dependent on clean clips — consistent with the signer-generalisation diagnosis. Next: the
+recipe ablations (finger dropout off first — the resolvable errors hinge on handshape detail; then GRL,
+mixup, depth), the 1st-place anchor, and optionally a fluent signer on the 54 unresolved items.
 
 ---
 
