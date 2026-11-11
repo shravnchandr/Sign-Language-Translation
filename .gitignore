@@ -62,3 +62,6 @@ run_commands.sh
 
 # Downloaded LMDB archives (multi-GB) — never commit
 *.mdb
+
+# Local results pulled from RunPod (checkpoints, logs, review kits)
+results/
