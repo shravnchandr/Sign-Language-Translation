@@ -1056,6 +1056,46 @@ exact one-token decode (any insertion or deletion fails) while the classifier ta
 classifier (best non-blank class over time) on the same clips. One-hand mode helps both models on
 WLASL two-hand clips; the 0 % p10 signers are still uninspected.
 
+### WLASL: metric vs model gap, and the "0 % signers" (2026-11-11)
+`cross_dataset_eval` now also scores a phrase model like a classifier ("pooled": each sign's best
+per-frame log-probability over the clip, blank excluded) and writes per-clip CSVs
+(`results/wlasl_eval/`), so checkpoints can be compared clip by clip.
+
+| WLASL, all 67 signers (1,671 clips) | exact decode | pooled top-1 | pooled top-5 | decode contains sign |
+|---|---|---|---|---|
+| phrases01 | 45.4 % | 55.5 % | 74.6 % | 56.1 % |
+| phrases02 (tempo 0.5–2×) | 46.0 % | 57.1 % | 75.5 % | 58.1 % |
+| fold0_graph classifier | — | 64.2 % (top-1) | 82.6 % | — |
+
+- **About half the gap was the metric.** phrases01 decodes 2+ signs on 295 clips and nothing on 65;
+  of the 170 clips pooled scoring recovers, 153 had decoded as two signs. The rest is real:
+  pooled phrases01 vs classifier +134 / −278 clips (McNemar p 1e-12), phrases02 p 5e-10. In-domain
+  the gap is ~5 points (67.0 vs 62.4 single-sign, phrase breakdown); cross-dataset ~8.
+- **Paired phrases01 → phrases02:** exact +138 / −127 (p 0.54), pooled +126 / −100 (p 0.10) — the
+  wider tempo range is still no clear gain.
+- **The 0 % p10 signers are a small-sample artefact:** 17 of 67 signers have ≤ 3 clips (28 clips
+  total); the 7 at 0 % have 1–2 clips each. Among the 22 signers with ≥ 20 clips (1,412 clips),
+  classifier accuracy is 48–82 %, phrases01 pooled 34–81 %; nobody fails outright. Per-signer
+  accuracy hardly tracks clip count, hand-visible fraction, aspect k or raw shoulder ratio
+  (|Spearman| ≤ 0.18).
+- **What does track errors is a second hand:** clips with both hands detected somewhere score 49.1 %
+  vs 74.6 % (classifier) and 35.8 % vs 69.3 % (phrases01 pooled), and the phrase model loses more.
+  Confounded with the sign (two-handed signs), but it matches the ASL Signs data gap (a second hand
+  in a median 2 % of clips). By source, signingsavvy is lowest (54 %, 344 clips), aslbrick highest
+  (80 %); clips where a hand is visible > 90 % of frames score lower (53 %), likely hands held up
+  before / after the sign.
+
+### phrases03: WLASL training signers mixed into phrase training (2026-11-11, running)
+`build_wlasl_lmdb.signer_split`: WLASL signers sorted by clip count, dealt snake-wise → train half
+33 signers / 847 clips, test half 34 / 824 clips; both have all 206 signs and 40 / 42 % two-hand
+clips. `train_phrases --extra-data-dir {WLASL_DIR} --extra-frac 0.15`: 15 % of phrases come from WLASL
+train-half signers (each in proportion to its clips; one signer per phrase as before, ~2.6 signs),
+the rest from the 18 ASL Signs training signers as before; phrases01's recipe otherwise (tempo
+0.8–1.25×). Each WLASL clip is reused ~19× per epoch — overfitting to those signers is possible and is
+what the held-out test half measures. Baselines on the **test half**: classifier 66.7 %; phrases01
+exact 44.2 % / pooled 57.0 % (two-hand clips exact 25.8 %); phrases02 44.2 % / 57.8 %.
+Kaggle notebook `islr-phrases03-wlasl` (commit 6ede152).
+
 ---
 
 ## Pending Ideas (not yet implemented)
