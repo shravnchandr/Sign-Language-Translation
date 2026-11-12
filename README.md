@@ -237,6 +237,7 @@ uv sync
 ```bash
 kaggle datasets download shravnchandr/asl-is-lmdb -p data/asl-is-lmdb --unzip
 kaggle datasets download shravnchandr/asl-fs-lmdb -p data/asl-fs-lmdb --unzip
+kaggle datasets download shravnchandr/wlasl-lmdb -p data/wlasl-lmdb --unzip   # private; WLASL, 206 shared signs, aspect-corrected (cross-dataset test)
 ```
 
 **Raw competition data** (only needed to rebuild LMDBs or run the VQ-VAE pipeline):

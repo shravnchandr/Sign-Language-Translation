@@ -228,10 +228,12 @@ End-to-end supervised classification. Optional CTC pre-training on ASL Fingerspe
 **Pre-built LMDB datasets (recommended — download from Kaggle):**
 - `data/asl-is-lmdb/` — `is.lmdb.mdb` + `train.csv` + `sign_to_prediction_index_map.json`
 - `data/asl-fs-lmdb/` — `fs.lmdb.mdb` + `train.csv` + `character_to_prediction_index.json`
+- `data/wlasl-lmdb/` — `wlasl.lmdb.mdb` + `train.csv` + `sign_to_prediction_index_map.json` (private Kaggle dataset `shravnchandr/wlasl-lmdb`, from `notebooks/kaggle/build-wlasl-lmdb`; same keys as `is.lmdb.mdb`; participant ids 900000 + WLASL signer; WLASL is C-UDA)
 
 ```bash
 kaggle datasets download shravnchandr/asl-is-lmdb -p data/asl-is-lmdb --unzip
 kaggle datasets download shravnchandr/asl-fs-lmdb -p data/asl-fs-lmdb --unzip
+kaggle datasets download shravnchandr/wlasl-lmdb -p data/wlasl-lmdb --unzip   # private; WLASL, 206 shared signs, aspect-corrected (cross-dataset test)
 ```
 
 Rebuilt on Kaggle (CPU) by `notebooks/Build_ISLT_LMDB.ipynb` (ASL Signs) and `notebooks/Build_FS_LMDB.ipynb` (fingerspelling; output byte-identical to `build_fingerspelling_lmdb.py`, reads only the 393 needed columns, builds on the disk with most free space since the LMDB is 15.9 GiB — 4 min on Kaggle CPU, publishes a new version of `shravnchandr/asl-fs-lmdb` or creates it; `INCLUDE_SUPPLEMENTAL` adds the supplemental set, untested). `notebooks/tools/create-*-lmdb.ipynb` are the older versions.
