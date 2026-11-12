@@ -22,6 +22,7 @@ Approaches, all under `research/models/` (current work in the `islr` package, or
 - `scripts/` — shell pipelines (`run_pipeline_isolated.sh`, `run_pipeline_vqvae_seq2seq.sh`, `setup_runpod.sh`, `runpod_results.sh`; they `cd` to the repo root themselves) and Kaggle runners (`kaggle_run.py`, `extract_aslcitizen.py`).
 - `notebooks/` — by approach: `data/` (LMDB builders, WLASL MediaPipe extraction, `build-wlasl-*` Kaggle kernel folders; `legacy/`), `exploration/`, `early_transformers/`, `vqvae/`, `first_place/`. Index in `notebooks/README.md`.
 - `archive/research/` — superseded prototypes, feature experiments and tools (reference only).
+- `results/` (gitignored) is organised like the code: `isolated/<run>/`, `pretrain/<run>/`, `phrases/<run>/` (checkpoint + meta + `logs/` + eval outputs), `evaluation/` (`wlasl/` per-clip CSVs, `error_review/`, `signer_diagnostics/`); `results/kaggle/` is the inbox `kaggle_run.py output` downloads into — file each run under its approach afterwards. `exports/phrases04/` is the browser model (ONNX, labels, preprocess spec, `sign_reliability.json`, `fixtures/`).
 - Gitignored: `data/`, `exports/`, `results/`, `docs/` (except `docs/experiments/`, the experiment log). The local ASL Signs LMDB is `data/asl-is-lmdb/is.lmdb.mdb` (+ train.csv, sign map), the same layout as the Kaggle dataset and the scripts' defaults. Paths in older experiment-log entries predate this layout (reorganised 2026-11-12: `cnn_transformer` → `islr`).
 
 ## Commands
@@ -37,7 +38,7 @@ bash scripts/run_pipeline_isolated.sh --arch graph --val-fold 0 --fs-cleanup   #
 bash scripts/run_pipeline_isolated.sh --skip-pretrain --num-workers 8   # relaunches in tmux session "islr"
 tmux attach -t islr                      # logs also in logs/isolated_<timestamp>.log; --no-tmux = foreground
 bash scripts/run_pipeline_isolated.sh --skip-pretrain --val-fold 2   # validate on signer fold 2 of 7 (GroupKFold)
-PYTHONPATH=research/models uv run python -m islr.isolated.error_review --checkpoint <best_phase1.pth> --also <other.pth> --data-dir data/asl-is-lmdb --lmdb-path data/asl-is-lmdb/is.lmdb.mdb --val-fold 0 --out results/error_review/fold0_graph_errors.html   # error-review kit (CPU)
+PYTHONPATH=research/models uv run python -m islr.isolated.error_review --checkpoint <best_phase1.pth> --also <other.pth> --data-dir data/asl-is-lmdb --lmdb-path data/asl-is-lmdb/is.lmdb.mdb --val-fold 0 --out results/evaluation/error_review/fold0_graph_errors.html   # error-review kit (CPU)
 PYTHONPATH=research/models uv run python -m islr.isolated.signer_diagnostics --logs 'logs/fold*.log'   # per-signer data stats vs val acc (CPU)
 PYTHONPATH=research/models uv run python -m islr.phrases.grammar   # sample synthetic gloss phrases + vocabulary coverage
 PYTHONPATH=research/models uv run python -m islr.phrases.train --val-fold 0 --arch graph --init <fold0 best_phase1.pth> --out-dir checkpoints/phrases_fold0_graph 2>&1 | tee logs/phrases_fold0_graph.log   # continuous (multi-sign) CTC on synthetic phrases (GPU; run inside tmux)
@@ -47,13 +48,13 @@ bash scripts/run_pipeline_isolated.sh --skip-pretrain --val-fold 0 --hand-drop-p
 bash scripts/run_pipeline_isolated.sh --skip-pretrain --val-fold 0 --arch graph   # GraphConformer (hand-skeleton graph encoder)
 bash scripts/run_pipeline_isolated.sh --skip-pretrain --val-fold 0 --arch graph --bone-aug-prob 0.5   # + hand-proportion augmentation (default off)
 PYTHONPATH=research/models uv run python -m islr.phrases.breakdown --checkpoint <best_phrases.pth> --iso-checkpoint <fold0 best_phase1.pth> --out results/<run>/breakdown.txt   # full val breakdown: WER/ops by length/kind/signer, downsampled vs full, emission timing, controlled single-sign vs classifier (CPU, ~15 min)
-PYTHONPATH=research/models uv run --with onnx --with onnxruntime --with onnxscript python -m islr.export.export_onnx --checkpoint <best_phrases.pth> --out-dir exports/phrases01   # phrase CTC model → ONNX (onnxruntime-web) + labels.json + preprocess.json; verified against PyTorch on LMDB clips (CPU)
+PYTHONPATH=research/models uv run --with onnx --with onnxruntime --with onnxscript python -m islr.export.export_onnx --checkpoint <best_phrases.pth> --out-dir exports/phrases04   # phrase CTC model → ONNX (onnxruntime-web) + labels.json + preprocess.json; verified against PyTorch on LMDB clips (CPU)
 python3 scripts/kaggle_run.py push <name> --gpu -- islr.phrases.train --data-dir {IS_LMDB_DIR} --lmdb-path {IS_LMDB_DIR}/is.lmdb.mdb --val-fold 0 --arch graph --init {CKPT_DIR}/fold0_graph/best_phase1.pth --out-dir {OUT} --num-workers 4   # any repo module as a private Kaggle notebook (T4, 12 h max, ~30 GPU h/week); clones the pushed HEAD, mounts asl-is-lmdb / islr-checkpoints / wlasl-lmdb, copies LMDBs to local disk
 PYTHONPATH=research/models uv run python -m islr.evaluation.cross_dataset --checkpoint <best_phrases.pth | best_phase1.pth> --data-dir data/wlasl-lmdb --out <json>   # cross-dataset score on WLASL's 67 unseen signers (phrase: single-sign exact decode; isolated: top-1/top-5), framing cost, two-hand clips, one-hand mode + McNemar
 PYTHONPATH=research/models uv run python -m islr.evaluation.sign_reliability --checkpoint <best_phrases.pth> --wlasl-dir data/wlasl-lmdb --out exports/<run>/sign_reliability.json   # per-sign accuracy / confusions / score thresholds for the app (CPU, ~15 min)
-python3 scripts/kaggle_run.py status <name>; python3 scripts/kaggle_run.py output <name>   # → results/kaggle/<name>/ (out/run.log, checkpoints)
+python3 scripts/kaggle_run.py status <name>; python3 scripts/kaggle_run.py output <name>   # → results/kaggle/<name>/ (inbox: out/run.log, checkpoints; then file under results/<approach>/<run>/)
 uvx --with six kaggle kernels push -p notebooks/data/build-wlasl-lmdb   # WLASL → ASL-Signs-compatible LMDB on Kaggle (CPU; clones this repo, runs data/build_wlasl_lmdb.py); status / output: uvx --with six kaggle kernels status|output shravnchandr/build-wlasl-lmdb
-PYTHONPATH=research/models uv run --with onnxruntime python -m islr.export.browser_fixtures --parquet <competition parquets> --concat --out-dir exports/phrases01/fixtures   # golden fixtures for the browser port (raw frames → trim / features / logits / decode)
+PYTHONPATH=research/models uv run --with onnxruntime python -m islr.export.browser_fixtures --parquet <competition parquets> --concat --out-dir exports/phrases04/fixtures   # golden fixtures for the browser port (raw frames → trim / features / logits / decode)
 bash scripts/runpod_results.sh send run005       # on the pod, before stopping it (disk is erased on stop)
 bash scripts/runpod_results.sh receive <code>    # on your machine → runs/run005/ (gitignored)
 

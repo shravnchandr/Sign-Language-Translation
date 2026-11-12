@@ -22,9 +22,9 @@ positions in the stored data) are drawn faded, so tracking gaps are visible.
 
 Run from the repo root (CPU; a few minutes for 14k clips):
   PYTHONPATH=research/models uv run python -m islr.isolated.error_review \\
-      --checkpoint results/results_fold0_graph/checkpoints/fold0_graph/best_phase1.pth \\
-      --also results/results_fold0_fixed/checkpoints/fold0_fixed/best_phase1.pth \\
-      --out results/error_review/fold0_graph_errors.html
+      --checkpoint results/isolated/fold0_graph/best_phase1.pth \\
+      --also results/isolated/fold0_fixed/best_phase1.pth \\
+      --out results/evaluation/error_review/fold0_graph_errors.html
 """
 
 import argparse
@@ -147,7 +147,7 @@ def main():
     ap.add_argument("--min-ref-frames", type=int, default=8, help="… and at least this many detected frames")
     ap.add_argument("--n-heads", type=int, default=4, help="attention heads of every checkpoint (= training --n-heads)")
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--out", default="results/error_review/error_review.html")
+    ap.add_argument("--out", default="results/evaluation/error_review/error_review.html")
     args = ap.parse_args()
     rng = random.Random(args.seed)
 

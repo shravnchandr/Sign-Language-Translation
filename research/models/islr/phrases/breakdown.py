@@ -13,9 +13,9 @@ then reports:
 
 Usage:
   PYTHONPATH=research/models uv run python -m islr.phrases.breakdown \
-    --checkpoint results/results_phrases01/checkpoints/phrases_fold0_graph/best_phrases.pth \
-    --iso-checkpoint results/results_fold0_graph/checkpoints/fold0_graph/best_phase1.pth \
-    --out results/results_phrases01/breakdown.txt
+    --checkpoint results/phrases/phrases04/best_phrases.pth \
+    --iso-checkpoint results/isolated/fold0_graph/best_phase1.pth \
+    --out results/phrases/phrases04/breakdown.txt
 """
 
 import argparse

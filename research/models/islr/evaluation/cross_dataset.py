@@ -17,7 +17,7 @@ an exact McNemar test, and per-signer spread. --out writes the numbers as JSON,
 
 Usage:
   PYTHONPATH=research/models uv run python -m islr.evaluation.cross_dataset \
-    --checkpoint results/results_phrases01/checkpoints/phrases_fold0_graph/best_phrases.pth \
+    --checkpoint results/phrases/phrases04/best_phrases.pth \
     --data-dir data/wlasl-lmdb --out results/phrases01_wlasl.json
 """
 

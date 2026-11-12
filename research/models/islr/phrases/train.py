@@ -33,7 +33,7 @@ Usage (from the project root):
   PYTHONPATH=research/models uv run python -m islr.phrases.train \\
       --data-dir data/asl-is-lmdb --lmdb-path data/asl-is-lmdb/is.lmdb.mdb \\
       --val-fold 0 --arch graph \\
-      --init results/results_fold0_graph/checkpoints/fold0_graph/best_phase1.pth \\
+      --init results/isolated/fold0_graph/best_phase1.pth \\
       --out-dir checkpoints/phrases_fold0_graph
 """
 

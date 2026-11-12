@@ -27,7 +27,7 @@ Usage:
   PYTHONPATH=research/models uv run --with onnxruntime python -m islr.export.browser_fixtures \
     --parquet data/Isolated_ASL_Recognition/train_landmark_files/16069/100015657.parquet \
               data/Isolated_ASL_Recognition/train_landmark_files/18796/1001373962.parquet \
-    --concat --out-dir exports/phrases01/fixtures
+    --concat --out-dir exports/phrases04/fixtures
 """
 
 import argparse
@@ -153,7 +153,7 @@ def main() -> None:
     p.add_argument("--parquet", nargs="+", required=True, type=Path)
     p.add_argument("--concat", action="store_true", help="also write all inputs as one phrase")
     p.add_argument("--train-csv", default="data/asl-is-lmdb/train.csv")
-    p.add_argument("--export-dir", type=Path, default=Path("exports/phrases01"))
+    p.add_argument("--export-dir", type=Path, default=Path("exports/phrases04"))
     p.add_argument("--out-dir", type=Path, required=True)
     p.add_argument("--max-frames", type=int, default=384)
     args = p.parse_args()

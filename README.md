@@ -175,8 +175,10 @@ notebooks/             # by approach — see notebooks/README.md
   first_place/         #   1st-place Kaggle solution reproduced on our signer fold
 archive/research/      # superseded prototypes, feature experiments and tools (kept for reference)
 data/                  # datasets (gitignored) — see below
-exports/               # ONNX exports for the browser (gitignored)
-results/               # run outputs pulled from RunPod / Kaggle (gitignored)
+exports/               # browser-ready model (gitignored): phrases04/ = ONNX + labels + preprocess spec +
+                       #   sign_reliability.json + fixtures/
+results/               # run outputs (gitignored), by approach: isolated/, pretrain/, phrases/<run>/,
+                       #   evaluation/ (wlasl, error_review, signer_diagnostics); kaggle/ = download inbox
 docs/                  # local notes (gitignored); docs/experiments/ = the experiment log (tracked)
 
 research/
@@ -326,9 +328,9 @@ PYTHONPATH=research/models uv run python -m islr.phrases.breakdown \
 
 # ONNX export (+ labels.json, preprocess.json) and browser test fixtures
 PYTHONPATH=research/models uv run --with onnx --with onnxruntime --with onnxscript \
-  python -m islr.export.export_onnx --checkpoint <best_phrases.pth> --out-dir exports/phrases01
+  python -m islr.export.export_onnx --checkpoint <best_phrases.pth> --out-dir exports/phrases04
 PYTHONPATH=research/models uv run --with onnxruntime python -m islr.export.browser_fixtures \
-  --parquet <competition parquets> --concat --out-dir exports/phrases01/fixtures
+  --parquet <competition parquets> --concat --out-dir exports/phrases04/fixtures
 ```
 
 ### VQ-VAE Pipeline
