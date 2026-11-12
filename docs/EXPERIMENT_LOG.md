@@ -1085,7 +1085,7 @@ per-frame log-probability over the clip, blank excluded) and writes per-clip CSV
   (80 %); clips where a hand is visible > 90 % of frames score lower (53 %), likely hands held up
   before / after the sign.
 
-### phrases03: WLASL training signers mixed into phrase training (2026-11-11, running)
+### phrases03: WLASL training signers mixed into phrase training (2026-11-11)
 `build_wlasl_lmdb.signer_split`: WLASL signers sorted by clip count, dealt snake-wise → train half
 33 signers / 847 clips, test half 34 / 824 clips; both have all 206 signs and 40 / 42 % two-hand
 clips. `train_phrases --extra-data-dir {WLASL_DIR} --extra-frac 0.15`: 15 % of phrases come from WLASL
@@ -1095,6 +1095,36 @@ the rest from the 18 ASL Signs training signers as before; phrases01's recipe ot
 what the held-out test half measures. Baselines on the **test half**: classifier 66.7 %; phrases01
 exact 44.2 % / pooled 57.0 % (two-hand clips exact 25.8 %); phrases02 44.2 % / 57.8 %.
 Kaggle notebook `islr-phrases03-wlasl` (commit 6ede152).
+
+**Result** (T4 fp16, 3m53s/epoch, early stop at 28, best epoch 22). Paired on the 824 test-half
+clips; phrases01 rescored in the same notebook = the local CSV clip for clip.
+
+| WLASL test half (34 unseen signers) | phrases01 | phrases03 | paired |
+|---|---|---|---|
+| exact decode | 44.2 % | **80.1 %** | +313 / −17, p 1e-71 |
+| pooled top-1 / top-5 | 57.0 / 75.6 % | 81.2 / 94.5 % | top-1 +219 / −20 |
+| two-hand clips (345), exact | 25.8 % | 76.8 % | p 2e-45 (classifier 53.0 %) |
+| one-hand clips (479), exact | 57.4 % | 82.5 % | p 9e-28 (classifier 76.6 %) |
+| aspect correction undone | 24.3 % | 39.2 % | |
+| decodes with 0 / 1 / 2+ signs | 35 / 605 / 184 | 0 / 811 / 13 | |
+| one-hand mode on two-hand clips | 25.8 → 50.5 % (helps) | 76.8 → 57.1 % (**hurts**, +13 / −81) | |
+| signers with ≥ 20 clips improved | | 11 / 11 | |
+| ASL Signs synthetic val WER | 0.294 | 0.296 | in-domain unchanged |
+
+Also beats the fold0_graph classifier on the same clips (81.2 vs 66.7 %, +166 / −47).
+**Leakage check:** no shared video ids, no identical clips across halves, and a test clip's nearest
+same-sign train-half clip (32-frame upper-body trajectory) is no closer than its nearest other-signer
+test-half clip (median 2.22 vs 2.10; none < 0.05). WLASL signer ids could still merge or split real
+people; not checkable here.
+
+What this does and does not show: ~850 clips (≈ 4 per sign) gave +36 points on new WLASL signers
+without costing anything in-domain, and the model now uses a second hand (two-hand clips 26 → 77 %;
+removing the base hand now hurts). But the test signers come from the **same websites / recording
+setups** as the train half, so part of the gain is adaptation to WLASL's recording style (one-hand
+clips also rose 57 → 83 %, single-sign decodes 73 → 98 %). It is evidence that a small amount of
+two-handed, differently-recorded data matters a lot — not yet that the model works on a webcam.
+Consequences: one-hand mode should be off for phrases03; exported to `exports/phrases03/`
+(ONNX parity 1.06e-4, 32/32 argmax) for live testing in the browser.
 
 ---
 
