@@ -36,6 +36,7 @@ import zlib
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
@@ -68,6 +69,8 @@ class SyntheticPhraseDataset(Dataset):
         holdout_frac: share of multi-sign gloss sequences (by a fixed hash of the
                      sequence) never drawn for training; validation reports them
                      separately as unseen combinations. Single signs are never held out.
+        signer_weights: {signer: weight} for drawing a phrase's signer (normalised);
+                     None = uniform over signers.
     """
 
     def __init__(
@@ -85,6 +88,7 @@ class SyntheticPhraseDataset(Dataset):
         min_detected: int = 4,
         bone_aug: Optional[Tuple[float, float, float]] = None,
         holdout_frac: float = 0.1,
+        signer_weights: Optional[Dict[str, float]] = None,
     ):
         self.source = source
         self.idx2sign = idx2sign
@@ -110,6 +114,10 @@ class SyntheticPhraseDataset(Dataset):
         self.available = {
             p: {idx2sign[s] for (q, s) in self.clips if q == p} for p in self.signers
         }
+        self.signer_p = None
+        if signer_weights:
+            w = np.asarray([signer_weights[p] for p in self.signers], dtype=float)
+            self.signer_p = w / w.sum()
         self.raw_lengths = np.asarray(source.lengths)
         self.set_epoch(0)
 
@@ -129,7 +137,8 @@ class SyntheticPhraseDataset(Dataset):
         rng = np.random.default_rng([self.seed, epoch])
         specs = []
         for _ in range(self.n_phrases):
-            signer = self.signers[rng.integers(len(self.signers))]
+            signer = (self.signers[rng.integers(len(self.signers))] if self.signer_p is None
+                      else self.signers[rng.choice(len(self.signers), p=self.signer_p)])
             while True:
                 glosses, english = self.grammar.sample(
                     rng, self.available[signer], self.random_frac, self.max_signs
@@ -255,6 +264,22 @@ class SyntheticPhraseDataset(Dataset):
                 "english": english, "clips": clips, "kind": kind}
 
 
+class ConcatSource:
+    """Several clip sources (ASLDataset-like: df, lengths, _load_coords) seen as one, e.g.
+    ASL Signs training signers + WLASL training signers. Signer ids must not collide
+    (WLASL ids are offset by 900000)."""
+
+    def __init__(self, *sources):
+        self.sources = sources
+        self.df = pd.concat([s.df[["participant_id", "sign"]] for s in sources], ignore_index=True)
+        self.lengths = np.concatenate([np.asarray(s.lengths) for s in sources])
+        self._starts = np.cumsum([0] + [len(s.df) for s in sources])
+
+    def _load_coords(self, j: int) -> torch.Tensor:
+        k = int(np.searchsorted(self._starts, j, side="right")) - 1
+        return self.sources[k]._load_coords(j - int(self._starts[k]))
+
+
 def _hold_fill(block: torch.Tensor, present: torch.Tensor) -> torch.Tensor:
     """Frames where present is False take the nearest earlier present frame
     (the first present frame for leading ones)."""
@@ -268,7 +293,7 @@ def phrase_datasets(train_source, val_source, idx2sign: Dict[int, str], n_train:
                     n_val: int, seed: int = 0, **kw) -> Tuple["SyntheticPhraseDataset", "SyntheticPhraseDataset"]:
     """Train phrases from training signers (augmented, redrawn per epoch via
     set_epoch) and a fixed set of validation phrases from held-out signers."""
-    aug_only = {"bone_aug", "tempo"}
+    aug_only = {"bone_aug", "tempo", "signer_weights"}
     train = SyntheticPhraseDataset(train_source, idx2sign, n_train, seed, augment=True, **kw)
     val = SyntheticPhraseDataset(val_source, idx2sign, n_val, seed + 1000, augment=False,
                                  **{k: v for k, v in kw.items() if k not in aug_only})

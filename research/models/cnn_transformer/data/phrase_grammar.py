@@ -416,7 +416,7 @@ class PhraseGrammar:
                 if len(g) <= max_len and all(x != y for x, y in zip(g, g[1:])):
                     return g, e
         words = sorted(avail)
-        n = int(rng.integers(1, max_len + 1))
+        n = int(rng.integers(1, max_len + 1)) if len(words) > 1 else 1  # no immediate repeats
         g: List[str] = []
         while len(g) < n:
             w = words[rng.integers(len(words))]

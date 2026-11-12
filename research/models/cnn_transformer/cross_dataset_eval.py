@@ -2,7 +2,9 @@
 
 Works for both model kinds:
   - phrase (CTC) checkpoints (phrases_meta.json next to the .pth): a clip is correct
-    when the greedy decode of its hand-trimmed segment is exactly the one sign;
+    when the greedy decode of its hand-trimmed segment is exactly the one sign. Also
+    scored like a classifier ("pooled": each sign's best per-frame log-probability
+    over the clip, blank excluded → top-1 / top-5) and leniently (decode contains it);
   - isolated classifiers (best_phase1.pth): top-1 / top-5 of the 250-way head.
 The isolated path subsamples to --iso-max-frames before Δ1, as ASLDataset does at
 evaluation; the phrase path trims to the hand span and caps at --max-frames.
@@ -10,7 +12,8 @@ evaluation; the phrase path trims to the hand span and caps at --max-frames.
 Reports overall accuracy (aspect-corrected as stored, and with the correction undone
 from `aspect_k` to show what framing costs), identical vs synonym glosses, clips with
 vs without both hands, one-hand mode (less active hand removed) on two-hand clips with
-an exact McNemar test, and per-signer spread. --out writes the numbers as JSON.
+an exact McNemar test, and per-signer spread. --out writes the numbers as JSON,
+--per-clip one row per clip (CSV) for paired comparisons between checkpoints.
 
 Usage:
   PYTHONPATH=research/models uv run python -m cnn_transformer.cross_dataset_eval \
@@ -32,6 +35,7 @@ import torch
 
 from . import config as C
 from .data._cache_keys import lmdb_key
+from .data.build_wlasl_lmdb import signer_split
 from .error_review import load_model
 from .export_onnx import clip_features, load_ctc_model
 
@@ -86,6 +90,10 @@ def main() -> None:
     p.add_argument("--iso-max-frames", type=int, default=128)
     p.add_argument("--max-frames", type=int, default=384)
     p.add_argument("--out", type=Path)
+    p.add_argument("--per-clip", type=Path, help="CSV: one row per clip")
+    p.add_argument("--signers", choices=["all", "train", "test"], default="all",
+                   help="WLASL signer half (build_wlasl_lmdb.signer_split); use test for a "
+                        "model trained with --extra-data-dir")
     args = p.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -100,21 +108,27 @@ def main() -> None:
     blank = len(sign2idx)
 
     @torch.no_grad()
-    def predict(x: np.ndarray) -> tuple[bool, bool]:
-        """(top-1 correct, top-5 correct) for the clip's label y (closure var)."""
+    def predict(x: np.ndarray) -> dict:
+        """Scores for the clip's label y (closure var): correct, top5 [, pooled, decode]."""
         x = _subsample(_trim(x), args.max_frames) if phrase else _subsample(x, args.iso_max_frames)
         t = torch.from_numpy(x[None]).float().to(device)
         out = model(t, torch.ones(1, len(x), dtype=torch.bool, device=device))[0]
-        if phrase:
-            hyp, prev = [], None
-            for c in out.argmax(-1).tolist():
-                if c != prev and c != blank:
-                    hyp.append(c)
-                prev = c
-            return hyp == [y], hyp == [y]
-        return out.argmax().item() == y, y in out.topk(5).indices.tolist()
+        if not phrase:
+            return {"correct": out.argmax().item() == y, "top5": y in out.topk(5).indices.tolist(),
+                    "pred": out.argmax().item()}
+        hyp, prev = [], None
+        for c in out.argmax(-1).tolist():
+            if c != prev and c != blank:
+                hyp.append(c)
+            prev = c
+        pooled = out.float().log_softmax(-1)[:, :blank].max(0).values
+        top5 = pooled.topk(5).indices.tolist()
+        return {"correct": hyp == [y], "top5": y in top5, "pooled": top5[0] == y,
+                "contains": y in hyp, "n_tokens": len(hyp), "pred": top5[0]}
 
     df = pd.read_csv(args.data_dir / "train.csv")
+    if args.signers != "all":
+        df = df[df["participant_id"].isin(signer_split(df)[args.signers])]
     lmdb_path = args.lmdb_path or args.data_dir / "wlasl.lmdb.mdb"
     env = lmdb.open(str(lmdb_path), subdir=False, readonly=True, lock=False,
                     map_size=os.path.getsize(lmdb_path) + (1 << 28))
@@ -127,22 +141,29 @@ def main() -> None:
             raw = coords.clone()
             raw[:, 0::3] /= r.aspect_k
             raw[:, 2::3] /= r.aspect_k
-            top1, top5 = predict(x)
-            rows.append(dict(signer=r.participant_id, synonym=bool(r.synonym),
-                             two_hands=r.both_hands > 0, correct=top1, top5=top5,
-                             uncorrected=predict(clip_features(raw).numpy())[0],
-                             one_hand=predict(one_hand(x))[0]))
+            pres = x[:, -2:] > 0
+            rows.append(dict(path=r.path, sign=r.sign, signer=r.participant_id,
+                             synonym=bool(r.synonym), two_hands=r.both_hands > 0,
+                             n_frames=len(x), hand_frac=float(pres.any(1).mean()),
+                             aspect_k=r.aspect_k, ratio_raw=r.ratio_raw, fps=r.fps,
+                             source=r.source, **predict(x),
+                             uncorrected=predict(clip_features(raw).numpy())["correct"],
+                             one_hand=predict(one_hand(x))["correct"]))
     res = pd.DataFrame(rows)
 
     two = res[res["two_hands"]]
     per_signer = res.groupby("signer")["correct"].mean()
     summary = {
         "checkpoint": str(args.checkpoint),
+        "wlasl_signers": args.signers,
         "kind": "phrase (single-sign exact decode)" if phrase else "isolated (top-1)",
         "clips": len(res), "signs": int(df["sign"].nunique()), "signers": int(res["signer"].nunique()),
         "accuracy": float(res["correct"].mean()),
         "accuracy_uncorrected": float(res["uncorrected"].mean()),
-        "top5": None if phrase else float(res["top5"].mean()),
+        "top5": float(res["top5"].mean()),
+        "pooled_top1": float(res["pooled"].mean()) if phrase else None,
+        "decode_contains": float(res["contains"].mean()) if phrase else None,
+        "decode_tokens": {int(k): int(v) for k, v in res["n_tokens"].value_counts().sort_index().items()} if phrase else None,
         "identical_gloss": float(res.loc[~res["synonym"], "correct"].mean()),
         "synonym_gloss": float(res.loc[res["synonym"], "correct"].mean()),
         "two_hand_clips": {"n": len(two), "accuracy": float(two["correct"].mean())},
@@ -156,6 +177,9 @@ def main() -> None:
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(summary, indent=2))
+    if args.per_clip:
+        args.per_clip.parent.mkdir(parents=True, exist_ok=True)
+        res.to_csv(args.per_clip, index=False)
 
 
 if __name__ == "__main__":

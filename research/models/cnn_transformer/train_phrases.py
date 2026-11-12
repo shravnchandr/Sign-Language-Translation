@@ -45,15 +45,17 @@ import time
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from .data.augmentation import AdvancedAugmentation
-from .data.dataset import BucketBatchSampler, get_data_loaders, worker_context
+from .data.build_wlasl_lmdb import signer_split
+from .data.dataset import ASLDataset, BucketBatchSampler, get_data_loaders, worker_context
 from .data.fingerspelling_dataset import collate_ctc
-from .data.phrase_dataset import phrase_datasets
+from .data.phrase_dataset import ConcatSource, phrase_datasets
 from .model import GraphConformer, LandmarkConformer
 from .pretrain_fingerspelling import _fmt_time, edit_distance, greedy_decode
 
@@ -140,6 +142,26 @@ def evaluate(model, loader, val_ds, device, amp_dtype, use_amp, blank, criterion
     }
 
 
+def extra_source(args, is_train, sign2idx):
+    """ASL Signs training clips + the "train" half of WLASL's signers (signer_split), and
+    signer weights so that --extra-frac of the phrases come from WLASL signers (each in
+    proportion to its clips; ASL Signs signers uniform, as without extra data)."""
+    df = pd.read_csv(Path(args.extra_data_dir) / "train.csv")
+    split = signer_split(df)
+    df = df[df["participant_id"].isin(split["train"])].copy()
+    df["sign"] = df["sign"].map(sign2idx)
+    extra = ASLDataset(df, args.extra_data_dir, lmdb_path=args.extra_lmdb_path
+                       or str(Path(args.extra_data_dir) / "wlasl.lmdb.mdb"), max_frames=1 << 20)
+    is_signers = is_train.df["participant_id"].astype(str).unique()
+    clips = extra.df["participant_id"].astype(str).value_counts()
+    weights = {s: (1 - args.extra_frac) / len(is_signers) for s in is_signers}
+    weights.update({s: args.extra_frac * n / clips.sum() for s, n in clips.items()})
+    print(f"Extra clips: {len(df):,} from {len(clips)} WLASL signers ({extra.df['sign'].nunique()} "
+          f"signs; {(df['both_hands'] > 0).mean():.0%} with both hands) → {args.extra_frac:.0%} "
+          f"of phrases; test signers held out: {len(split['test'])}")
+    return ConcatSource(is_train, extra), weights
+
+
 def train(args):
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -160,12 +182,15 @@ def train(args):
     # Clip sources: the usual signer split; lengths uncapped (max_frames is huge).
     tl, vl, _ = get_data_loaders(args.data_dir, lmdb_path=args.lmdb_path, num_workers=0,
                                  val_fold=args.val_fold, n_folds=args.n_folds, max_frames=1 << 20)
+    train_source, signer_weights = tl.dataset, None
+    if args.extra_data_dir:
+        train_source, signer_weights = extra_source(args, tl.dataset, sign2idx)
     phrase_kw = dict(max_frames=args.max_frames, random_frac=args.random_frac,
                      max_signs=args.max_signs, transition=(args.trans_min, args.trans_max),
                      min_detected=args.min_detected, holdout_frac=args.holdout_frac)
     train_ds, val_ds = phrase_datasets(
-        tl.dataset, vl.dataset, idx2sign, args.train_phrases, args.val_phrases, seed=args.seed,
-        tempo=(args.tempo_min, args.tempo_max),
+        train_source, vl.dataset, idx2sign, args.train_phrases, args.val_phrases, seed=args.seed,
+        tempo=(args.tempo_min, args.tempo_max), signer_weights=signer_weights,
         bone_aug=(args.bone_aug_prob, args.bone_aug_hand, args.bone_aug_bone), **phrase_kw,
     )
     if args.max_val_signers:  # quick runs: keep the phrases of the first k held-out signers
@@ -328,6 +353,11 @@ def main():
     p.add_argument("--bone-aug-prob", type=float, default=0.0)
     p.add_argument("--bone-aug-hand", type=float, default=0.15)
     p.add_argument("--bone-aug-bone", type=float, default=0.1)
+    p.add_argument("--extra-data-dir", default="",
+                   help="WLASL LMDB folder: mix its 'train' signer half into training")
+    p.add_argument("--extra-lmdb-path", default="")
+    p.add_argument("--extra-frac", type=float, default=0.15,
+                   help="share of training phrases from the extra signers")
     train(p.parse_args())
 
 

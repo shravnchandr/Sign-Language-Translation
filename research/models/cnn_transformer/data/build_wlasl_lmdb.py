@@ -73,6 +73,22 @@ def aspect_factor(coords: np.ndarray) -> tuple[float, float]:
     return (k if _K_RANGE[0] <= k <= _K_RANGE[1] else 1.0), raw
 
 
+def signer_split(df: pd.DataFrame) -> dict:
+    """Fixed WLASL signer split {"train": [...], "test": [...]} with balanced clip counts.
+
+    Signers sorted by (clips desc, id) are dealt snake-wise (train, test, test, train, ...),
+    so the two halves get about the same number of clips and of signers. "train" signers
+    may be mixed into training (train_phrases --extra-data-dir); "test" signers stay a
+    cross-dataset test (cross_dataset_eval --signers test).
+    """
+    counts = df.groupby("participant_id").size()
+    order = sorted(counts.index, key=lambda s: (-counts[s], s))
+    split = {"train": [], "test": []}
+    for i, s in enumerate(order):
+        split["train" if i % 4 in (0, 3) else "test"].append(int(s))
+    return split
+
+
 def _process(args: tuple) -> tuple:
     """Worker: parquet → corrected coords bytes + stats (self-contained imports)."""
     import numpy as np
