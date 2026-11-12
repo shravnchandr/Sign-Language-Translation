@@ -118,8 +118,6 @@ def push(a: argparse.Namespace) -> None:
                                capture_output=True, text=True).stdout.strip()
         if not ahead:
             sys.exit(f"HEAD {ref[:7]} is not pushed — the notebook clones from GitHub. Push first.")
-    if not a.command or a.command[0] == "--":
-        a.command = a.command[1:]
     if not a.command:
         sys.exit("missing: -- <module> [args]")
     slug = f"{user()}/islr-{a.name}"
@@ -146,11 +144,13 @@ def main() -> None:
     s.add_argument("--accelerator", default="NvidiaTeslaT4")
     s.add_argument("--ref", help="git commit/branch to clone (default: local HEAD, must be pushed)")
     s.add_argument("--dataset", action="append", default=[], help="extra dataset source")
-    s.add_argument("command", nargs=argparse.REMAINDER)
     for name in ("status", "output"):
         s = sub.add_parser(name)
         s.add_argument("name")
-    a = p.parse_args()
+    argv = sys.argv[1:]
+    cut = argv.index("--") if "--" in argv else len(argv)  # everything after -- is the command
+    a = p.parse_args(argv[:cut])
+    a.command = argv[cut + 1 :]
     if a.action == "push":
         push(a)
     elif a.action == "status":
