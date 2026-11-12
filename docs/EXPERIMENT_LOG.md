@@ -962,13 +962,17 @@ hands are hard either way (~44 % vs 62 % overall). Two-handed signs need data wi
 **Other datasets checked (2026-11-11):**
 - **WLASL** (our own `shravnchandr/preprocess-wlasl-mediapipe` Kaggle notebook: legacy MediaPipe
   Holistic, model_complexity 1, confidence 0.5, competition parquet format; 11,980 clips, 2,000
-  signs; 233 of our 250 signs, 1,671 clips, median 7 per sign). Sample of 31 clips: **both hands
+  signs; its 233 shared glosses map onto 206 of our 250 signs — 32 via synonyms such as father → dad,
+  cop → police, a few uncertain (sit → chair, suppose → if, upstairs → up) — 1,671 clips, median 7 per sign). Sample of 31 clips: **both hands
   tracked** — two-handed signs have both hands in 29–53 % of frames (bath 0.49, book 0.43, car 0.52,
   chocolate 0.53, clean 0.45, cloud 0.29; every clip has some), the one-handed APPLE 0 %. Same
   Holistic as the competition yet both hands → the 2 % is specific to the ASL Signs data.
   Framing differs: shoulder ratio 0.94 (p10–p90 0.76–1.06; ASL Signs 0.40) — landscape video, as
   the aspect estimate predicts (≈ 0.9 for 16:9) — and signers are farther away (shoulder width 0.25
-  of the frame vs 0.56). Usable only after per-clip aspect correction (x and z × ratio / 0.40).
+  of the frame vs 0.56). Usable only after per-clip aspect correction. `data/build_wlasl_lmdb.py` (run on Kaggle by
+  `notebooks/kaggle/build-wlasl-lmdb/`) writes an ASL-Signs-compatible LMDB with x and z scaled per
+  clip so the shoulder ratio is 0.40 (local smoke test, 27 clips: median k 2.44, ratio 0.400 after;
+  phrase model single-sign exact 7/27 uncorrected → 8/27 corrected — too few clips to read).
   Full output ≈ 19 GB; the overlapping signs ≈ 2.7 GB (`kaggle kernels output --file-pattern`,
   rate-limited — better built into an LMDB on Kaggle). Licence: WLASL is C-UDA (computational use).
 - **MS-ASL** (`shravnchandr/ms-asl-nose-reference-mediapipe-pose`, private, 9.9 GB): not raw

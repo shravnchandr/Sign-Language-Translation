@@ -40,6 +40,7 @@ bash run_pipeline_cnn_transformer.sh --skip-pretrain --val-fold 0 --arch graph  
 bash run_pipeline_cnn_transformer.sh --skip-pretrain --val-fold 0 --arch graph --bone-aug-prob 0.5   # + hand-proportion augmentation (default off)
 PYTHONPATH=research/models uv run python -m cnn_transformer.phrase_breakdown --checkpoint <best_phrases.pth> --iso-checkpoint <fold0 best_phase1.pth> --out results/<run>/breakdown.txt   # full val breakdown: WER/ops by length/kind/signer, downsampled vs full, emission timing, controlled single-sign vs classifier (CPU, ~15 min)
 PYTHONPATH=research/models uv run --with onnx --with onnxruntime --with onnxscript python -m cnn_transformer.export_onnx --checkpoint <best_phrases.pth> --out-dir exports/phrases01   # phrase CTC model → ONNX (onnxruntime-web) + labels.json + preprocess.json; verified against PyTorch on LMDB clips (CPU)
+uvx --with six kaggle kernels push -p notebooks/kaggle/build-wlasl-lmdb   # WLASL → ASL-Signs-compatible LMDB on Kaggle (CPU; clones this repo, runs data/build_wlasl_lmdb.py); status / output: uvx --with six kaggle kernels status|output shravnchandr/build-wlasl-lmdb
 PYTHONPATH=research/models uv run --with onnxruntime python -m cnn_transformer.browser_fixtures --parquet <competition parquets> --concat --out-dir exports/phrases01/fixtures   # golden fixtures for the browser port (raw frames → trim / features / logits / decode)
 bash runpod_results.sh send run005       # on the pod, before stopping it (disk is erased on stop)
 bash runpod_results.sh receive <code>    # on your machine → runs/run005/ (gitignored)
@@ -152,6 +153,7 @@ End-to-end supervised classification. Optional CTC pre-training on ASL Fingerspe
 | `data/dataset.py` | `ASLDataset`, `BucketBatchSampler`, `get_data_loaders` |
 | `data/augmentation.py` | `AdvancedAugmentation` (7 types), `mixup_batch` |
 | `data/preprocessing.py` | `frame_stacked_data` — parquet → numpy array |
+| `data/build_wlasl_lmdb.py` + `data/wlasl_gloss_map.json` | WLASL landmark parquets (shared signs: 233 glosses → 206 signs, `--strict` = identical names) → ASL-Signs-compatible LMDB (same `frame_stacked_data`, same keys) with per-clip aspect correction (x, z scaled so shoulder drop / width = 0.40; WLASL is landscape) and train.csv (participant_id = 900000 + signer, fps, source, synonym, aspect_k, both_hands) |
 | `data/build_lmdb.py` | One-time LMDB archive builder (parallelised — `os.cpu_count()` workers by default) |
 | `data/build_fingerspelling_lmdb.py` | Fingerspelling LMDB builder — parquet-file-level parallelism (one worker per ~1 GB file) |
 | `data/fingerspelling_dataset.py` | `FingerspellingDataset`, `collate_ctc`, `load_char_map` — CTC pre-training data pipeline |
