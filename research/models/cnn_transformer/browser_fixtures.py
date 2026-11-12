@@ -152,7 +152,7 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--parquet", nargs="+", required=True, type=Path)
     p.add_argument("--concat", action="store_true", help="also write all inputs as one phrase")
-    p.add_argument("--train-csv", default="data/Isolated_ASL_Recognition/train.csv")
+    p.add_argument("--train-csv", default="data/asl-is-lmdb/train.csv")
     p.add_argument("--export-dir", type=Path, default=Path("exports/phrases01"))
     p.add_argument("--out-dir", type=Path, required=True)
     p.add_argument("--max-frames", type=int, default=384)

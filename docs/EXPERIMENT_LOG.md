@@ -1194,6 +1194,14 @@ signers; live webcam calibration is unmeasured.
 
 ---
 
+### Repository reorganised (2026-11-12)
+Shell pipelines → `scripts/`; root Kaggle notebooks and the WLASL MediaPipe notebook → `notebooks/kaggle/`;
+superseded notebooks / prototypes / tools → `archive/`; local ASL Signs LMDB `IS_LMDB_Database.mdb` →
+`data/asl-is-lmdb/is.lmdb.mdb` (+ train.csv, sign map; same layout as the Kaggle dataset). Paths in the
+entries above are as they were at the time.
+
+---
+
 ## Pending Ideas (not yet implemented)
 
 ### High priority

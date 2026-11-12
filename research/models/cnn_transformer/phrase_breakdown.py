@@ -82,8 +82,8 @@ def main() -> None:
     p.add_argument("--iso-checkpoint", help="isolated classifier for the single-sign comparison")
     p.add_argument("--iso-n-heads", type=int, default=4)
     p.add_argument("--iso-max-frames", type=int, default=128)
-    p.add_argument("--data-dir", default="data/Isolated_ASL_Recognition")
-    p.add_argument("--lmdb-path", default="IS_LMDB_Database.mdb")
+    p.add_argument("--data-dir", default="data/asl-is-lmdb")
+    p.add_argument("--lmdb-path", default="data/asl-is-lmdb/is.lmdb.mdb")
     p.add_argument("--n-folds", type=int, default=7)
     # Must match the training run (train_phrases.py defaults).
     p.add_argument("--seed", type=int, default=42)

@@ -16,8 +16,8 @@ Output JSON:
 
 Usage:
   PYTHONPATH=research/models uv run python -m cnn_transformer.sign_reliability \
-    --checkpoint <best_phrases.pth> --data-dir data/Isolated_ASL_Recognition \
-    --lmdb-path IS_LMDB_Database.mdb --wlasl-dir data/wlasl-lmdb --out exports/phrases04/sign_reliability.json
+    --checkpoint <best_phrases.pth> --data-dir data/asl-is-lmdb \
+    --lmdb-path data/asl-is-lmdb/is.lmdb.mdb --wlasl-dir data/wlasl-lmdb --out exports/phrases04/sign_reliability.json
 """
 
 import argparse
@@ -103,8 +103,8 @@ def summarise(res: pd.DataFrame, idx2sign: dict) -> dict:
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--checkpoint", required=True, type=Path)
-    p.add_argument("--data-dir", default="data/Isolated_ASL_Recognition", type=Path)
-    p.add_argument("--lmdb-path", default="IS_LMDB_Database.mdb", type=Path)
+    p.add_argument("--data-dir", default="data/asl-is-lmdb", type=Path)
+    p.add_argument("--lmdb-path", default="data/asl-is-lmdb/is.lmdb.mdb", type=Path)
     p.add_argument("--val-fold", type=int, default=0)
     p.add_argument("--n-folds", type=int, default=7)
     p.add_argument("--wlasl-dir", type=Path, help="WLASL LMDB folder: also score its held-out signer half")

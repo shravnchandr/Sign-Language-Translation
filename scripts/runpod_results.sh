@@ -6,18 +6,18 @@
 # with a one-time code; no SSH setup needed.
 #
 # On the pod (bundles checkpoints/ and logs/, prints a code, waits for receiver):
-#   bash runpod_results.sh send                  # name defaults to a timestamp
-#   bash runpod_results.sh send run005           # name the bundle
-#   bash runpod_results.sh send run005 extra.txt # add more paths
+#   bash scripts/runpod_results.sh send                  # name defaults to a timestamp
+#   bash scripts/runpod_results.sh send run005           # name the bundle
+#   bash scripts/runpod_results.sh send run005 extra.txt # add more paths
 #
 # On your machine (downloads and unpacks into runs/<bundle-name>/):
-#   bash runpod_results.sh receive <code>
+#   bash scripts/runpod_results.sh receive <code>
 #
 # runpodctl: preinstalled on RunPod pods. On macOS:
 #   brew install runpod/runpodctl/runpodctl
 
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
@@ -43,7 +43,7 @@ send)
     echo "[send] $BUNDLE ($(du -h "$BUNDLE" | cut -f1)) — contents:"
     tar tzf "$BUNDLE" | grep -v '/$' | sed 's/^/  /'
     echo ""
-    echo "[send] On your machine, run:  bash runpod_results.sh receive <code shown below>"
+    echo "[send] On your machine, run:  bash scripts/runpod_results.sh receive <code shown below>"
     echo "       (this waits until the transfer completes; keep the pod running)"
     runpodctl send "$BUNDLE"
     rm -f "$BUNDLE"
@@ -51,7 +51,7 @@ send)
 
 receive)
     CODE="${1:-}"
-    [ -n "$CODE" ] || die "usage: bash runpod_results.sh receive <code>"
+    [ -n "$CODE" ] || die "usage: bash scripts/runpod_results.sh receive <code>"
     mkdir -p runs
     STAGE="$(mktemp -d runs/.incoming.XXXXXX)"
     trap 'rm -rf "$STAGE"' EXIT

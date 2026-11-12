@@ -3,9 +3,9 @@
 # Model code lives in research/models/vqvae_seq2seq/
 #
 # Usage:
-#   bash run_pipeline_vqvae_seq2seq.sh
-#   bash run_pipeline_vqvae_seq2seq.sh --vqvae-epochs 10 --translator-epochs 10  # quick test
-#   bash run_pipeline_vqvae_seq2seq.sh --skip-phase1  # if VQ-VAE checkpoint already exists
+#   bash scripts/run_pipeline_vqvae_seq2seq.sh
+#   bash scripts/run_pipeline_vqvae_seq2seq.sh --vqvae-epochs 10 --translator-epochs 10  # quick test
+#   bash scripts/run_pipeline_vqvae_seq2seq.sh --skip-phase1  # if VQ-VAE checkpoint already exists
 
 set -e  # stop on any error
 

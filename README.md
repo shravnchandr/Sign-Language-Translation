@@ -163,6 +163,16 @@ Spatial-Temporal Graph Convolutional Network. Legacy baseline, superseded by `--
 ## Project Structure
 
 ```
+research/models/       # model code (PYTHONPATH=research/models) — see tree below
+scripts/               # RunPod / local pipelines: run_pipeline_*.sh, setup_runpod.sh, runpod_results.sh
+notebooks/kaggle/      # Kaggle notebooks + runners: kaggle_run.py (any module on a Kaggle GPU),
+                       #   extract_aslcitizen.py, LMDB / TFRecord builders, WLASL MediaPipe extraction
+archive/               # superseded exploratory notebooks, prototypes and tools (kept for reference)
+data/                  # datasets (gitignored) — see below
+exports/               # ONNX exports for the browser (gitignored)
+results/               # run outputs pulled from RunPod / Kaggle (gitignored)
+docs/                  # local notes (gitignored); EXPERIMENT_LOG.md is tracked
+
 research/
 ├── models/
 │   ├── cnn_transformer/         # LandmarkConformer (end-to-end)
@@ -175,6 +185,8 @@ research/
 │   │   ├── browser_fixtures.py         # Golden test cases for a browser port
 │   │   ├── error_review.py             # HTML kit to review val errors
 │   │   ├── signer_diagnostics.py       # Per-signer data stats vs accuracy
+│   │   ├── cross_dataset_eval.py       # Score a checkpoint on WLASL's unseen signers
+│   │   ├── sign_reliability.py         # Per-sign accuracy / confusions / score thresholds for the app
 │   │   ├── model/
 │   │   │   ├── landmark_conformer.py   # Main model
 │   │   │   ├── graph_conformer.py      # GraphConformer (--arch graph)
@@ -185,6 +197,7 @@ research/
 │   │       ├── dataset.py              # ASLDataset, BucketBatchSampler, get_data_loaders
 │   │       ├── augmentation.py         # AdvancedAugmentation (7 types), mixup_batch
 │   │       ├── build_lmdb.py           # One-time LMDB archive builder
+│   │       ├── build_wlasl_lmdb.py     # WLASL → ASL-Signs-compatible LMDB (+ all-gloss mode)
 │   │       ├── build_fingerspelling_lmdb.py  # Fingerspelling LMDB builder
 │   │       ├── fingerspelling_dataset.py     # FingerspellingDataset, collate_ctc
 │   │       ├── phrase_grammar.py       # ASL-style gloss templates over the 250 signs
@@ -210,13 +223,12 @@ research/
 │       └── st_gcn_model.py
 
 data/
-├── asl-is-lmdb/                 # ASL Signs LMDB (download below)
+├── asl-is-lmdb/                 # ASL Signs LMDB: is.lmdb.mdb + train.csv + sign map (download below)
 ├── asl-fs-lmdb/                 # Fingerspelling LMDB (download below)
+├── wlasl-lmdb/                  # WLASL, 206 shared signs (private; cross-dataset test)
+├── wlasl-all-lmdb/              # WLASL, all 2,000 glosses (private; wider-vocabulary training)
 ├── Isolated_ASL_Recognition/    # Raw ASL Signs parquets (only needed to rebuild LMDB)
 └── ASL_Fingerspelling_Recognition/ # Raw Fingerspelling parquets (189 GB, rarely needed)
-
-run_pipeline_cnn_transformer.sh  # LandmarkConformer: LMDB build → pre-train → fine-tune
-run_pipeline_vqvae_seq2seq.sh    # VQ-VAE pipeline: Phase 1 → tokenize → Phase 2
 ```
 
 ---
@@ -239,6 +251,7 @@ uv sync
 kaggle datasets download shravnchandr/asl-is-lmdb -p data/asl-is-lmdb --unzip
 kaggle datasets download shravnchandr/asl-fs-lmdb -p data/asl-fs-lmdb --unzip
 kaggle datasets download shravnchandr/wlasl-lmdb -p data/wlasl-lmdb --unzip   # private; WLASL, 206 shared signs, aspect-corrected (cross-dataset test)
+kaggle datasets download shravnchandr/wlasl-all-lmdb -p data/wlasl-all-lmdb --unzip   # private; WLASL, all 2,000 glosses (2,017 labels), wlasl_half split column (train_phrases --vocab)
 ```
 
 **Raw competition data** (only needed to rebuild LMDBs or run the VQ-VAE pipeline):
@@ -263,8 +276,8 @@ Extract to `data/Isolated_ASL_Recognition/` and `data/ASL_Fingerspelling_Recogni
 ```bash
 git clone https://github.com/shravnchandr/Sign-Language-Translation.git && cd Sign-Language-Translation
 mkdir -p ~/.kaggle && mv ~/kaggle.json ~/.kaggle/ && chmod 600 ~/.kaggle/kaggle.json
-bash setup_runpod.sh        # uv + tmux, CUDA check, LMDB from the build notebook's output, key check
-bash run_pipeline_cnn_transformer.sh --skip-pretrain --num-workers 8
+bash scripts/setup_runpod.sh        # uv + tmux, CUDA check, LMDB from the build notebook's output, key check
+bash scripts/run_pipeline_cnn_transformer.sh --skip-pretrain --num-workers 8
 tmux attach -t islr         # training runs in a detached tmux session; detach with Ctrl-b d
 ```
 
@@ -274,23 +287,23 @@ The pipeline relaunches itself in tmux (session `islr`) and logs to
 **Before stopping the pod** (its disk is erased on stop), pull checkpoints and logs:
 
 ```bash
-bash runpod_results.sh send run005           # on the pod — prints a one-time code
-bash runpod_results.sh receive <code>        # on your machine → runs/run005/
+bash scripts/runpod_results.sh send run005           # on the pod — prints a one-time code
+bash scripts/runpod_results.sh receive <code>        # on your machine → runs/run005/
 ```
 
 ```bash
 # Recommended: pre-built LMDBs, skip pre-training
-bash run_pipeline_cnn_transformer.sh --skip-pretrain
+bash scripts/run_pipeline_cnn_transformer.sh --skip-pretrain
 
 # With CTC pre-training (uses downloaded FS LMDB — no 189 GB download needed)
-bash run_pipeline_cnn_transformer.sh
+bash scripts/run_pipeline_cnn_transformer.sh
 
 # Re-use an existing backbone checkpoint
-bash run_pipeline_cnn_transformer.sh \
+bash scripts/run_pipeline_cnn_transformer.sh \
   --pretrained-backbone checkpoints/pretrain_fs/backbone_best.pth
 
 # Quick smoke test
-bash run_pipeline_cnn_transformer.sh --skip-pretrain \
+bash scripts/run_pipeline_cnn_transformer.sh --skip-pretrain \
   --phase1-epochs 2 --phase2-epochs 1
 ```
 
@@ -332,7 +345,7 @@ PYTHONPATH=research/models uv run --with onnxruntime python -m cnn_transformer.b
 
 ```bash
 # Full pipeline
-PYTHONPATH=research/models bash run_pipeline_vqvae_seq2seq.sh
+PYTHONPATH=research/models bash scripts/run_pipeline_vqvae_seq2seq.sh
 
 # Phase 1 — train VQ-VAE
 PYTHONPATH=research/models uv run python -m vqvae_seq2seq.vqvae.train_vqvae \

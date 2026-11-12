@@ -6,59 +6,59 @@
 #   2. Fine-tuning (with backbone from stage 0 if available)
 #
 # Usage:
-#   bash run_pipeline_cnn_transformer.sh
-#   bash run_pipeline_cnn_transformer.sh --skip-pretrain               # skip FS LMDB + pre-training
-#   bash run_pipeline_cnn_transformer.sh --skip-fs-lmdb                # skip FS LMDB build but still pre-train
-#   bash run_pipeline_cnn_transformer.sh --pretrained-backbone checkpoints/pretrain_fs/backbone_best.pth
-#   bash run_pipeline_cnn_transformer.sh --phase1-epochs 10 --phase2-epochs 5  # quick test
-#   bash run_pipeline_cnn_transformer.sh --map-size-gb 200
-#   bash run_pipeline_cnn_transformer.sh --allow-errors
-#   bash run_pipeline_cnn_transformer.sh --val-fold 0              # signer fold 0 of 7 (CV)
-#   bash run_pipeline_cnn_transformer.sh --stretch-mode sample --stretch-min 0.5 --stretch-max 2.0 --stretch-prob 0.8
-#   bash run_pipeline_cnn_transformer.sh --max-frames 256           # keep long clips longer (default 128)
-#   bash run_pipeline_cnn_transformer.sh --hand-drop-prob 0.5       # simulate hand-tracking gaps (default off)
-#   bash run_pipeline_cnn_transformer.sh --loss ce --seed 1         # loss ablation / another seed
-#   bash run_pipeline_cnn_transformer.sh --mixup-prob 0 / --finger-drop-prob 0 / --zero-parts face / --no-depth   # ablations
-#   bash run_pipeline_cnn_transformer.sh --supcon-weight 0.2        # cross-signer contrastive loss
-#   bash run_pipeline_cnn_transformer.sh --grl-lambda 0             # GRL off (also --dropout, --drop-path-max)
-#   bash run_pipeline_cnn_transformer.sh --aug-rotate 30 --aug-shear 0.15 --aug-scale 0.2 --aug-affine-prob 0.75
-#   bash run_pipeline_cnn_transformer.sh --arch graph               # GraphConformer: hand-skeleton graph encoder
-#   bash run_pipeline_cnn_transformer.sh --arch graph --bone-aug-prob 0.5   # + bone-length (hand proportion) augmentation
-#   bash run_pipeline_cnn_transformer.sh --arch graph --val-fold 0  # FS pre-train (same arch/seed) then fine-tune
-#   bash run_pipeline_cnn_transformer.sh --arch graph --fs-cleanup  # ... and delete the FS LMDB (~16 GiB) after pre-training
+#   bash scripts/run_pipeline_cnn_transformer.sh
+#   bash scripts/run_pipeline_cnn_transformer.sh --skip-pretrain               # skip FS LMDB + pre-training
+#   bash scripts/run_pipeline_cnn_transformer.sh --skip-fs-lmdb                # skip FS LMDB build but still pre-train
+#   bash scripts/run_pipeline_cnn_transformer.sh --pretrained-backbone checkpoints/pretrain_fs/backbone_best.pth
+#   bash scripts/run_pipeline_cnn_transformer.sh --phase1-epochs 10 --phase2-epochs 5  # quick test
+#   bash scripts/run_pipeline_cnn_transformer.sh --map-size-gb 200
+#   bash scripts/run_pipeline_cnn_transformer.sh --allow-errors
+#   bash scripts/run_pipeline_cnn_transformer.sh --val-fold 0              # signer fold 0 of 7 (CV)
+#   bash scripts/run_pipeline_cnn_transformer.sh --stretch-mode sample --stretch-min 0.5 --stretch-max 2.0 --stretch-prob 0.8
+#   bash scripts/run_pipeline_cnn_transformer.sh --max-frames 256           # keep long clips longer (default 128)
+#   bash scripts/run_pipeline_cnn_transformer.sh --hand-drop-prob 0.5       # simulate hand-tracking gaps (default off)
+#   bash scripts/run_pipeline_cnn_transformer.sh --loss ce --seed 1         # loss ablation / another seed
+#   bash scripts/run_pipeline_cnn_transformer.sh --mixup-prob 0 / --finger-drop-prob 0 / --zero-parts face / --no-depth   # ablations
+#   bash scripts/run_pipeline_cnn_transformer.sh --supcon-weight 0.2        # cross-signer contrastive loss
+#   bash scripts/run_pipeline_cnn_transformer.sh --grl-lambda 0             # GRL off (also --dropout, --drop-path-max)
+#   bash scripts/run_pipeline_cnn_transformer.sh --aug-rotate 30 --aug-shear 0.15 --aug-scale 0.2 --aug-affine-prob 0.75
+#   bash scripts/run_pipeline_cnn_transformer.sh --arch graph               # GraphConformer: hand-skeleton graph encoder
+#   bash scripts/run_pipeline_cnn_transformer.sh --arch graph --bone-aug-prob 0.5   # + bone-length (hand proportion) augmentation
+#   bash scripts/run_pipeline_cnn_transformer.sh --arch graph --val-fold 0  # FS pre-train (same arch/seed) then fine-tune
+#   bash scripts/run_pipeline_cnn_transformer.sh --arch graph --fs-cleanup  # ... and delete the FS LMDB (~16 GiB) after pre-training
 #
 # Fingerspelling data is fetched only when pre-training actually runs (not with
 # --skip-pretrain or --pretrained-backbone): if the FS LMDB is not at its default
-# path, setup_runpod.sh --with-fs downloads it from shravnchandr/asl-fs-lmdb and
+# path, scripts/setup_runpod.sh --with-fs downloads it from shravnchandr/asl-fs-lmdb and
 # verifies it, after checking there is enough free disk.
 #
 # Recommended (downloaded LMDB datasets, skip all local builds):
-#   bash run_pipeline_cnn_transformer.sh --skip-pretrain
-#   bash run_pipeline_cnn_transformer.sh --pretrain-epochs 30   # pre-train longer (default 20, patience 5)
+#   bash scripts/run_pipeline_cnn_transformer.sh --skip-pretrain
+#   bash scripts/run_pipeline_cnn_transformer.sh --pretrain-epochs 30   # pre-train longer (default 20, patience 5)
 #
 # tmux: started outside tmux, the pipeline relaunches itself in a detached tmux
 # session (default name "islr") so it survives a closed terminal / browser tab,
 # and tees all output to logs/cnn_transformer_<timestamp>.log.
 #   tmux attach -t islr        # watch live; detach again with Ctrl-b then d
 #   tail -f logs/cnn_transformer_*.log
-#   bash run_pipeline_cnn_transformer.sh --no-tmux ...   # run in the foreground
-#   bash run_pipeline_cnn_transformer.sh --tmux-session exp2 ...  # parallel/other run
+#   bash scripts/run_pipeline_cnn_transformer.sh --no-tmux ...   # run in the foreground
+#   bash scripts/run_pipeline_cnn_transformer.sh --tmux-session exp2 ...  # parallel/other run
 
 set -e
 ORIG_ARGS=("$@")
 
 # Run from the repo root regardless of the caller's cwd (relative paths below
 # and in arguments are repo-relative).
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 SELF="$(pwd)/$(basename "$0")"
 
-# setup_runpod.sh installs uv into ~/.local/bin, which is only on PATH in shells
+# scripts/setup_runpod.sh installs uv into ~/.local/bin, which is only on PATH in shells
 # started afterwards — not the terminal that ran setup, nor a tmux session
 # launched from it. Exported here, it also reaches the tmux child.
 if ! command -v uv >/dev/null 2>&1 && [ -x "$HOME/.local/bin/uv" ]; then
     export PATH="$HOME/.local/bin:$PATH"
 fi
-command -v uv >/dev/null 2>&1 || { echo "uv not found — run setup_runpod.sh first." >&2; exit 1; }
+command -v uv >/dev/null 2>&1 || { echo "uv not found — run scripts/setup_runpod.sh first." >&2; exit 1; }
 
 export PYTHONPATH="$(pwd)/research/models${PYTHONPATH:+:$PYTHONPATH}"
 export PYTORCH_ALLOC_CONF=expandable_segments:True
@@ -233,7 +233,7 @@ if [ "$SKIP_PRETRAIN" = false ]; then
         # Default location: verify it, or download it (only now that it is needed).
         echo ""
         echo "[FS LMDB] Verifying / downloading the pre-built fingerspelling LMDB..."
-        bash setup_runpod.sh --skip-env --with-fs
+        bash scripts/setup_runpod.sh --skip-env --with-fs
     elif [ -f "$FS_LMDB_PATH" ]; then
         echo ""
         echo "[FS LMDB] Using pre-built LMDB at $FS_LMDB_PATH."

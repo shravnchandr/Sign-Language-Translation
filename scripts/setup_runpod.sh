@@ -3,11 +3,11 @@
 #
 # Installs the environment, downloads the pre-built ASL Signs LMDB from the
 # saved output of the Kaggle build notebook, and lays it out exactly where
-# run_pipeline_cnn_transformer.sh / train.py read it by default:
+# scripts/run_pipeline_cnn_transformer.sh / train.py read it by default:
 #
 #   data/asl-is-lmdb/  is.lmdb.mdb  train.csv  sign_to_prediction_index_map.json
 #
-# Kernel output is fetched by research/tools/download_kernel_output.py rather than
+# Kernel output is fetched by archive/research/tools/download_kernel_output.py rather than
 # `kaggle kernels output`, which buffers each file fully in RAM (OOM risk on a
 # 15–20 GB LMDB). Downloads land in data/.kaggle_download/ — same filesystem as
 # data/asl-is-lmdb/, so the final move is an instant rename (peak disk ≈ 1× LMDB).
@@ -20,18 +20,18 @@
 # Kaggle credentials: ~/.kaggle/kaggle.json, or KAGGLE_USERNAME + KAGGLE_KEY.
 #
 # Usage (from the repo root):
-#   bash setup_runpod.sh                                         # build-islt-lmdb notebook output
-#   bash setup_runpod.sh --kernel <owner>/<notebook-slug>        # a different notebook
-#   bash setup_runpod.sh --dataset shravnchandr/asl-is-lmdb      # from a Kaggle dataset instead
-#   bash setup_runpod.sh --from /path/to/downloaded/dir          # files already on disk
-#   bash setup_runpod.sh --skip-env                              # data only
-#   bash setup_runpod.sh --force                                 # re-download even if verified
-#   bash setup_runpod.sh --with-fs                               # also the fingerspelling LMDB
+#   bash scripts/setup_runpod.sh                                         # build-islt-lmdb notebook output
+#   bash scripts/setup_runpod.sh --kernel <owner>/<notebook-slug>        # a different notebook
+#   bash scripts/setup_runpod.sh --dataset shravnchandr/asl-is-lmdb      # from a Kaggle dataset instead
+#   bash scripts/setup_runpod.sh --from /path/to/downloaded/dir          # files already on disk
+#   bash scripts/setup_runpod.sh --skip-env                              # data only
+#   bash scripts/setup_runpod.sh --force                                 # re-download even if verified
+#   bash scripts/setup_runpod.sh --with-fs                               # also the fingerspelling LMDB
 #                                                                #   (dataset shravnchandr/asl-fs-lmdb → data/asl-fs-lmdb/)
 
 set -euo pipefail
 CALLER_DIR="$(pwd)"
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 # uv installs to ~/.local/bin, which is only on PATH in shells started after the
 # install — pick it up so re-runs in the same terminal don't miss or reinstall it.
 if ! command -v uv >/dev/null 2>&1 && [ -x "$HOME/.local/bin/uv" ]; then
@@ -89,7 +89,7 @@ if [ "$SKIP_ENV" = false ]; then
         source "$HOME/.local/bin/env"
     fi
     if ! command -v tmux >/dev/null 2>&1; then
-        # run_pipeline_cnn_transformer.sh runs training inside tmux by default
+        # scripts/run_pipeline_cnn_transformer.sh runs training inside tmux by default
         echo "[env] Installing tmux..."
         SUDO=""; [ "$(id -u)" -eq 0 ] || SUDO="sudo"
         $SUDO apt-get update -qq && $SUDO apt-get install -y -qq tmux >/dev/null
@@ -130,7 +130,7 @@ print(f"  CACHE_VERSION {CACHE_VERSION}: {hits}/{len(vals)} keys found | "
       f"{len(df):,} samples, {df['participant_id'].nunique()} signers, {n_signs} signs")
 assert hits == len(vals), (
     "LMDB keys do not match the training code: this archive was built with an older "
-    "version. Rebuild it on Kaggle (notebooks/tools/create-is-lmdb.ipynb) and re-run."
+    "version. Rebuild it on Kaggle (archive/notebooks/tools/create-is-lmdb.ipynb) and re-run."
 )
 x = torch.load(io.BytesIO(first), weights_only=True)
 assert x.ndim == 2 and x.shape[1] == COORD_FEAT, f"sample shape {tuple(x.shape)}, expected (T, {COORD_FEAT})"
@@ -156,7 +156,7 @@ else
         echo "[data] Free disk: $(free_gb "$SRC") GB"
         if [ -n "$KERNEL" ]; then
             echo "[data] Downloading saved output of notebook $KERNEL ..."
-            uv run python research/tools/download_kernel_output.py "$KERNEL" -p "$SRC" \
+            uv run python archive/research/tools/download_kernel_output.py "$KERNEL" -p "$SRC" \
                 --include '*.mdb' train.csv sign_to_prediction_index_map.json \
                 --exclude lock.mdb
         else
@@ -257,9 +257,9 @@ echo ""
 echo "========================================"
 echo "Setup complete. Free disk: $(free_gb .) GB"
 echo "Train (runs in a detached tmux session 'islr'; safe to disconnect):"
-echo "  bash run_pipeline_cnn_transformer.sh --skip-pretrain --num-workers 8"
+echo "  bash scripts/run_pipeline_cnn_transformer.sh --skip-pretrain --num-workers 8"
 echo "  tmux attach -t islr          # watch live; detach with Ctrl-b then d"
 echo "  tail -f logs/cnn_transformer_*.log"
 echo "Before stopping the pod (disk is erased on stop):"
-echo "  bash runpod_results.sh send <run-name>     # then 'receive <code>' on your machine"
+echo "  bash scripts/runpod_results.sh send <run-name>     # then 'receive <code>' on your machine"
 echo "========================================"
