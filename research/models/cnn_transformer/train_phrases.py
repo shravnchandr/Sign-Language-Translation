@@ -147,9 +147,17 @@ def extra_source(args, is_train, sign2idx):
     signer weights so that --extra-frac of the phrases come from WLASL signers (each in
     proportion to its clips; ASL Signs signers uniform, as without extra data)."""
     df = pd.read_csv(Path(args.extra_data_dir) / "train.csv")
-    split = signer_split(df)
+    if "wlasl_half" in df:  # all-gloss LMDB: halves fixed at build time (= the 206-sign split)
+        split = {h: df.loc[df["wlasl_half"] == h, "participant_id"].unique().tolist()
+                 for h in ("train", "test")}
+    else:
+        split = signer_split(df)
     df = df[df["participant_id"].isin(split["train"])].copy()
     df["sign"] = df["sign"].map(sign2idx)
+    if df["sign"].isna().any():
+        raise SystemExit(f"{int(df['sign'].isna().sum())} extra clips have labels outside the "
+                         "vocabulary — pass --vocab <extra dir>/sign_to_prediction_index_map.json")
+    df["sign"] = df["sign"].astype(int)
     extra = ASLDataset(df, args.extra_data_dir, lmdb_path=args.extra_lmdb_path
                        or str(Path(args.extra_data_dir) / "wlasl.lmdb.mdb"), max_frames=1 << 20)
     is_signers = is_train.df["participant_id"].astype(str).unique()
@@ -175,6 +183,11 @@ def train(args):
     print(f"Device: {device}" + (f" | AMP {str(amp_dtype).replace('torch.', '')}" if use_amp else ""))
 
     sign2idx = json.load(open(Path(args.data_dir) / "sign_to_prediction_index_map.json"))
+    if args.vocab:  # wider vocabulary: the 250 ASL Signs signs first, unchanged, then extra labels
+        vocab = json.load(open(args.vocab))
+        assert all(vocab.get(s) == i for s, i in sign2idx.items()), "--vocab must extend the sign map"
+        print(f"Vocabulary: {len(vocab)} labels ({len(vocab) - len(sign2idx)} beyond ASL Signs)")
+        sign2idx = vocab
     idx2sign = {v: k for k, v in sign2idx.items()}
     n_classes = len(sign2idx)
     blank = n_classes
@@ -291,7 +304,8 @@ def train(args):
             best_wer, patience = r["wer"], 0
             torch.save(model.state_dict(), out_dir / "best_phrases.pth")
             meta = {"arch": args.arch, "d_model": args.d_model, "n_layers": args.n_layers,
-                    "n_heads": args.n_heads, "vocab": "sign_to_prediction_index_map.json",
+                    "n_heads": args.n_heads,
+                    "vocab": args.vocab or "sign_to_prediction_index_map.json",
                     "blank": blank, "val_fold": args.val_fold, "epoch": epoch + 1,
                     "val_wer": r["wer"], "val_exact": r["exact"], "init": args.init}
             if args.arch == "graph":
@@ -362,6 +376,8 @@ def main():
     p.add_argument("--extra-data-dir", default="",
                    help="WLASL LMDB folder: mix its 'train' signer half into training")
     p.add_argument("--extra-lmdb-path", default="")
+    p.add_argument("--vocab", default="",
+                   help="wider label map (first 250 = ASL Signs map), e.g. the all-gloss WLASL map")
     p.add_argument("--extra-frac", type=float, default=0.15,
                    help="share of training phrases from the extra signers")
     train(p.parse_args())

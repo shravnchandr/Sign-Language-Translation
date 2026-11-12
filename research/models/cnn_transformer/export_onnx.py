@@ -47,18 +47,28 @@ class _AllValid(nn.Module):
 
 
 def load_ctc_model(checkpoint: Path, meta: dict, n_classes: int) -> nn.Module:
+    """Phrase checkpoint → model with n_classes signs + blank (last). A checkpoint trained with
+    a wider vocabulary (train_phrases --vocab; meta["blank"] > n_classes) is cut to its first
+    n_classes rows + blank, i.e. exactly the 250-sign model the browser runs."""
+    trained = meta.get("blank", n_classes)
     graph_kw = (dict(graph_hidden=meta["graph_hidden"], graph_layers=meta["graph_layers"])
                 if meta["arch"] == "graph" else {})
     model = (GraphConformer if meta["arch"] == "graph" else LandmarkConformer)(
         **graph_kw,
-        num_classes=n_classes,
+        num_classes=trained,  # classification head, unused in CTC mode but sized like the vocab
         d_model=meta["d_model"],
         n_heads=meta["n_heads"],
         n_layers=meta["n_layers"],
         n_signers=0,
-        ctc_vocab_size=n_classes,
+        ctc_vocab_size=trained,
     )
     model.load_state_dict(torch.load(checkpoint, map_location="cpu", weights_only=True))
+    if trained != n_classes:
+        old, keep = model.ctc_head, list(range(n_classes)) + [trained]
+        model.ctc_head = nn.Linear(old.in_features, n_classes + 1)
+        with torch.no_grad():
+            model.ctc_head.weight.copy_(old.weight[keep])
+            model.ctc_head.bias.copy_(old.bias[keep])
     return model.eval()
 
 

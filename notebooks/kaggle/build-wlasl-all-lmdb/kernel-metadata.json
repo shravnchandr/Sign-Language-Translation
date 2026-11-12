@@ -1,0 +1,22 @@
+{
+  "id": "shravnchandr/build-wlasl-all-lmdb",
+  "title": "build-wlasl-all-lmdb",
+  "code_file": "build-wlasl-all-lmdb.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_tpu": false,
+  "enable_internet": true,
+  "keywords": [],
+  "dataset_sources": [
+    "risangbaskoro/wlasl-processed"
+  ],
+  "kernel_sources": [
+    "shravnchandr/preprocess-wlasl-mediapipe"
+  ],
+  "competition_sources": [
+    "asl-signs"
+  ],
+  "model_sources": []
+}
