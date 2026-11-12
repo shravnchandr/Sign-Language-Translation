@@ -913,7 +913,11 @@ built in): max |Δlogit| vs PyTorch 2.3e-4, identical frame argmax on 32/32 LMDB
 and stitched phrases). Needed one model change: `HandDominanceModule` mirrors with `torch.where`
 instead of boolean indexing (bit-identical on a 16-sequence test). `browser_fixtures.py` writes
 raw-frame → feature → logit fixtures; an independent re-implementation of the written feature rules
-matches them to 4e-7, 0 presence mismatches. Conventions a live camera pipeline must reproduce,
+matches them to 4e-7, 0 presence mismatches. (Review fix, same day: fixtures were computed by the
+training pipeline, which re-infers presence from filled coordinates — a hand detected only at frame
+77 was flagged at frame 104 — and skipped the 384-frame subsample (a 2,100-frame concat stayed
+2,100). They are now built from the raw frames by an explicit contract: presence = actual
+detection, subsample before Δ1; the training pipeline is reported as a cross-check.) Conventions a live camera pipeline must reproduce,
 measured on the LMDB:
 - **Unmirrored video:** pose 11 (left shoulder) x > pose 12 x in 600/600 clips.
 - **Hand slots by body side:** `left_hand` wrist nearest pose 15 (left wrist) for 574/576 hands —
@@ -935,12 +939,43 @@ Cause found in the data: **both hands are detected in the same frame in a median
 over the 250 signs (40 clips each), including clearly two-handed signs — shoe 1 %, book / cloud
 / bath / car / rain 2 %, chocolate 4 %, police 6 % (200 clips each). The raw competition parquet
 for a two-handed CLOUD clip has 28 left-hand frames and 0 right-hand frames, so it is the source
-extraction, not `hand_presence`. Every model here has learned signs from one hand; a correctly
-tracked base hand (MediaPipe Tasks in the browser tracks both) is out of distribution.
-Removing the non-dominant hand from held-out clips changes nothing (chocolate 47/57 → 47/57).
-Browser integration rule: pass only the dominant hand per segment (other slot never detected).
-Implications: no base-hand information can be learned from this dataset; two-handed signs need
-other data (check WLASL / MS-ASL landmarks, app recordings).
+extraction, not `hand_presence`. The models see a second hand rarely; a correctly tracked base
+hand (MediaPipe Tasks in the browser tracks both) is uncommon input for them. (An earlier version
+of this entry said every model "learned signs from one hand" and made one-hand input a browser
+rule — overstated: sparse detections do not show the models use no second-hand information.)
+Removing the less active hand on held-out chocolate clips: 47/57 → 47/57 (those clips rarely have
+a second hand, so this says little). **Targeted test** — phrase model, single-sign decode, every
+held-out clip with detections of both hands (review follow-up, 2026-11-11):
+
+| Held-out clips | n | two hands | one hand (less active removed) | +/− | McNemar p |
+|---|---|---|---|---|---|
+| both hands detected somewhere | 575 | 44.2 % | 49.0 % | +66 / −38 | 0.01 |
+| both hands in the same frame | 321 | 43.9 % | 44.5 % | +26 / −24 | 0.89 |
+| signer 34503 / 49445 / 62590 | 294 / 271 / 10 | 36.4 / 51.3 / 80.0 % | 40.1 / 57.2 / 90.0 % | | 0.14 / 0.04 / 1.0 |
+
+The gain comes from clips whose two hands are detected at different times (possibly tracking
+flicker or one hand changing slot — untested), not from true two-hand frames. One-hand mode is an
+experimental browser option to compare against the two-hand path, not a rule. Clips with two
+hands are hard either way (~44 % vs 62 % overall). Two-handed signs need data with both hands
+(WLASL below, app recordings).
+
+**Other datasets checked (2026-11-11):**
+- **WLASL** (our own `shravnchandr/preprocess-wlasl-mediapipe` Kaggle notebook: legacy MediaPipe
+  Holistic, model_complexity 1, confidence 0.5, competition parquet format; 11,980 clips, 2,000
+  signs; 233 of our 250 signs, 1,671 clips, median 7 per sign). Sample of 31 clips: **both hands
+  tracked** — two-handed signs have both hands in 29–53 % of frames (bath 0.49, book 0.43, car 0.52,
+  chocolate 0.53, clean 0.45, cloud 0.29; every clip has some), the one-handed APPLE 0 %. Same
+  Holistic as the competition yet both hands → the 2 % is specific to the ASL Signs data.
+  Framing differs: shoulder ratio 0.94 (p10–p90 0.76–1.06; ASL Signs 0.40) — landscape video, as
+  the aspect estimate predicts (≈ 0.9 for 16:9) — and signers are farther away (shoulder width 0.25
+  of the frame vs 0.56). Usable only after per-clip aspect correction (x and z × ratio / 0.40).
+  Full output ≈ 19 GB; the overlapping signs ≈ 2.7 GB (`kaggle kernels output --file-pattern`,
+  rate-limited — better built into an LMDB on Kaggle). Licence: WLASL is C-UDA (computational use).
+- **MS-ASL** (`shravnchandr/ms-asl-nose-reference-mediapipe-pose`, private, 9.9 GB): not raw
+  landmarks — `.npy` of 60 resampled frames × 1,848 standardised features (264 × 7), with flipped /
+  fast / slow copies and no missing-value markers; hand presence cannot be recovered without the
+  (unlocated) producer. Raw re-extraction would need the YouTube videos (C-UDA; many links dead).
+  Annotations local: 5,811 of 25,513 clips are on our signs.
 
 ---
 

@@ -49,7 +49,7 @@ These are synthetic phrases (citation-form clips, artificial transitions, no coa
 
 - **Unmirrored frames**, hands assigned to slots by distance to the pose wrists (MediaPipe's handedness label assumes a mirrored selfie image).
 - **Portrait ≈ 3:4 framing** — landmark x is a fraction of the image width and y of the height; an uncropped landscape webcam drops held-out accuracy from 62 % to 14 %.
-- **One hand only.** Both hands are detected in the same frame in a median **2 %** of training clips, even for two-handed signs (shoe 1 %, chocolate 4 %) — a limitation of the source data. The models have learned every sign from one hand, so a correctly tracked base hand confuses them (live: CHOCOLATE → police). The browser passes only the dominant hand; learning two-handed signs needs other data.
+- **Second hand rarely present in training.** Both hands are detected in the same frame in a median **2 %** of training clips, even for two-handed signs (shoe 1 %, chocolate 4 %) — a limitation of the source data (WLASL, extracted with the same MediaPipe Holistic, tracks both). The models see a second hand rarely; how much they use it is not measured. A live base hand may push predictions off (anecdotally CHOCOLATE → police). **One-hand mode** (pass only the more active hand) is an experimental option, to compare against the two-hand path: on the 575 held-out clips with both hands detected somewhere, removing the less active hand raised phrase-model accuracy 44.2 % → 49.0 % (+66 / −38, McNemar p = 0.01), but on the 321 with both hands in the same frame it changed nothing (43.9 % → 44.5 %, +26 / −24, p = 0.89).
 
 ## Research Directions
 
