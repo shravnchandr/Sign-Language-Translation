@@ -1173,6 +1173,25 @@ Next: the live landmarks themselves (frames from the app, `browser_fixtures` for
 the model actually receives (slots, mirroring, framing ratio, presence) before changing data.
 MS-ASL has 50 PENCIL / 24 BOAT clips but no usable landmarks (re-extraction from YouTube).
 
+### Per-sign reliability for the app — phrases04 (2026-11-12)
+`sign_reliability.py` scores every clip by signers the checkpoint never saw (ASL Signs fold-0 val,
+14,076 clips + WLASL test half, 824) the way the app can: "pooled" = per sign, max over the
+segment's frames of its softmax probability (blank excluded). Output `exports/phrases04/sign_reliability.json`
+(per sign: n, top-1/3/5, exact decode, top-3 confusions; calibration table; thresholds).
+
+| | top-1 | top-3 | top-5 | exact decode |
+|---|---|---|---|---|
+| combined (14,900) | 66.0 % | 81.9 % | 86.0 % | 63.3 % |
+| ASL Signs fold 0 | 65.1 % | 81.1 % | 85.4 % | 62.2 % |
+| WLASL test half | 82.7 % | 94.3 % | 96.1 % | 80.8 % |
+
+Calibration (top-1 accuracy by top-1 pooled probability p1): < 0.2 → 8 %, 0.5–0.6 → 36 %, 0.8–0.9 →
+57 %, ≥ 0.9 → 88 % (55 % of clips). Thresholds: p1 ≥ 0.685 keeps 72 % of clips at 80 % precision;
+≥ 0.928 keeps 51 % at 90 %; ≥ 0.988 keeps 34 % at 95 %. Product reading: show the top 3 (82 %),
+and a "not sure" state below ~0.7. Most frequent confusions are near-synonyms (cat → kitty, goose →
+duck, wake ↔ awake, mouth → lips, pencil ↔ pen, man → dad). Calibration is on held-out *dataset*
+signers; live webcam calibration is unmeasured.
+
 ---
 
 ## Pending Ideas (not yet implemented)
