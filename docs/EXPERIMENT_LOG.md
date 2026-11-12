@@ -975,6 +975,37 @@ hands are hard either way (~44 % vs 62 % overall). Two-handed signs need data wi
   phrase model single-sign exact 7/27 uncorrected → 8/27 corrected — too few clips to read).
   Full output ≈ 19 GB; the overlapping signs ≈ 2.7 GB (`kaggle kernels output --file-pattern`,
   rate-limited — better built into an LMDB on Kaggle). Licence: WLASL is C-UDA (computational use).
+- **WLASL LMDB built on Kaggle** (`shravnchandr/build-wlasl-lmdb` v1, CPU, minutes; output = kernel
+  output, not yet a dataset): 1,671 clips, 206 signs (2–21 clips each, median 7.5; 193 clips via
+  synonym glosses), 67 signers, WLASL splits 1,174 / 296 / 201, all 25 fps per the WLASL json,
+  median 68 frames, 0 errors; aspect k 1.17–3.61 (median 2.30), never the fallback.
+  **Second hand, per sign** (share of clips with both hands in some frame, 206 shared signs):
+  WLASL median 12 % / mean 40 %, ASL Signs median 2 % / mean 3 %. 80 signs exceed 50 % in WLASL
+  (chocolate, have, read, cut, tree: 100 %); the same signs have a median 2 % (max 12 %) in ASL Signs,
+  and the per-sign rates are unrelated (Spearman −0.05) — ASL Signs' rare second-hand detections do
+  not track which signs are two-handed.
+- **Cross-dataset test** (fold-0 checkpoints, all 67 WLASL signers unseen, 1,671 clips):
+
+  | | uncorrected | aspect-corrected |
+  |---|---|---|
+  | isolated `fold0_graph` top-1 (250-way) | 30.6 % | **64.2 %** (top-5 82.6 %; 66.7 % restricted to the 206 shared signs) |
+  | phrase model `phrases01`, single-sign exact | 24.8 % | 45.4 % |
+
+  - The aspect correction doubles accuracy: framing alone explains a 34-pt drop (the same mistake
+    as an uncropped landscape webcam in the browser).
+  - The isolated model transfers to new signers / cameras nearly at its fold-0 level (64.2 vs
+    68.6 % in-dataset). Per WLASL signer: median 66.7 %, p10 8.6 %, p90 92.5 % (28 signers with
+    ≥ 10 clips) — a few signers fail almost completely (not yet inspected). Synonym-gloss clips
+    59.6 % vs identical-gloss 64.7 %.
+  - The phrase model loses far more (45.4 %, vs 62.4 % single-sign in-dataset). Untested: WLASL
+    clips are longer (median 68 frames at 25 fps vs 22 in ASL Signs) and the phrase model saw only
+    0.8–1.25× tempo, the classifier 0.5–2.0×.
+  - **Two-hand clips are much harder:** isolated 49.1 % (685 clips with both hands somewhere) vs
+    74.6 % (986 without) — part may be the signs themselves. **One-hand mode on these clips:**
+    isolated 49.1 → 51.4 % (+56 / −40, p = 0.13); phrase model **26.9 → 37.1 %** (+124 / −54,
+    p < 0.001). On real two-handed data, removing the less active hand clearly helps the phrase
+    model and is neutral-to-positive for the classifier — the second hand is input both models
+    handle poorly, consistent with ASL Signs barely containing it.
 - **MS-ASL** (`shravnchandr/ms-asl-nose-reference-mediapipe-pose`, private, 9.9 GB): not raw
   landmarks — `.npy` of 60 resampled frames × 1,848 standardised features (264 × 7), with flipped /
   fast / slow copies and no missing-value markers; hand presence cannot be recovered without the

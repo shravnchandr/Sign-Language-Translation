@@ -167,8 +167,10 @@ def main() -> None:
     print(f"raw shoulder ratio median {df['ratio_raw'].median():.2f} → corrected {TARGET_RATIO}; "
           f"aspect k median {df['aspect_k'].median():.2f} (p10 {df['aspect_k'].quantile(.1):.2f}, "
           f"p90 {df['aspect_k'].quantile(.9):.2f}); k = 1 fallback {int((df['aspect_k'] == 1).sum())}")
-    print(f"frames with both hands: median {df['both_hands'].median():.0%} "
-          f"(ASL Signs: ~0 %); fps: {df['fps'].value_counts().head(5).to_dict()}")
+    per_sign = df.groupby("sign")["both_hands"].apply(lambda s: (s > 0).mean())
+    print(f"clips with both hands in some frame: {(df['both_hands'] > 0).mean():.0%}; per sign "
+          f"median {per_sign.median():.0%}, {(per_sign > 0.5).sum()} signs > 50 % "
+          f"(ASL Signs: per-sign median 2 %); fps: {df['fps'].value_counts().head(5).to_dict()}")
 
 
 if __name__ == "__main__":
