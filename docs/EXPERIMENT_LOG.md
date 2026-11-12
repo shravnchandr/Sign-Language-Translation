@@ -1107,7 +1107,7 @@ clips; phrases01 rescored in the same notebook = the local CSV clip for clip.
 | one-hand clips (479), exact | 57.4 % | 82.5 % | p 9e-28 (classifier 76.6 %) |
 | aspect correction undone | 24.3 % | 39.2 % | |
 | decodes with 0 / 1 / 2+ signs | 35 / 605 / 184 | 0 / 811 / 13 | |
-| one-hand mode on two-hand clips | 25.8 → 50.5 % (helps) | 76.8 → 57.1 % (**hurts**, +13 / −81) | |
+| one-hand mode on two-hand clips (345) | 25.8 → 39.4 % (helps, +71 / −24, p 1e-6) | 76.8 → 57.1 % (**hurts**, +13 / −81, p 4e-13) | |
 | signers with ≥ 20 clips improved | | 11 / 11 | |
 | ASL Signs synthetic val WER | 0.294 | 0.296 | in-domain unchanged |
 
