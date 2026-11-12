@@ -907,6 +907,41 @@ n = 194 ≈ 55–69 % (the earlier "±3.5 pts" was one standard error).
   non-manuals) are an unvalidated proxy for natural signing — neither a demonstrated upper nor
   lower bound until tested on real continuous signing.
 
+### Browser export + training-data conventions (2026-11-11)
+`export_onnx.py` → `sign_ctc.onnx` (26.8 MiB fp32, `features` (1, T, 788), 8 ≤ T ≤ 512, all-valid mask
+built in): max |Δlogit| vs PyTorch 2.3e-4, identical frame argmax on 32/32 LMDB inputs (single clips
+and stitched phrases). Needed one model change: `HandDominanceModule` mirrors with `torch.where`
+instead of boolean indexing (bit-identical on a 16-sequence test). `browser_fixtures.py` writes
+raw-frame → feature → logit fixtures; an independent re-implementation of the written feature rules
+matches them to 4e-7, 0 presence mismatches. Conventions a live camera pipeline must reproduce,
+measured on the LMDB:
+- **Unmirrored video:** pose 11 (left shoulder) x > pose 12 x in 600/600 clips.
+- **Hand slots by body side:** `left_hand` wrist nearest pose 15 (left wrist) for 574/576 hands —
+  not MediaPipe Tasks' handedness label (which assumes a mirrored selfie image).
+- **Portrait ≈ 3:4 frames:** p99 |dy| / |dx| of hand bones in normalised coords 0.76–0.82 (45k hand
+  frames; per signer 0.67–1.08) ≈ width/height. Mean shoulder drop below the nose / shoulder width
+  = 0.40 (p10–p90 0.34–0.45, 2,000 clips); an uncropped 16:9 frame gives ≈ 0.9. Uncropped
+  landscape on held-out clips: accuracy 62 % → 14 %.
+- Simulated integration mistakes on 150 held-out clips (accuracy, correct pipeline 62 %): y flipped
+  0 %, planar xyz layout 0 %, pose-first layout 2 %, hand slots swapped 2 %, no nose subtraction 13 %,
+  presence all 1 27 %, z = 0 47 %, missing hand = 0 instead of held 51 %, Δ1 = 0 59 %, 10 fps 61 %.
+
+### ASL Signs data has (almost) one hand per clip (2026-11-11)
+Live browser test: CHOCOLATE (C hand on the back of a base hand) decoded as police. Pipeline
+mistakes simulated on held-out chocolate clips (landscape framing, selfie mirror, swapped slots,
+no nose subtraction, z = 0, 10–15 fps, hand shifted toward midline) give other errors, never
+police; held-out chocolate/police are never confused with each other (0/57, 0/56).
+Cause found in the data: **both hands are detected in the same frame in a median 2 % of clips**
+over the 250 signs (40 clips each), including clearly two-handed signs — shoe 1 %, book / cloud
+/ bath / car / rain 2 %, chocolate 4 %, police 6 % (200 clips each). The raw competition parquet
+for a two-handed CLOUD clip has 28 left-hand frames and 0 right-hand frames, so it is the source
+extraction, not `hand_presence`. Every model here has learned signs from one hand; a correctly
+tracked base hand (MediaPipe Tasks in the browser tracks both) is out of distribution.
+Removing the non-dominant hand from held-out clips changes nothing (chocolate 47/57 → 47/57).
+Browser integration rule: pass only the dominant hand per segment (other slot never detected).
+Implications: no base-hand information can be learned from this dataset; two-handed signs need
+other data (check WLASL / MS-ASL landmarks, app recordings).
+
 ---
 
 ## Pending Ideas (not yet implemented)

@@ -1,10 +1,24 @@
 # Isolated Sign Language Recognition
 
-Research into signer-independent isolated ASL recognition from MediaPipe landmark sequences. The core problem: models trained on one set of signers generalize poorly to new ones, because they memorize individual signing styles rather than learning sign representations. This project explores three approaches to that generalization problem.
+Research into signer-independent ASL recognition from MediaPipe landmark sequences — first isolated signs (250 signs, Google ASL Signs), now continuous multi-sign phrases, with the goal of free, on-device sign recognition that runs in a browser. The core problem: models trained on one set of signers generalize poorly to new ones, because they memorize individual signing styles rather than learning sign representations.
 
 ## Results
 
-All runs use a signer-independent val split (no test signer seen during training). Baseline to beat: 1st-place Kaggle solution at **0.8929**.
+All runs use a signer-independent val split (no val signer seen during training). The 1st-place Kaggle score (**0.8929**) is a 4-seed ensemble trained on all 21 signers and scored on a hidden test set, so it is not directly comparable.
+
+**Signer folds (current protocol).** `--val-fold k` holds out 3 of 21 signers (GroupKFold(7)); fold 0 = signers 34503, 49445, 62590 (14,076 clips). Signer spread is large (≈ 0.57–0.82 per signer), so pooled 1-point differences are within noise.
+
+| Fold 0 | Val accuracy | Notes |
+|--------|-------------|-------|
+| `fold0_fixed` — LandmarkConformer, all fixes + per-clip time stretch | 0.677 | baseline |
+| `fold0_graph` — GraphConformer (`--arch graph`) | **0.686** | hand-skeleton graph encoder; McNemar p = 0.004 vs baseline (one seed) |
+| ensemble of the two (softmax average) | 0.703 | 2× inference |
+| `fold0_graph` + per-signer BatchNorm adaptation (AdaBN, offline) | 0.697 | BN statistics re-estimated from half of each held-out signer's unlabelled clips, scored on the other half |
+| fixed + graph + FS-pretrained ensemble, each with AdaBN | **0.721** | best fold-0 result so far |
+
+Bone-length augmentation, fingerspelling pre-training (alone) and a cross-signer contrastive loss gave no gain on fold 0 (details in `docs/EXPERIMENT_LOG.md`).
+
+**Earlier runs (fixed 3-signer split, not comparable with the folds):**
 
 | Run | Model | Val Accuracy | Key changes |
 |-----|-------|-------------|-------------|
@@ -14,7 +28,28 @@ All runs use a signer-independent val split (no test signer seen during training
 | 004 | + geometry stream, hand presence, normalization fix, augmentation / handedness / GRL fixes | 0.7590 (TTA 0.7610) | best at epoch 50; a NaN batch at epoch 55 broke eval for the remaining epochs |
 | 005 | Run 004 + bf16 AMP, non-finite batch guard | **0.7665** (TTA 0.7669) | clean 80 epochs; plateaued — run-to-run noise ≈ 1 pt on this split |
 | — | Factorized VQ-VAE + Conformer | WIP | — |
-| — | ST-GCN | — | baseline, not yet run |
+| — | ST-GCN | — | superseded by `--arch graph` (wrong graph indexing, by-sign split) |
+
+### Continuous signing (synthetic phrases)
+
+There is no openly licensed continuous ASL dataset with this vocabulary and MediaPipe landmarks, so phrases are stitched on the fly from isolated clips (`train_phrases.py`): one signer per phrase, clips trimmed to the hand activity, 3–8 interpolated transition frames, 1–5 signs per phrase (70 % ASL-style gloss templates, 30 % random sequences). A CTC head over the 250 signs + blank is trained from the fold-0 GraphConformer; validation phrases are built only from the 3 held-out signers, and 10 % of gloss sequences are never trained on.
+
+| `phrases01` (fold 0, 3,000 val phrases) | |
+|---|---|
+| Word error rate | **0.294** (seen sequences 0.251, unseen 0.294, random 0.383) |
+| Exact phrase | 0.467 |
+| Per signer WER | 0.140 / 0.352 / 0.390 |
+| By length (1 / 2 / 3 / 4 / 5 signs) | 0.40 / 0.28 / 0.26 / 0.32 / 0.40 — substitutions dominate; deletions grow with length |
+
+These are synthetic phrases (citation-form clips, artificial transitions, no coarticulation or facial grammar): an unvalidated proxy for real signing until tested on real recordings.
+
+### Running in the browser
+
+`export_onnx.py` exports the phrase model to ONNX for onnxruntime-web (verified against PyTorch), with `labels.json` and a `preprocess.json` describing the input features; `browser_fixtures.py` writes golden raw-frame → feature → output test cases. The app itself is [ASL-App](https://github.com/shravnchandr/ASL-App). A live camera pipeline has to reproduce the training data's conventions, measured on the dataset:
+
+- **Unmirrored frames**, hands assigned to slots by distance to the pose wrists (MediaPipe's handedness label assumes a mirrored selfie image).
+- **Portrait ≈ 3:4 framing** — landmark x is a fraction of the image width and y of the height; an uncropped landscape webcam drops held-out accuracy from 62 % to 14 %.
+- **One hand only.** Both hands are detected in the same frame in a median **2 %** of training clips, even for two-handed signs (shoe 1 %, chocolate 4 %) — a limitation of the source data. The models have learned every sign from one hand, so a correctly tracked base hand confuses them (live: CHOCOLATE → police). The browser passes only the dominant hand; learning two-handed signs needs other data.
 
 ## Research Directions
 
@@ -23,6 +58,8 @@ All runs use a signer-independent val split (no test signer seen during training
 - **Discrete motion tokenization** — factorized VQ-VAE separates what the body looks like (pose) from how it moves (motion, dynamics), producing interpretable tokens that may generalize better across signers
 - **Multi-scale temporal modeling** — velocity at Δ1/Δ2/Δ5 frames and chunk encoding at 4/8/16 frames capture finger micro-motion, arm movement, and global sign structure simultaneously
 - **Geometry-aware features** — joint-angle cosines and fingertip distances give hand shape representations invariant to wrist rotation and signer hand scale
+- **Hand-skeleton graph encoder** — GraphConformer replaces the per-hand linear projections with a shared graph network over the hand skeleton
+- **Continuous recognition** — CTC over synthetic phrases built from isolated clips, as a step toward sentence-level recognition
 
 ---
 
@@ -64,6 +101,12 @@ The geometry stream is the key addition: raw XYZ obscures hand shape because it 
 
 ---
 
+**GraphConformer (`--arch graph`):** the same model with the hand streams replaced by a shared hand-skeleton graph encoder (skeleton + knuckle-web adjacency plus a learned residual adjacency) over wrist-relative positions, bone vectors and multi-scale velocities; both hands share weights (the non-dominant one is mirrored). Same data, no rebuild.
+
+**CTC mode:** with `ctc_vocab_size` set, the model skips the CLS token and returns per-frame logits — used for fingerspelling pre-training and for continuous phrases.
+
+---
+
 ### 2 — Factorized VQ-VAE + Conformer (`research/models/vqvae_seq2seq/`)
 
 Two-phase pipeline: unsupervised discrete tokenization followed by supervised sequence-to-label translation.
@@ -91,7 +134,7 @@ A Conformer encoder (6 layers, d_model=256, kernel=7) reads the 5–10 token seq
 
 ### 3 — ST-GCN (`research/models/st_gcn/`)
 
-Spatial-Temporal Graph Convolutional Network. Reference baseline.
+Spatial-Temporal Graph Convolutional Network. Legacy baseline, superseded by `--arch graph` (its graph indexing was wrong and it used a by-sign split, so its numbers are not comparable).
 
 - 209-node anatomical graph (hands, pose, selected face landmarks)
 - 9 ST-GCN blocks in 3 stages: 64 → 128 → 256 channels
@@ -123,9 +166,16 @@ research/
 │   ├── cnn_transformer/         # LandmarkConformer (end-to-end)
 │   │   ├── config.py                   # Landmark layout constants, feature dimensions
 │   │   ├── pretrain_fingerspelling.py  # CTC pre-training on ASL Fingerspelling
-│   │   ├── train.py                    # Training loop
+│   │   ├── train.py                    # Training loop (isolated signs)
+│   │   ├── train_phrases.py            # CTC training on synthetic continuous phrases
+│   │   ├── phrase_breakdown.py         # Full phrase val breakdown (length / signer / timing)
+│   │   ├── export_onnx.py              # Phrase model → ONNX + labels + preprocessing spec
+│   │   ├── browser_fixtures.py         # Golden test cases for a browser port
+│   │   ├── error_review.py             # HTML kit to review val errors
+│   │   ├── signer_diagnostics.py       # Per-signer data stats vs accuracy
 │   │   ├── model/
 │   │   │   ├── landmark_conformer.py   # Main model
+│   │   │   ├── graph_conformer.py      # GraphConformer (--arch graph)
 │   │   │   ├── conformer.py            # ConformerBlock, SinusoidalPositionalEncoding
 │   │   │   ├── normalization.py        # WristNormalization
 │   │   │   └── grl.py                  # SignerDiscriminator, ganin_lambda
@@ -134,7 +184,9 @@ research/
 │   │       ├── augmentation.py         # AdvancedAugmentation (7 types), mixup_batch
 │   │       ├── build_lmdb.py           # One-time LMDB archive builder
 │   │       ├── build_fingerspelling_lmdb.py  # Fingerspelling LMDB builder
-│   │       └── fingerspelling_dataset.py     # FingerspellingDataset, collate_ctc
+│   │       ├── fingerspelling_dataset.py     # FingerspellingDataset, collate_ctc
+│   │       ├── phrase_grammar.py       # ASL-style gloss templates over the 250 signs
+│   │       └── phrase_dataset.py       # SyntheticPhraseDataset (clips stitched on the fly)
 │   ├── vqvae_seq2seq/          # Factorized VQ-VAE pipeline
 │   │   ├── vqvae/
 │   │   │   ├── vqvae_model.py          # Main VQ-VAE model
@@ -254,6 +306,24 @@ bash run_pipeline_cnn_transformer.sh --skip-pretrain \
 | `--fs-data-dir` | `data/asl-fs-lmdb` | Fingerspelling dataset root |
 
 > **LMDB cache invalidation:** any change to `config.py` that affects `ALL_COLUMNS` (face landmark selection, `INCLUDE_DEPTH`, `INCLUDE_FACE`) requires rebuilding the LMDB. `CACHE_VERSION` is an MD5 of `ALL_COLUMNS` so stale archives are never silently reused.
+
+### Continuous phrases and browser export
+
+```bash
+# CTC on synthetic phrases, initialised from a fold-0 isolated checkpoint (GPU; inside tmux)
+PYTHONPATH=research/models uv run python -m cnn_transformer.train_phrases --val-fold 0 --arch graph \
+  --init <fold0 best_phase1.pth> --out-dir checkpoints/phrases_fold0_graph
+
+# Full validation breakdown (CPU)
+PYTHONPATH=research/models uv run python -m cnn_transformer.phrase_breakdown \
+  --checkpoint <best_phrases.pth> --iso-checkpoint <fold0 best_phase1.pth> --out <breakdown.txt>
+
+# ONNX export (+ labels.json, preprocess.json) and browser test fixtures
+PYTHONPATH=research/models uv run --with onnx --with onnxruntime --with onnxscript \
+  python -m cnn_transformer.export_onnx --checkpoint <best_phrases.pth> --out-dir exports/phrases01
+PYTHONPATH=research/models uv run --with onnxruntime python -m cnn_transformer.browser_fixtures \
+  --parquet <competition parquets> --concat --out-dir exports/phrases01/fixtures
+```
 
 ### VQ-VAE Pipeline
 
