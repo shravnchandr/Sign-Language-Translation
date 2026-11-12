@@ -1126,6 +1126,31 @@ two-handed, differently-recorded data matters a lot — not yet that the model w
 Consequences: one-hand mode should be off for phrases03; exported to `exports/phrases03/`
 (ONNX parity 1.06e-4, 32/32 argmax) for live testing in the browser.
 
+### phrases04: viewpoint augmentation on top of phrases03 (2026-11-12)
+Live use of phrases03 needed several camera angles / distances before a sign was recognised. A
+synthetic sweep on the WLASL test half (phrases03, scratch script, not committed) showed distance
+alone costs nothing (shoulder-width scaling: ×0.5 / ×2 = 80.1 %), while horizontal stretch (aspect,
+body turn) cost 2–14 points (×0.75 78.3, ×1.33 75.2, ×0.6 69.4, ×1.67 65.9 %), vertical squash ×0.75
+75.2 %, tilt −25° 75.1 %. Phrase training only used ±15° rotation at p 0.5. New flags `--aug-shear`,
+`--aug-scale` (training only, default off) pass `spatial_affine`'s existing shear / per-axis scale
+through. phrases04 = phrases03 + `--aug-rotate 20 --aug-shear 0.15 --aug-scale 0.3
+--aug-affine-prob 0.8`; evaluated on the clean (unaugmented) test half. Kaggle `islr-phrases04-viewpoint`
+(commit 34f183e), 3m52s/epoch, ran all 30 epochs, best epoch 24.
+
+| WLASL test half (824 clips) | phrases03 | phrases04 | paired |
+|---|---|---|---|
+| exact decode | 80.1 % | 80.8 % | +50 / −44, p 0.61 |
+| pooled top-1 / top-5 | 81.2 / 94.5 % | 82.6 / 96.1 % | top-5 +23 / −10, p 0.035 |
+| two-hand clips (345), exact | 76.8 % | 78.6 % | p 0.47 |
+| **aspect correction undone** (raw landscape x) | 39.2 % | **77.4 %** | +338 / −23, p 6e-73 |
+| ASL Signs synthetic val WER | 0.296 | 0.291 | |
+
+Clean accuracy unchanged (top-5 slightly up), and the one real framing shift we have — WLASL's own
+uncorrected landscape coordinates, x off by a factor ~2.3 (median aspect k) — went from 39 % to 77 %:
+the model no longer depends on the 3:4 crop / x-rescale being right. Not measured: real 3D head or
+body turns, camera pitch, and tracking quality at distance; live testing decides. Exported to
+`exports/phrases04/`.
+
 ---
 
 ## Pending Ideas (not yet implemented)
