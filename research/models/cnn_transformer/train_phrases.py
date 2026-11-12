@@ -258,7 +258,8 @@ def train(args):
             sel = torch.rand(coords.shape[0], device=device) < args.aug_affine_prob
             if sel.any():
                 i = torch.where(sel)[0]
-                coords[i] = AdvancedAugmentation.spatial_affine(coords[i], args.aug_rotate)
+                coords[i] = AdvancedAugmentation.spatial_affine(coords[i], args.aug_rotate,
+                                                                args.aug_shear, args.aug_scale)
             input_lengths = mask.sum(1).long()
             snap = [b.clone() for b in bn_buffers]
             with torch.amp.autocast(device_type=device.type, dtype=amp_dtype, enabled=use_amp):
@@ -350,6 +351,11 @@ def main():
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--aug-rotate", type=float, default=15.0)
     p.add_argument("--aug-affine-prob", type=float, default=0.5)
+    p.add_argument("--aug-shear", type=float, default=0.0,
+                   help="training only: x-shear ~ U(±s) (camera angle); 0 = off")
+    p.add_argument("--aug-scale", type=float, default=0.0,
+                   help="training only: per-axis x/y scale ~ 1 + U(±s) (aspect, body turn, "
+                        "camera height); 0 = off")
     p.add_argument("--bone-aug-prob", type=float, default=0.0)
     p.add_argument("--bone-aug-hand", type=float, default=0.15)
     p.add_argument("--bone-aug-bone", type=float, default=0.1)
