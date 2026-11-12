@@ -1028,6 +1028,34 @@ Python 3.13, torch 2.11.0+cu130, 12 h per run). Private datasets: `asl-is-lmdb`,
 Estimate for a default phrase run (1,250 batches + 3,000 val phrases): ~4–5 min/epoch, 30 epochs
 ≈ 2.5 h — comparable to the A40 (4m40s/epoch).
 
+### phrases02: wider tempo range, 0.5–2× (2026-11-11)
+Hypothesis: the phrase model transfers worse to WLASL than the isolated classifier (45.4 % vs
+64.2 %) because it was trained at tempo 0.8–1.25× while WLASL signers sign at other speeds.
+`islr-phrases02-tempo` (Kaggle T4, fp16): phrases01's recipe with `--tempo-min 0.5 --tempo-max 2.0`,
+same init (fold0_graph), same fold-0 val phrases; WLASL eval of both checkpoints in the same notebook.
+4m22s/epoch, early stop at epoch 28, best epoch 22, no non-finite batches.
+
+| | phrases01 (0.8–1.25×, A40 bf16) | phrases02 (0.5–2×, T4 fp16) |
+|---|---|---|
+| Synthetic val WER (best epoch) | 0.294 | 0.287 |
+| exact / single-sign (n = 194) | 0.466 / 0.624 | 0.471 / 0.588 |
+| per-signer WER 34503 / 49445 / 62590 | 0.391 / 0.352 / 0.141 | 0.377 / 0.351 / 0.135 |
+| WLASL single-sign exact decode | 45.4 % | 46.0 % |
+| WLASL, aspect correction undone | 24.7 % | 23.3 % |
+| WLASL clips with / without both hands | 26.9 % / 58.2 % | 28.0 % / 58.5 % |
+| one-hand mode on two-hand clips | 26.9 → 37.1 % (+124 / −54) | 28.0 → 39.9 % (+137 / −56, p 5e-9) |
+| WLASL per-signer median (p10, p90) | 43.5 % (0, 67) | 44.8 % (0, 67) |
+
+The Kaggle run reproduced phrases01's WLASL numbers exactly (0.4536, as measured on CPU), so the
+eval is deterministic across machines. **The tempo hypothesis is not supported:** WLASL +0.7 points
+(≈ 11 clips of 1,671 net; the per-clip results were not saved, so no paired test — treat it as no
+change), synthetic WER −0.007 (single seed and different hardware/precision — within noise). The
+gap to the classifier (64.2 %) remains ~18 points. Not yet separated: the phrase score demands an
+exact one-token decode (any insertion or deletion fails) while the classifier takes an argmax over
+250 classes, so part of the gap may be the metric — next check is scoring the phrase model as a
+classifier (best non-blank class over time) on the same clips. One-hand mode helps both models on
+WLASL two-hand clips; the 0 % p10 signers are still uninspected.
+
 ---
 
 ## Pending Ideas (not yet implemented)
