@@ -11,6 +11,8 @@ with placeholders filled in:
     {CKPT_DIR}     root of shravnchandr/islr-checkpoints (fold0_graph/, phrases01/)
     {WLASL_DIR}    folder of wlasl.lmdb.mdb + train.csv (shravnchandr/wlasl-lmdb)
     {OUT}          /kaggle/working/out — everything written here is the run's output
+The IS / WLASL LMDB folders are copied to local disk first (/kaggle/input is slow for
+random reads); --no-copy reads them in place.
 stdout/stderr also go to {OUT}/run.log.
 
 Usage (from the repo root):
@@ -51,7 +53,7 @@ def user() -> str:
     return os.environ.get("KAGGLE_USERNAME") or json.loads(cfg.read_text())["username"]
 
 
-def notebook(ref: str, module: str, args: list[str]) -> dict:
+def notebook(ref: str, module: str, args: list[str], local_copy: bool = True) -> dict:
     def code(src: str) -> dict:
         return {"cell_type": "code", "metadata": {}, "execution_count": None, "outputs": [],
                 "source": src.strip("\n").splitlines(True)}
@@ -63,7 +65,7 @@ def notebook(ref: str, module: str, args: list[str]) -> dict:
                         f"at `{ref}`."]},
             code(f"""
 import glob, os, subprocess, sys
-REF, MODULE, ARGS = {ref!r}, {module!r}, {args!r}
+REF, MODULE, ARGS, LOCAL_COPY = {ref!r}, {module!r}, {args!r}, {local_copy!r}
 subprocess.run("pip install -q lmdb", shell=True, check=True)
 subprocess.run(f"git clone -q {REPO_URL} /tmp/repo && git -C /tmp/repo checkout -q {{REF}}",
                shell=True, check=True)
@@ -85,6 +87,15 @@ paths = {
     "OUT": "/kaggle/working/out",
 }
 os.makedirs(paths["OUT"], exist_ok=True)
+# /kaggle/input is slow for random reads: the phrase loader read ~125 ms per phrase from it
+# (4 ms from a local disk). Copy the LMDB folders to local disk first (minutes, once per run).
+import shutil, time
+for key in ("IS_LMDB_DIR", "WLASL_DIR") if LOCAL_COPY else ():
+    if paths[key]:
+        t0, dst = time.time(), f"/tmp/{key.lower()}"
+        shutil.copytree(paths[key], dst, dirs_exist_ok=True)
+        print(f"copied {paths[key]} → {dst} in {time.time() - t0:.0f}s")
+        paths[key] = dst
 print(paths)
 cmd = [sys.executable, "-u", "-m", MODULE] + [a.format(**paths) for a in ARGS]
 print(" ".join(cmd))
@@ -123,7 +134,7 @@ def push(a: argparse.Namespace) -> None:
     slug = f"{user()}/islr-{a.name}"
     with tempfile.TemporaryDirectory() as tmp:
         nb = Path(tmp) / f"islr-{a.name}.ipynb"
-        nb.write_text(json.dumps(notebook(ref, a.command[0], a.command[1:]), indent=1))
+        nb.write_text(json.dumps(notebook(ref, a.command[0], a.command[1:], not a.no_copy), indent=1))
         meta = {"id": slug, "title": f"islr-{a.name}", "code_file": nb.name, "language": "python",
                 "kernel_type": "notebook", "is_private": True, "enable_gpu": a.gpu,
                 "enable_tpu": False, "enable_internet": True, "keywords": [],
@@ -144,6 +155,8 @@ def main() -> None:
     s.add_argument("--accelerator", default="NvidiaTeslaT4")
     s.add_argument("--ref", help="git commit/branch to clone (default: local HEAD, must be pushed)")
     s.add_argument("--dataset", action="append", default=[], help="extra dataset source")
+    s.add_argument("--no-copy", action="store_true",
+                   help="read the LMDBs from /kaggle/input instead of a local copy")
     for name in ("status", "output"):
         s = sub.add_parser(name)
         s.add_argument("name")
