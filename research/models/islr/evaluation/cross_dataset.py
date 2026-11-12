@@ -16,7 +16,7 @@ an exact McNemar test, and per-signer spread. --out writes the numbers as JSON,
 --per-clip one row per clip (CSV) for paired comparisons between checkpoints.
 
 Usage:
-  PYTHONPATH=research/models uv run python -m cnn_transformer.cross_dataset_eval \
+  PYTHONPATH=research/models uv run python -m islr.evaluation.cross_dataset \
     --checkpoint results/results_phrases01/checkpoints/phrases_fold0_graph/best_phrases.pth \
     --data-dir data/wlasl-lmdb --out results/phrases01_wlasl.json
 """
@@ -33,11 +33,11 @@ import numpy as np
 import pandas as pd
 import torch
 
-from . import config as C
-from .data._cache_keys import lmdb_key
-from .data.build_wlasl_lmdb import signer_split
-from .error_review import load_model
-from .export_onnx import clip_features, load_ctc_model
+from ..core import config as C
+from ..core.data._cache_keys import lmdb_key
+from ..core.data.build_wlasl_lmdb import signer_split
+from ..isolated.error_review import load_model
+from ..export.export_onnx import clip_features, load_ctc_model
 
 F = C.COORD_FEAT
 

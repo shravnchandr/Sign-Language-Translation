@@ -21,7 +21,7 @@ frequent confusion pairs. Hand frames that MediaPipe did not detect (held
 positions in the stored data) are drawn faded, so tracking gaps are visible.
 
 Run from the repo root (CPU; a few minutes for 14k clips):
-  PYTHONPATH=research/models uv run python -m cnn_transformer.error_review \\
+  PYTHONPATH=research/models uv run python -m islr.isolated.error_review \\
       --checkpoint results/results_fold0_graph/checkpoints/fold0_graph/best_phase1.pth \\
       --also results/results_fold0_fixed/checkpoints/fold0_fixed/best_phase1.pth \\
       --out results/error_review/fold0_graph_errors.html
@@ -39,11 +39,11 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from .config import COORDS_PER_LM
-from .data.dataset import collate_batch, get_data_loaders
-from .data.preprocessing import hand_presence
-from .model.graph_conformer import GraphConformer
-from .model.landmark_conformer import LandmarkConformer
+from ..core.config import COORDS_PER_LM
+from ..core.data.dataset import collate_batch, get_data_loaders
+from ..core.data.preprocessing import hand_presence
+from ..core.model.graph_conformer import GraphConformer
+from ..core.model.landmark_conformer import LandmarkConformer
 
 # Stored layout: [LH 0–20 | pose 21–53 | RH 54–74 | face 75–130] landmarks.
 # Display order per frame: LH 21, RH 21, pose 0–24 (upper body), face 56 = 123 points.

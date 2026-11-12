@@ -15,7 +15,7 @@ Keys
   Length: b"fs:len:{sequence_id}"
 
 Run (from project root):
-  PYTHONPATH=research/models uv run python -m cnn_transformer.data.build_fingerspelling_lmdb \\
+  PYTHONPATH=research/models uv run python -m islr.core.data.build_fingerspelling_lmdb \\
       --data-dir  data/ASL_Fingerspelling_Recognition \\
       --lmdb-path data/cache/fingerspelling/fs.lmdb \\
       --out-csv   data/cache/fingerspelling/train.csv
@@ -74,8 +74,8 @@ def _process_parquet(args: tuple) -> list[tuple]:
     import numpy as np
     import pandas as pd
     import torch
-    from cnn_transformer.data.build_fingerspelling_lmdb import _FS_COLS
-    from cnn_transformer.config import COORD_FEAT
+    from islr.core.data.build_fingerspelling_lmdb import _FS_COLS
+    from islr.core.config import COORD_FEAT
 
     parquet_path, pending = args
     # pending: list of sequence_id ints to process from this parquet

@@ -41,10 +41,10 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
 
-from ..config import COORDS_PER_LM, LH_START, N_LH, RH_START
-from .augmentation import augment_sample, bone_scale
-from .phrase_grammar import PhraseGrammar
-from .preprocessing import hand_presence
+from ..core.config import COORDS_PER_LM, LH_START, N_LH, RH_START
+from ..core.data.augmentation import augment_sample, bone_scale
+from .grammar import PhraseGrammar
+from ..core.data.preprocessing import hand_presence
 
 _HAND_SLICES = [slice(hs, hs + N_LH * COORDS_PER_LM) for hs in (LH_START, RH_START)]
 

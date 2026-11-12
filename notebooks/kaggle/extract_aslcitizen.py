@@ -43,7 +43,7 @@ print("mediapipe", mp.__version__, "| python", sys.version.split()[0], "| CPUs",
 CELL_EXTRACT = """
 root = os.path.dirname(sorted(glob.glob("/kaggle/input/**/ASL_Citizen/splits", recursive=True))[0])
 splits = pd.concat([pd.read_csv(f"{root}/splits/{s}.csv").assign(split=s) for s in ("train", "val", "test")])
-gmap = json.load(open("/tmp/repo/research/models/cnn_transformer/data/aslcitizen_gloss_map.json"))
+gmap = json.load(open("/tmp/repo/research/models/islr/core/data/aslcitizen_gloss_map.json"))
 if not ALL:
     splits = splits[splits["Gloss"].isin(gmap)]
 splits = splits.sort_values("Video file").reset_index(drop=True)

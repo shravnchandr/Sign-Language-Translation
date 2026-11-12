@@ -13,7 +13,7 @@ all-True mask is built inside. Verified against PyTorch on real LMDB clips
 
 Usage:
   PYTHONPATH=research/models uv run --with onnx --with onnxruntime --with onnxscript \
-    python -m cnn_transformer.export_onnx \
+    python -m islr.export.export_onnx \
     --checkpoint results/results_phrases01/checkpoints/phrases_fold0_graph/best_phrases.pth \
     --out-dir exports/phrases01
 """
@@ -28,10 +28,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from . import config as C
-from .data._cache_keys import lmdb_key
-from .data.preprocessing import hand_presence
-from .model import GraphConformer, LandmarkConformer
+from ..core import config as C
+from ..core.data._cache_keys import lmdb_key
+from ..core.data.preprocessing import hand_presence
+from ..core.model import GraphConformer, LandmarkConformer
 
 
 class _AllValid(nn.Module):

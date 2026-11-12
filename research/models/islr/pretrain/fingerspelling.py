@@ -20,7 +20,7 @@ Best checkpoint = lowest greedy-decoded character error rate (CER) on held-out
 signers; CTC loss alone cannot show whether letters are actually recognised.
 
 Usage (from project root):
-  PYTHONPATH=research/models uv run python -m cnn_transformer.pretrain_fingerspelling \\
+  PYTHONPATH=research/models uv run python -m islr.pretrain.fingerspelling \\
       --data-dir   data/asl-fs-lmdb \\
       --lmdb-path  data/asl-fs-lmdb/fs.lmdb.mdb \\
       --lmdb-csv   data/asl-fs-lmdb/train.csv \\
@@ -42,14 +42,14 @@ from sklearn.model_selection import GroupShuffleSplit
 from tqdm import tqdm
 from torch.utils.data import DataLoader, Subset
 
-from .data.augmentation import AdvancedAugmentation
-from .data.dataset import BucketBatchSampler, worker_context
-from .data.fingerspelling_dataset import (
+from ..core.data.augmentation import AdvancedAugmentation
+from ..core.data.dataset import BucketBatchSampler, worker_context
+from ..core.data.fingerspelling_dataset import (
     FingerspellingDataset,
     collate_ctc,
     load_char_map,
 )
-from .model import GraphConformer, LandmarkConformer
+from ..core.model import GraphConformer, LandmarkConformer
 
 # Keys that belong to the backbone (everything that transfers to fine-tuning)
 _NON_BACKBONE_PREFIXES = ("head.", "ctc_head.", "signer_disc.", "cls_token")

@@ -30,7 +30,7 @@ Best checkpoint = lowest WER. Saves best_phrases.pth (full state dict) +
 phrases_meta.json, and val_examples.jsonl (reference / decoded / English).
 
 Usage (from the project root):
-  PYTHONPATH=research/models uv run python -m cnn_transformer.train_phrases \\
+  PYTHONPATH=research/models uv run python -m islr.phrases.train \\
       --data-dir data/asl-is-lmdb --lmdb-path data/asl-is-lmdb/is.lmdb.mdb \\
       --val-fold 0 --arch graph \\
       --init results/results_fold0_graph/checkpoints/fold0_graph/best_phase1.pth \\
@@ -51,13 +51,13 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from .data.augmentation import AdvancedAugmentation
-from .data.build_wlasl_lmdb import signer_split
-from .data.dataset import ASLDataset, BucketBatchSampler, get_data_loaders, worker_context
-from .data.fingerspelling_dataset import collate_ctc
-from .data.phrase_dataset import ConcatSource, phrase_datasets
-from .model import GraphConformer, LandmarkConformer
-from .pretrain_fingerspelling import _fmt_time, edit_distance, greedy_decode
+from ..core.data.augmentation import AdvancedAugmentation
+from ..core.data.build_wlasl_lmdb import signer_split
+from ..core.data.dataset import ASLDataset, BucketBatchSampler, get_data_loaders, worker_context
+from ..core.data.fingerspelling_dataset import collate_ctc
+from .dataset import ConcatSource, phrase_datasets
+from ..core.model import GraphConformer, LandmarkConformer
+from ..pretrain.fingerspelling import _fmt_time, edit_distance, greedy_decode
 
 _SKIP_PREFIXES = ("head.", "ctc_head.", "signer_disc.", "cls_token", "proj_head.")
 

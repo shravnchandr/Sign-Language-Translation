@@ -15,7 +15,7 @@ Output JSON:
   signs        per sign: n, top1, top3, top5, exact, confused_with [[sign, share of clips]]
 
 Usage:
-  PYTHONPATH=research/models uv run python -m cnn_transformer.sign_reliability \
+  PYTHONPATH=research/models uv run python -m islr.evaluation.sign_reliability \
     --checkpoint <best_phrases.pth> --data-dir data/asl-is-lmdb \
     --lmdb-path data/asl-is-lmdb/is.lmdb.mdb --wlasl-dir data/wlasl-lmdb --out exports/phrases04/sign_reliability.json
 """
@@ -32,10 +32,10 @@ import pandas as pd
 import torch
 from sklearn.model_selection import GroupKFold
 
-from .cross_dataset_eval import _subsample, _trim
-from .data._cache_keys import lmdb_key
-from .data.build_wlasl_lmdb import signer_split
-from .export_onnx import clip_features, load_ctc_model
+from .cross_dataset import _subsample, _trim
+from ..core.data._cache_keys import lmdb_key
+from ..core.data.build_wlasl_lmdb import signer_split
+from ..export.export_onnx import clip_features, load_ctc_model
 
 
 def _env(path: Path):

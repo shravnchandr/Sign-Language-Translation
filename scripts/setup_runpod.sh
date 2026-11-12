@@ -3,7 +3,7 @@
 #
 # Installs the environment, downloads the pre-built ASL Signs LMDB from the
 # saved output of the Kaggle build notebook, and lays it out exactly where
-# scripts/run_pipeline_cnn_transformer.sh / train.py read it by default:
+# scripts/run_pipeline_isolated.sh / train.py read it by default:
 #
 #   data/asl-is-lmdb/  is.lmdb.mdb  train.csv  sign_to_prediction_index_map.json
 #
@@ -89,7 +89,7 @@ if [ "$SKIP_ENV" = false ]; then
         source "$HOME/.local/bin/env"
     fi
     if ! command -v tmux >/dev/null 2>&1; then
-        # scripts/run_pipeline_cnn_transformer.sh runs training inside tmux by default
+        # scripts/run_pipeline_isolated.sh runs training inside tmux by default
         echo "[env] Installing tmux..."
         SUDO=""; [ "$(id -u)" -eq 0 ] || SUDO="sudo"
         $SUDO apt-get update -qq && $SUDO apt-get install -y -qq tmux >/dev/null
@@ -112,9 +112,9 @@ verify() {
 import io, json, sys
 from pathlib import Path
 import pandas as pd, torch
-from cnn_transformer.config import COORD_FEAT
-from cnn_transformer.data.dataset import _open_lmdb_env
-from cnn_transformer.data._cache_keys import CACHE_VERSION, lmdb_key
+from islr.core.config import COORD_FEAT
+from islr.core.data.dataset import _open_lmdb_env
+from islr.core.data._cache_keys import CACHE_VERSION, lmdb_key
 
 d = Path(sys.argv[1])
 df = pd.read_csv(d / "train.csv")
@@ -196,8 +196,8 @@ verify_fs() {
 import io, sys
 from pathlib import Path
 import pandas as pd, torch
-from cnn_transformer.config import COORD_FEAT
-from cnn_transformer.data.dataset import _open_lmdb_env
+from islr.core.config import COORD_FEAT
+from islr.core.data.dataset import _open_lmdb_env
 
 d = Path(sys.argv[1])
 df = pd.read_csv(d / "train.csv")
@@ -257,9 +257,9 @@ echo ""
 echo "========================================"
 echo "Setup complete. Free disk: $(free_gb .) GB"
 echo "Train (runs in a detached tmux session 'islr'; safe to disconnect):"
-echo "  bash scripts/run_pipeline_cnn_transformer.sh --skip-pretrain --num-workers 8"
+echo "  bash scripts/run_pipeline_isolated.sh --skip-pretrain --num-workers 8"
 echo "  tmux attach -t islr          # watch live; detach with Ctrl-b then d"
-echo "  tail -f logs/cnn_transformer_*.log"
+echo "  tail -f logs/isolated_*.log"
 echo "Before stopping the pod (disk is erased on stop):"
 echo "  bash scripts/runpod_results.sh send <run-name>     # then 'receive <code>' on your machine"
 echo "========================================"

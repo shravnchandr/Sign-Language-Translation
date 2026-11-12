@@ -17,7 +17,7 @@ random reads); --no-copy reads them in place.
 stdout/stderr also go to {OUT}/run.log.
 
 Usage (from the repo root):
-  python notebooks/kaggle/kaggle_run.py push phrases02 --gpu -- cnn_transformer.train_phrases \\
+  python notebooks/kaggle/kaggle_run.py push phrases02 --gpu -- islr.phrases.train \\
       --data-dir {IS_LMDB_DIR} --lmdb-path {IS_LMDB_DIR}/is.lmdb.mdb --val-fold 0 --arch graph \\
       --init {CKPT_DIR}/fold0_graph/best_phase1.pth --out-dir {OUT} --num-workers 4
   ... -- module_a args :: module_b args     # several commands, run in order

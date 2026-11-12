@@ -26,7 +26,7 @@ sequence_id, sign, wlasl_gloss, synonym, fps, source, split, aspect_k, ratio_raw
 both_hands, n_frames) and a copy of the ASL Signs sign map.
 
 Usage:
-  PYTHONPATH=research/models python -m cnn_transformer.data.build_wlasl_lmdb \
+  PYTHONPATH=research/models python -m islr.core.data.build_wlasl_lmdb \
     --wlasl-dir /kaggle/input/preprocess-wlasl-mediapipe/wlasl_landmarks \
     --wlasl-json /kaggle/input/wlasl-processed/WLASL_v0.3.json \
     --sign-map /kaggle/input/asl-signs/sign_to_prediction_index_map.json \
@@ -99,8 +99,8 @@ def _process(args: tuple) -> tuple:
     import numpy as np
     import torch
 
-    from cnn_transformer.data.build_wlasl_lmdb import aspect_factor
-    from cnn_transformer.data.preprocessing import frame_stacked_data, hand_presence
+    from islr.core.data.build_wlasl_lmdb import aspect_factor
+    from islr.core.data.preprocessing import frame_stacked_data, hand_presence
 
     path, full_path = args
     try:

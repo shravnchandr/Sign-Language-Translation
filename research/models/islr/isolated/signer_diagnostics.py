@@ -27,7 +27,7 @@ Spearman rank correlation of every statistic against accuracy is printed. With
 few signers (e.g. 9 from 3 folds) treat correlations as leads, not conclusions.
 
 Run from the repo root (CPU only; ~1–3 min at the default sample size):
-  PYTHONPATH=research/models uv run python -m cnn_transformer.signer_diagnostics \\
+  PYTHONPATH=research/models uv run python -m islr.isolated.signer_diagnostics \\
       --logs 'logs/fold*.log'
 """
 
@@ -42,10 +42,10 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 
-from .config import COORDS_PER_LM, FACE_START, LH_START, POSE_START, RH_START
-from .data._cache_keys import lmdb_key
-from .data.dataset import _open_lmdb_env
-from .data.preprocessing import hand_presence
+from ..core.config import COORDS_PER_LM, FACE_START, LH_START, POSE_START, RH_START
+from ..core.data._cache_keys import lmdb_key
+from ..core.data.dataset import _open_lmdb_env
+from ..core.data.preprocessing import hand_presence
 
 _C = COORDS_PER_LM
 

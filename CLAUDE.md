@@ -6,15 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 An Isolated Sign Language Recognition system classifying 250 ASL signs from MediaPipe landmarks.
 
-Two approaches are under active development, both under `research/models/`:
+Approaches, all under `research/models/` (current work in the `islr` package, organised by approach):
 
 | Approach | Location | Status |
 |---|---|---|
-| Factorized VQ-VAE → Conformer translator | `research/models/vqvae_seq2seq/` | Primary pipeline |
-| LandmarkConformer (end-to-end) | `research/models/cnn_transformer/` | Kaggle training target |
-| GraphConformer (hand-skeleton graph encoder) | `research/models/cnn_transformer/` (`--arch graph`) | Fold 0: 0.686 (vs 0.677 conformer; ensemble 0.703) |
-| Continuous CTC on synthetic phrases | `research/models/cnn_transformer/train_phrases.py` | Fold 0 `phrases01`: WER 0.294 on held-out signers' synthetic phrases; `phrases03` (+ WLASL train-half signers, 15 % of phrases): same WER, WLASL held-out signers 44.2 → 80.1 % single-sign; `phrases04` (+ `--aug-scale 0.3 --aug-shear 0.15 --aug-rotate 20 --aug-affine-prob 0.8`): 80.8 %, and 77.4 % (phrases03 39.2 %) with WLASL's aspect correction undone (2D coordinate distortion only; augmentation chosen on that same test half — not an independent test); ONNX export for the browser |
-| ST-GCN (legacy) | `research/models/st_gcn/` | Superseded by `--arch graph` — wrong graph indexing, by-sign split; not comparable |
+| 0. Factorized VQ-VAE → Conformer translator | `research/models/vqvae_seq2seq/` | Dormant (earliest approach); its discrete-bottleneck idea lives on as `islr/core/model/vq.py` |
+| — ST-GCN baseline | `research/models/st_gcn/` | Legacy: superseded by `--arch graph` — wrong graph indexing, by-sign split; not comparable |
+| A. Isolated-sign classifier (LandmarkConformer / GraphConformer) | `research/models/islr/isolated/` (+ `core/`) | Fold 0: 0.686 graph (0.677 conformer); ensemble 0.708 |
+| B. Fingerspelling CTC pre-training | `research/models/islr/pretrain/` | No single-model gain (0.650 vs 0.661); useful ensemble member |
+| **C. Continuous CTC on synthetic phrases** | `research/models/islr/phrases/` | **Current product model.** `phrases01`: WER 0.294 on held-out signers' synthetic phrases; `phrases03` (+ WLASL train-half signers, 15 % of phrases): same WER, WLASL held-out signers 44.2 → 80.1 % single-sign; `phrases04` (+ `--aug-scale 0.3 --aug-shear 0.15 --aug-rotate 20 --aug-affine-prob 0.8`): 80.8 %, and 77.4 % (phrases03 39.2 %) with WLASL's aspect correction undone (2D coordinate distortion only; augmentation chosen on that same test half — not an independent test); browser export in `islr/export/` |
 
 ## Repository layout
 
@@ -29,27 +29,27 @@ uv sync
 # LandmarkConformer on a fresh RunPod pod: env + tmux + LMDB download/verify, then train
 bash scripts/setup_runpod.sh                     # default: saved output of Kaggle notebook shravnchandr/build-islt-lmdb
 bash scripts/setup_runpod.sh --with-fs           # also the fingerspelling LMDB (~16 GiB) for CTC pre-training
-bash scripts/run_pipeline_cnn_transformer.sh --arch graph --val-fold 0 --fs-cleanup   # (no --compile: crashes on GPU) FS pre-train → fine-tune; the FS LMDB is downloaded only when pre-training runs (disk check: ~35 GB peak), --fs-cleanup deletes it afterwards
-bash scripts/run_pipeline_cnn_transformer.sh --skip-pretrain --num-workers 8   # relaunches in tmux session "islr"
-tmux attach -t islr                      # logs also in logs/cnn_transformer_<timestamp>.log; --no-tmux = foreground
-bash scripts/run_pipeline_cnn_transformer.sh --skip-pretrain --val-fold 2   # validate on signer fold 2 of 7 (GroupKFold)
-PYTHONPATH=research/models uv run python -m cnn_transformer.error_review --checkpoint <best_phase1.pth> --also <other.pth> --data-dir data/asl-is-lmdb --lmdb-path data/asl-is-lmdb/is.lmdb.mdb --val-fold 0 --out results/error_review/fold0_graph_errors.html   # error-review kit (CPU)
-PYTHONPATH=research/models uv run python -m cnn_transformer.signer_diagnostics --logs 'logs/fold*.log'   # per-signer data stats vs val acc (CPU)
-PYTHONPATH=research/models uv run python -m cnn_transformer.data.phrase_grammar   # sample synthetic gloss phrases + vocabulary coverage
-PYTHONPATH=research/models uv run python -m cnn_transformer.train_phrases --val-fold 0 --arch graph --init <fold0 best_phase1.pth> --out-dir checkpoints/phrases_fold0_graph 2>&1 | tee logs/phrases_fold0_graph.log   # continuous (multi-sign) CTC on synthetic phrases (GPU; run inside tmux)
-bash scripts/run_pipeline_cnn_transformer.sh --skip-pretrain --val-fold 0 --stretch-mode sample --stretch-min 0.5 --stretch-max 2.0 --stretch-prob 0.8   # per-clip tempo aug
-bash scripts/run_pipeline_cnn_transformer.sh --skip-pretrain --max-frames 256   # longer cap (default 128; 5.6% of clips > 128, 0.3% > 256)
-bash scripts/run_pipeline_cnn_transformer.sh --skip-pretrain --val-fold 0 --hand-drop-prob 0.5   # simulate hand-tracking gaps (default off)
-bash scripts/run_pipeline_cnn_transformer.sh --skip-pretrain --val-fold 0 --arch graph   # GraphConformer (hand-skeleton graph encoder)
-bash scripts/run_pipeline_cnn_transformer.sh --skip-pretrain --val-fold 0 --arch graph --bone-aug-prob 0.5   # + hand-proportion augmentation (default off)
-PYTHONPATH=research/models uv run python -m cnn_transformer.phrase_breakdown --checkpoint <best_phrases.pth> --iso-checkpoint <fold0 best_phase1.pth> --out results/<run>/breakdown.txt   # full val breakdown: WER/ops by length/kind/signer, downsampled vs full, emission timing, controlled single-sign vs classifier (CPU, ~15 min)
-PYTHONPATH=research/models uv run --with onnx --with onnxruntime --with onnxscript python -m cnn_transformer.export_onnx --checkpoint <best_phrases.pth> --out-dir exports/phrases01   # phrase CTC model → ONNX (onnxruntime-web) + labels.json + preprocess.json; verified against PyTorch on LMDB clips (CPU)
-python3 notebooks/kaggle/kaggle_run.py push <name> --gpu -- cnn_transformer.train_phrases --data-dir {IS_LMDB_DIR} --lmdb-path {IS_LMDB_DIR}/is.lmdb.mdb --val-fold 0 --arch graph --init {CKPT_DIR}/fold0_graph/best_phase1.pth --out-dir {OUT} --num-workers 4   # any repo module as a private Kaggle notebook (T4, 12 h max, ~30 GPU h/week); clones the pushed HEAD, mounts asl-is-lmdb / islr-checkpoints / wlasl-lmdb, copies LMDBs to local disk
-PYTHONPATH=research/models uv run python -m cnn_transformer.cross_dataset_eval --checkpoint <best_phrases.pth | best_phase1.pth> --data-dir data/wlasl-lmdb --out <json>   # cross-dataset score on WLASL's 67 unseen signers (phrase: single-sign exact decode; isolated: top-1/top-5), framing cost, two-hand clips, one-hand mode + McNemar
-PYTHONPATH=research/models uv run python -m cnn_transformer.sign_reliability --checkpoint <best_phrases.pth> --wlasl-dir data/wlasl-lmdb --out exports/<run>/sign_reliability.json   # per-sign accuracy / confusions / score thresholds for the app (CPU, ~15 min)
+bash scripts/run_pipeline_isolated.sh --arch graph --val-fold 0 --fs-cleanup   # (no --compile: crashes on GPU) FS pre-train → fine-tune; the FS LMDB is downloaded only when pre-training runs (disk check: ~35 GB peak), --fs-cleanup deletes it afterwards
+bash scripts/run_pipeline_isolated.sh --skip-pretrain --num-workers 8   # relaunches in tmux session "islr"
+tmux attach -t islr                      # logs also in logs/isolated_<timestamp>.log; --no-tmux = foreground
+bash scripts/run_pipeline_isolated.sh --skip-pretrain --val-fold 2   # validate on signer fold 2 of 7 (GroupKFold)
+PYTHONPATH=research/models uv run python -m islr.isolated.error_review --checkpoint <best_phase1.pth> --also <other.pth> --data-dir data/asl-is-lmdb --lmdb-path data/asl-is-lmdb/is.lmdb.mdb --val-fold 0 --out results/error_review/fold0_graph_errors.html   # error-review kit (CPU)
+PYTHONPATH=research/models uv run python -m islr.isolated.signer_diagnostics --logs 'logs/fold*.log'   # per-signer data stats vs val acc (CPU)
+PYTHONPATH=research/models uv run python -m islr.phrases.grammar   # sample synthetic gloss phrases + vocabulary coverage
+PYTHONPATH=research/models uv run python -m islr.phrases.train --val-fold 0 --arch graph --init <fold0 best_phase1.pth> --out-dir checkpoints/phrases_fold0_graph 2>&1 | tee logs/phrases_fold0_graph.log   # continuous (multi-sign) CTC on synthetic phrases (GPU; run inside tmux)
+bash scripts/run_pipeline_isolated.sh --skip-pretrain --val-fold 0 --stretch-mode sample --stretch-min 0.5 --stretch-max 2.0 --stretch-prob 0.8   # per-clip tempo aug
+bash scripts/run_pipeline_isolated.sh --skip-pretrain --max-frames 256   # longer cap (default 128; 5.6% of clips > 128, 0.3% > 256)
+bash scripts/run_pipeline_isolated.sh --skip-pretrain --val-fold 0 --hand-drop-prob 0.5   # simulate hand-tracking gaps (default off)
+bash scripts/run_pipeline_isolated.sh --skip-pretrain --val-fold 0 --arch graph   # GraphConformer (hand-skeleton graph encoder)
+bash scripts/run_pipeline_isolated.sh --skip-pretrain --val-fold 0 --arch graph --bone-aug-prob 0.5   # + hand-proportion augmentation (default off)
+PYTHONPATH=research/models uv run python -m islr.phrases.breakdown --checkpoint <best_phrases.pth> --iso-checkpoint <fold0 best_phase1.pth> --out results/<run>/breakdown.txt   # full val breakdown: WER/ops by length/kind/signer, downsampled vs full, emission timing, controlled single-sign vs classifier (CPU, ~15 min)
+PYTHONPATH=research/models uv run --with onnx --with onnxruntime --with onnxscript python -m islr.export.export_onnx --checkpoint <best_phrases.pth> --out-dir exports/phrases01   # phrase CTC model → ONNX (onnxruntime-web) + labels.json + preprocess.json; verified against PyTorch on LMDB clips (CPU)
+python3 notebooks/kaggle/kaggle_run.py push <name> --gpu -- islr.phrases.train --data-dir {IS_LMDB_DIR} --lmdb-path {IS_LMDB_DIR}/is.lmdb.mdb --val-fold 0 --arch graph --init {CKPT_DIR}/fold0_graph/best_phase1.pth --out-dir {OUT} --num-workers 4   # any repo module as a private Kaggle notebook (T4, 12 h max, ~30 GPU h/week); clones the pushed HEAD, mounts asl-is-lmdb / islr-checkpoints / wlasl-lmdb, copies LMDBs to local disk
+PYTHONPATH=research/models uv run python -m islr.evaluation.cross_dataset --checkpoint <best_phrases.pth | best_phase1.pth> --data-dir data/wlasl-lmdb --out <json>   # cross-dataset score on WLASL's 67 unseen signers (phrase: single-sign exact decode; isolated: top-1/top-5), framing cost, two-hand clips, one-hand mode + McNemar
+PYTHONPATH=research/models uv run python -m islr.evaluation.sign_reliability --checkpoint <best_phrases.pth> --wlasl-dir data/wlasl-lmdb --out exports/<run>/sign_reliability.json   # per-sign accuracy / confusions / score thresholds for the app (CPU, ~15 min)
 python3 notebooks/kaggle/kaggle_run.py status <name>; python3 notebooks/kaggle/kaggle_run.py output <name>   # → results/kaggle/<name>/ (out/run.log, checkpoints)
 uvx --with six kaggle kernels push -p notebooks/kaggle/build-wlasl-lmdb   # WLASL → ASL-Signs-compatible LMDB on Kaggle (CPU; clones this repo, runs data/build_wlasl_lmdb.py); status / output: uvx --with six kaggle kernels status|output shravnchandr/build-wlasl-lmdb
-PYTHONPATH=research/models uv run --with onnxruntime python -m cnn_transformer.browser_fixtures --parquet <competition parquets> --concat --out-dir exports/phrases01/fixtures   # golden fixtures for the browser port (raw frames → trim / features / logits / decode)
+PYTHONPATH=research/models uv run --with onnxruntime python -m islr.export.browser_fixtures --parquet <competition parquets> --concat --out-dir exports/phrases01/fixtures   # golden fixtures for the browser port (raw frames → trim / features / logits / decode)
 bash scripts/runpod_results.sh send run005       # on the pod, before stopping it (disk is erased on stop)
 bash scripts/runpod_results.sh receive <code>    # on your machine → runs/run005/ (gitignored)
 
@@ -75,7 +75,7 @@ PYTHONPATH=research/models uv run python -m vqvae_seq2seq.translation.train_tran
 
 ## Architecture
 
-### Approach 1 — Factorized VQ-VAE Pipeline (`research/models/vqvae_seq2seq/`)
+### Approach 0 — Factorized VQ-VAE Pipeline (dormant) (`research/models/vqvae_seq2seq/`)
 
 **Phase 1 — Factorized VQ-VAE:**
 - Encodes landmark chunks into 4 discrete tokens per chunk: `(pose_id, motion_id, dynamics_id, face_id)`
@@ -102,7 +102,7 @@ Parquet → LandmarkProcessor → (T, N, 3)
   → FactorizedTokenEmbedding → Conformer → HybridDecoder → 250-class output
 ```
 
-### Approach 2 — LandmarkConformer (`research/models/cnn_transformer/`)
+### Approaches A–C — LandmarkConformer backbone (`research/models/islr/`)
 
 End-to-end supervised classification. Optional CTC pre-training on ASL Fingerspelling initialises the backbone before fine-tuning on the 250-class task. Designed for Kaggle training.
 
@@ -146,39 +146,41 @@ End-to-end supervised classification. Optional CTC pre-training on ASL Fingerspe
 | `translation/beam_search.py` | Beam search with CTC prefix scoring |
 | `translation/config.py` | `TranslationConfig` |
 
-### LandmarkConformer (`research/models/cnn_transformer/`)
+### `islr` package (`research/models/islr/`)
+
+Organised by approach: `core/` (shared config, backbones, data) · `isolated/` (A: isolated-sign classifier) · `pretrain/` (B: fingerspelling CTC pre-training) · `phrases/` (C: continuous CTC on synthetic phrases — current product model) · `evaluation/` (cross-dataset, per-sign reliability) · `export/` (browser ONNX + fixtures). Run modules as `python -m islr.<subpackage>.<module>`.
 
 | File | Purpose |
 |------|---------|
-| `config.py` | Landmark layout constants, feature dimensions |
-| `model/landmark_conformer.py` | `LandmarkConformer` — main model |
-| `model/conformer.py` | `ConformerBlock`, `SinusoidalPositionalEncoding` |
-| `model/normalization.py` | `WristNormalization` |
-| `model/grl.py` | `SignerDiscriminator`, `ganin_lambda` — GRL signer-invariance |
-| `model/graph_conformer.py` | `GraphConformer` — `LandmarkConformer` with hand streams from a shared hand-skeleton graph encoder (`--arch graph`) |
-| `model/vq.py` | `EMAQuantizer`, `PartVQ` — optional per-frame discrete bottleneck, one EMA codebook per body-part group (`--vq-codes`) |
-| `model/supcon.py` | `CrossSignerSupCon` — cross-signer supervised contrastive loss with cross-batch memory |
-| `data/dataset.py` | `ASLDataset`, `BucketBatchSampler`, `get_data_loaders` |
-| `data/augmentation.py` | `AdvancedAugmentation` (7 types), `mixup_batch` |
-| `data/preprocessing.py` | `frame_stacked_data` — parquet → numpy array |
-| `data/build_wlasl_lmdb.py` + `data/wlasl_gloss_map.json` | WLASL landmark parquets (shared signs: 233 glosses → 206 signs, `--strict` = identical names) → ASL-Signs-compatible LMDB (same `frame_stacked_data`, same keys) with per-clip aspect correction (x, z scaled so shoulder drop / width = 0.40; WLASL is landscape) and train.csv (participant_id = 900000 + signer, fps, source, synonym, aspect_k, both_hands) |
-| `data/build_lmdb.py` | One-time LMDB archive builder (parallelised — `os.cpu_count()` workers by default) |
-| `data/build_fingerspelling_lmdb.py` | Fingerspelling LMDB builder — parquet-file-level parallelism (one worker per ~1 GB file) |
-| `data/fingerspelling_dataset.py` | `FingerspellingDataset`, `collate_ctc`, `load_char_map` — CTC pre-training data pipeline |
-| `data/_cache_keys.py` | `CACHE_VERSION` hash, `lmdb_key`/`lmdb_length_key` helpers |
-| `pretrain_fingerspelling.py` | CTC pre-training loop — saves `backbone_best.pth` for fine-tuning |
-| `train.py` | Two-phase training loop with TTA evaluation |
-| `error_review.py` + `error_review_template.html` | Builds a self-contained HTML kit to review a checkpoint's val errors: blind A/B comparison (query vs true-sign / predicted-sign references from other signers), tracking gaps drawn faded, answers in localStorage + CSV/JSON export |
-| `signer_diagnostics.py` | Per-signer data stats (hand detection, dominance, speed, framing) from the LMDB, rank-correlated with per-signer val acc parsed from training logs |
-| `data/phrase_grammar.py` | `PhraseGrammar` — ASL-style gloss templates over the 250 signs (+ English rendering) and random sign sequences |
-| `data/phrase_dataset.py` | `SyntheticPhraseDataset` — one-signer phrases stitched on the fly from ASL Signs clips (trim, per-clip tempo, interpolated transitions, phrase-level hold-fill) |
-| `train_phrases.py` | CTC training on synthetic phrases (gloss WER / exact / single-sign on held-out-signer phrases); `--init` from an isolated-sign or FS backbone; `--extra-data-dir <wlasl-lmdb>` mixes WLASL's train-half signers in (`--extra-frac` of phrases, `ConcatSource` + signer weights) |
-| `cross_dataset_eval.py` | Scores a phrase or isolated checkpoint on the WLASL LMDB (67 unseen signers, 206 shared signs; `--signers test` = the held-out half of `build_wlasl_lmdb.signer_split`): phrase models exact decode + classifier-style pooled top-1/top-5 + decode-contains, accuracy aspect-corrected and with the correction undone, identical vs synonym glosses, clips with vs without both hands, one-hand mode on two-hand clips (McNemar), per-signer spread; JSON out, `--per-clip` CSV for paired comparisons. Reproduces the hand-measured phrases01 (45.4 %) and fold0_graph (64.2 %) numbers |
+| `core/config.py` | Landmark layout constants, feature dimensions |
+| `core/model/landmark_conformer.py` | `LandmarkConformer` — main model |
+| `core/model/conformer.py` | `ConformerBlock`, `SinusoidalPositionalEncoding` |
+| `core/model/normalization.py` | `WristNormalization` |
+| `core/model/grl.py` | `SignerDiscriminator`, `ganin_lambda` — GRL signer-invariance |
+| `core/model/graph_conformer.py` | `GraphConformer` — `LandmarkConformer` with hand streams from a shared hand-skeleton graph encoder (`--arch graph`) |
+| `core/model/vq.py` | `EMAQuantizer`, `PartVQ` — optional per-frame discrete bottleneck, one EMA codebook per body-part group (`--vq-codes`) |
+| `core/model/supcon.py` | `CrossSignerSupCon` — cross-signer supervised contrastive loss with cross-batch memory |
+| `core/data/dataset.py` | `ASLDataset`, `BucketBatchSampler`, `get_data_loaders` |
+| `core/data/augmentation.py` | `AdvancedAugmentation` (7 types), `mixup_batch` |
+| `core/data/preprocessing.py` | `frame_stacked_data` — parquet → numpy array |
+| `core/data/build_wlasl_lmdb.py` + `core/data/wlasl_gloss_map.json` | WLASL landmark parquets (shared signs: 233 glosses → 206 signs, `--strict` = identical names) → ASL-Signs-compatible LMDB (same `frame_stacked_data`, same keys) with per-clip aspect correction (x, z scaled so shoulder drop / width = 0.40; WLASL is landscape) and train.csv (participant_id = 900000 + signer, fps, source, synonym, aspect_k, both_hands) |
+| `core/data/build_lmdb.py` | One-time LMDB archive builder (parallelised — `os.cpu_count()` workers by default) |
+| `core/data/build_fingerspelling_lmdb.py` | Fingerspelling LMDB builder — parquet-file-level parallelism (one worker per ~1 GB file) |
+| `core/data/fingerspelling_dataset.py` | `FingerspellingDataset`, `collate_ctc`, `load_char_map` — CTC pre-training data pipeline |
+| `core/data/_cache_keys.py` | `CACHE_VERSION` hash, `lmdb_key`/`lmdb_length_key` helpers |
+| `pretrain/fingerspelling.py` | CTC pre-training loop — saves `backbone_best.pth` for fine-tuning |
+| `isolated/train.py` | Two-phase training loop with TTA evaluation |
+| `isolated/error_review.py` + `isolated/error_review_template.html` | Builds a self-contained HTML kit to review a checkpoint's val errors: blind A/B comparison (query vs true-sign / predicted-sign references from other signers), tracking gaps drawn faded, answers in localStorage + CSV/JSON export |
+| `isolated/signer_diagnostics.py` | Per-signer data stats (hand detection, dominance, speed, framing) from the LMDB, rank-correlated with per-signer val acc parsed from training logs |
+| `phrases/grammar.py` | `PhraseGrammar` — ASL-style gloss templates over the 250 signs (+ English rendering) and random sign sequences |
+| `phrases/dataset.py` | `SyntheticPhraseDataset` — one-signer phrases stitched on the fly from ASL Signs clips (trim, per-clip tempo, interpolated transitions, phrase-level hold-fill) |
+| `phrases/train.py` | CTC training on synthetic phrases (gloss WER / exact / single-sign on held-out-signer phrases); `--init` from an isolated-sign or FS backbone; `--extra-data-dir <wlasl-lmdb>` mixes WLASL's train-half signers in (`--extra-frac` of phrases, `ConcatSource` + signer weights) |
+| `evaluation/cross_dataset.py` | Scores a phrase or isolated checkpoint on the WLASL LMDB (67 unseen signers, 206 shared signs; `--signers test` = the held-out half of `build_wlasl_lmdb.signer_split`): phrase models exact decode + classifier-style pooled top-1/top-5 + decode-contains, accuracy aspect-corrected and with the correction undone, identical vs synonym glosses, clips with vs without both hands, one-hand mode on two-hand clips (McNemar), per-signer spread; JSON out, `--per-clip` CSV for paired comparisons. Reproduces the hand-measured phrases01 (45.4 %) and fold0_graph (64.2 %) numbers |
 | `notebooks/kaggle/kaggle_run.py` | `push <name> [--gpu] -- <module> <args> [:: <module> <args> ...]` / `status` / `output`: runs a repo module as a private Kaggle notebook `islr-<name>` (repo at the pushed HEAD, datasets mounted, placeholders {IS_LMDB_DIR} {CKPT_DIR} {WLASL_DIR} {OUT}, log in out/run.log) |
-| `browser_fixtures.py` | Golden fixtures for a browser port: competition parquets (+ `--concat` phrase) → raw per-frame landmarks, `segment`, `subsample`, expected `(T, IN_FEAT)` features, ONNX logits and greedy decode. Built from the raw frames by an explicit contract (drop no-pose frames, hand-span segment, nose origin, presence = actual detection, hold-fill, subsample to `--max-frames` before Δ1); the training pipeline is a reported cross-check (it can misplace a lone detection) |
-| `phrase_breakdown.py` | Rebuilds a phrase run's fixed val set and reports WER / sub / del / ins by length, kind and signer, deletions with vs without the `--max-frames` downsample, CTC emission timing vs clip spans, and a McNemar single-sign comparison against an isolated classifier on the same trimmed clips |
-| `sign_reliability.py` | Per-sign reliability of a phrase checkpoint on held-out signers (ASL Signs val fold + WLASL test half), scored as the app can (pooled per-sign max frame probability): top-1/3/5, exact, top-3 confusions, calibration table and precision thresholds → `sign_reliability.json` next to the ONNX export |
-| `export_onnx.py` | Exports a phrase (CTC) checkpoint to ONNX for the browser: input `features` (1, T, IN_FEAT), 8 ≤ T ≤ 512, all-valid mask built in; writes `labels.json` and `preprocess.json` (landmark order, origin, hold-fill, hand slots by pose wrist, Δ1); exits if ONNX ≠ PyTorch logits |
+| `export/browser_fixtures.py` | Golden fixtures for a browser port: competition parquets (+ `--concat` phrase) → raw per-frame landmarks, `segment`, `subsample`, expected `(T, IN_FEAT)` features, ONNX logits and greedy decode. Built from the raw frames by an explicit contract (drop no-pose frames, hand-span segment, nose origin, presence = actual detection, hold-fill, subsample to `--max-frames` before Δ1); the training pipeline is a reported cross-check (it can misplace a lone detection) |
+| `phrases/breakdown.py` | Rebuilds a phrase run's fixed val set and reports WER / sub / del / ins by length, kind and signer, deletions with vs without the `--max-frames` downsample, CTC emission timing vs clip spans, and a McNemar single-sign comparison against an isolated classifier on the same trimmed clips |
+| `evaluation/sign_reliability.py` | Per-sign reliability of a phrase checkpoint on held-out signers (ASL Signs val fold + WLASL test half), scored as the app can (pooled per-sign max frame probability): top-1/3/5, exact, top-3 confusions, calibration table and precision thresholds → `sign_reliability.json` next to the ONNX export |
+| `export/export_onnx.py` | Exports a phrase (CTC) checkpoint to ONNX for the browser: input `features` (1, T, IN_FEAT), 8 ≤ T ≤ 512, all-valid mask built in; writes `labels.json` and `preprocess.json` (landmark order, origin, hold-fill, hand slots by pose wrist, Δ1); exits if ONNX ≠ PyTorch logits |
 
 ## Known Bugs
 
@@ -189,48 +191,48 @@ End-to-end supervised classification. Optional CTC pre-training on ASL Fingerspe
 | `research/models/vqvae_seq2seq/translation/train_translator.py` | — | ~~Chunk size hardcoded as `8` when computing encoder lengths.~~ **Fixed: uses `vqvae.config.base_chunk_size`.** |
 | `research/models/st_gcn/st_gcn_model.py` | 106–110 | `edge_importance` parameter is allocated but never used in `forward()`. |
 | `research/models/st_gcn/st_gcn_training.py` | 219–225 | Double-normalizes adjacency matrix: `LandmarkGraph.get_normalized_adjacency()` already normalizes, then chain-edges are added and it's normalized again. |
-| `research/models/cnn_transformer/data/preprocessing.py` | — | ~~BASE_PATH double-prefixing: `frame_stacked_data` prepended `BASE_PATH` to an already-absolute path built by `dataset.py`. Fixed: `pd.read_parquet(file_path)` directly.~~ **Fixed.** |
-| `research/models/cnn_transformer/model/landmark_conformer.py` | — | ~~Hand dominance swap inverted: `lh_energy > rh_energy` triggered swap when LH was already dominant.~~ **Fixed: `rh_energy > lh_energy`.** |
-| `research/models/cnn_transformer/model/normalization.py` | — | ~~`RobustNormalization` mutated input in-place, corrupting TTA source tensors.~~ **Fixed: clones output before writing.** |
-| `research/models/cnn_transformer/data/augmentation.py` | — | ~~`random_flip` double-negated velocity x-coords (two loop passes, each covering full tensor).~~ **Fixed: single pass.** |
-| `research/models/cnn_transformer/data/augmentation.py` | — | ~~`random_flip` swapped only hand blocks; pose limbs and eyebrows/lip corners stayed un-swapped, producing anatomically impossible mirrors.~~ **Removed: redundant once `HandDominanceModule` mirrors every right-dominant input.** |
-| `research/models/cnn_transformer/data/preprocessing.py` | — | ~~A never-detected hand was stored as 0 = "at the nose", indistinguishable from a hand at the face; the FS LMDB also wrote 0 for every missing frame.~~ **Fixed: `hand_presence()` flags + gap filling in both datasets.** |
-| `research/models/cnn_transformer/data/augmentation.py` | — | ~~`augment_sample` spatial shift drew an independent ±0.02 offset per feature column, distorting hand shape (≈ 0.22 mean change in joint-angle cosines vs 0.28 natural spread).~~ **Fixed: one rigid offset per axis.** |
-| `research/models/cnn_transformer/data/augmentation.py` | — | ~~`time_stretch` cropped stretched batches back to T, cutting the last 10–23% of nearly every sign (buckets make most samples ≈ T).~~ **Fixed: returns the longer batch.** |
-| `research/models/cnn_transformer/model/landmark_conformer.py` | — | ~~`HandDominanceModule` swapped LH/RH slots without mirroring, so the dominant slot held right-hand anatomy for some signers and left-hand anatomy for others.~~ **Fixed: full horizontal mirror (`MIRROR_PERM` + x negation).** |
-| `research/models/cnn_transformer/train.py` | — | ~~GRL λ applied twice (inside `grad_reverse` and as `grl_lam * adv_loss`): backbone got −λ², discriminator trained at λ×.~~ **Fixed: `loss = sign_loss + adv_loss`.** |
-| `research/models/cnn_transformer/train.py` | — | ~~Per-frame σ=0.01 noise on all features in the train loop — as large as the whole Δ1 velocity signal and ≈ 0.19 change in joint-angle cosines.~~ **Removed** (dataset-level σ=3e-3 noise before velocity remains). |
-| `research/models/cnn_transformer/train.py` | — | ~~Train accuracy scored against `y_a` only under mixup, roughly halving it (Runs 002/003 logged ~0.42).~~ **Fixed: `lam·acc_a + (1−lam)·acc_b`.** |
-| `research/models/cnn_transformer/train.py` | — | ~~Warmup "head" prefixes hardcoded `lh_geo_proj`/`rh_geo_proj`/`feat_fuse` (present in any current backbone) and omitted `dist_proj`.~~ **Fixed: head = keys missing from the checkpoint.** |
-| `research/models/cnn_transformer/data/augmentation.py` | — | ~~`mixup_batch` discarded the shuffled sample's mask.~~ **Fixed: returns `mask \| mask[index]`.** |
-| `research/models/cnn_transformer/train.py` | — | ~~Class weights built from `value_counts()` of present labels only — an absent class shortened the vector and shifted every later weight onto the wrong class.~~ **Fixed: reindexed over `range(NUM_CLASSES)`.** |
-| `research/models/cnn_transformer/train.py` | — | ~~OneCycleLR `steps_per_epoch=len(train_loader)` ignored gradient accumulation, making schedule 2–4× slower.~~ **Fixed: `total_steps` computed from actual optimizer step counts per phase.** |
-| `research/models/cnn_transformer/train.py` | — | ~~Phase 2 loop `range(epoch_idx+1, total_steps)` ran too many epochs after early stopping.~~ **Fixed: `range(NUM_EPOCHS_PHASE2)`.** |
-| `research/models/cnn_transformer/train.py` | — | ~~Validation used 5× stochastic TTA, making checkpoint selection noisy.~~ **Fixed: `evaluate_epoch` is deterministic; TTA reserved for final reporting via `evaluate_epoch_tta`.** |
-| `research/models/cnn_transformer/model/conformer.py` | — | ~~Depthwise conv ran over padded positions, leaking zeros into valid boundary frames.~~ **Fixed: conv residual zeroed at padded positions.** |
-| `research/models/cnn_transformer/data/augmentation.py` | — | ~~`mixup_batch` paired lh-dominant with rh-dominant samples, producing ambiguous hand slot assignments when `HandDominanceModule` runs inside the model.~~ **Fixed: dominance-aware pairing shuffles within same-dominance groups.** |
-| `research/models/cnn_transformer/data/preprocessing.py` + `model/landmark_conformer.py` | — | ~~Double normalization: `normalize_values` zeroed the nose before LMDB, so `RobustNormalization` in the model always fell through to the shoulder-center branch (nose appeared missing).~~ **Fixed: `normalize_values` implements the full nose→shoulder→hip fallback; `RobustNormalization` removed from model.** LMDB must be rebuilt (`_NORM_VERSION` bump auto-invalidates). |
-| `research/models/cnn_transformer/train.py` | — | ~~`FocalLoss` used scalar `alpha=0.25` — a 4× global loss scaling, not per-class weighting.~~ **Fixed: inverse-frequency per-class weights from train.csv, mean-normalised, registered as a buffer.** |
-| `research/models/cnn_transformer/train.py` | — | ~~A single NaN batch under fp16 AMP poisoned the conv-module BatchNorm running stats: GradScaler protected the weights, but eval (running stats) collapsed to chance permanently while train mode looked fine (Run 004, epoch 55).~~ **Fixed: bf16 autocast on Ampere+; non-finite-loss guard restores BN buffers and skips the backward.** |
-| `research/models/cnn_transformer/train.py` | — | ~~TTA held 5 full-batch logit tensors simultaneously (OOM risk on long sequences).~~ **Fixed: running sum accumulation; only one extra tensor in memory at a time.** |
-| `research/models/cnn_transformer/model/conformer.py` | — | ~~`SinusoidalPositionalEncoding` raised `IndexError` when `T > max_len=512`.~~ **Fixed: on-the-fly PE generation in `forward()` without mutating the registered buffer (thread-safe).** |
-| `research/models/cnn_transformer/config.py` + `model/landmark_conformer.py` | — | ~~`SELECTED_FACE_INDICES` built by iterating `FACE_LANDMARK_INDICES.values()` — a dict key reordering would silently corrupt the eyebrow/mouth slice in the model.~~ **Fixed: explicit key ordering in config.py + runtime assertion in `LandmarkConformer.__init__`.** |
-| `research/models/cnn_transformer/data/preprocessing.py` + `model/landmark_conformer.py` | — | ~~`normalize_values` subtracted the pose-nose z from hand/face z (different MediaPipe depth frames): stored wrist z ≈ 1.5 + jitter, 52–82% of wrist velocity energy, dominating dominance energy and hand–nose distance.~~ **Fixed in-model (`_fix_depth`, xy for dominance/distance/scale); no LMDB rebuild.** |
-| `research/models/cnn_transformer/data/augmentation.py` | — | ~~`finger_dropout_batch` zeroed fingers before wrist subtraction → finger = −wrist.~~ **Fixed: collapse onto the wrist.** |
-| `research/models/cnn_transformer/model/landmark_conformer.py` | — | ~~`_hand_geometry` divided fingertip distances by mean MCP distance + 1e-6: when finger dropout collapsed all four MCPs but not the thumb, features reached 2.6e5 (0.15% of training clips ≈ 9% of batches, each such batch's update dominated by one clip under gradient clipping; exposed by the VQ commitment loss, 5e4). Every run since Run 004 trained with it; eval unaffected (no finger dropout).~~ **Fixed: distance features are 0 when hand scale ≤ 0.02 (real hands ≥ 0.036).** |
-| `research/models/cnn_transformer/data/augmentation.py` + `train.py` | — | ~~Batch stretch and TTA tempo jitter interpolated Δ1 with positions (inconsistent velocity) and blended short clips' last frames with padding.~~ **Fixed: `_resample_prefix` (valid frames only, Δ1 rebuilt).** |
-| `research/models/cnn_transformer/data/dataset.py` | — | ~~Never-detected hands got random geometry from noise/shift in training only.~~ **Fixed: re-zeroed after `augment_sample`; TTA noise skips them.** |
-| `research/models/cnn_transformer/model/conformer.py` | — | ~~Padding leaked into the depthwise conv (LayerNorm/pointwise biases) and BatchNorm statistics (max Δlogit 0.165 on a 6-frame clip).~~ **Fixed: re-mask before conv + `MaskedBatchNorm1d`.** |
-| `research/models/cnn_transformer/model/landmark_conformer.py` | — | ~~`forward()` mutated its input in place (same tensor twice → Δlogit 7.8).~~ **Fixed: clone at the boundary.** |
-| `research/models/cnn_transformer/model/landmark_conformer.py` | — | ~~Dominance energies averaged over padded frames (100 pad frames: dom_ratio 0.998 → 0.969); zero motion → 0.~~ **Fixed: mask-averaged, neutral 0.5.** |
-| `research/models/cnn_transformer/data/augmentation.py` + `train.py` | — | ~~Mixup on raw clips could flip dominance before the in-model mirror; different-length partners left single-source tails under the union mask; TTA noise broke Δ1 and wrote into padding.~~ **Fixed: canonicalise before mixup, time-aligned partners, anchor mask; noise on valid positions + Δ1 rebuilt.** |
-| `research/models/cnn_transformer/data/dataset.py` | — | ~~`BucketBatchSampler` fixed batch membership for all epochs.~~ **Fixed: per-epoch pooled sort.** |
-| `research/models/cnn_transformer/train.py` + `signer_diagnostics.py` | — | ~~Clean-train line printed between best-val and its per-signer line → diagnostics parsed nothing.~~ **Fixed: order restored; parser tolerant.** |
-| `research/models/cnn_transformer/data/dataset.py` | — | ~~Length sidecar `_lengths_<CACHE_VERSION>.json` ignored `max_frames` and split membership — a run with a different cap (or an equal-size split) reused stale lengths, mis-bucketing batches.~~ **Fixed: keyed on CACHE_VERSION + max_frames + md5 of the split's paths.** |
-| `research/models/cnn_transformer/data/dataset.py` | — | ~~LMDB opened with `map_size=1<<40` (1 TiB) on flat files over NAS — caused `lmdb.open()` to hang for 45+ minutes at mmap time.~~ **Fixed: flat-file reads use `os.path.getsize() + 256 MB` as map_size.** |
-| `research/models/cnn_transformer/pretrain_fingerspelling.py` | — | ~~CTC loss computed inside `autocast` (FP16) — underflows with long sequences (max_frames=384).~~ **Fixed: `logits.float().log_softmax(-1)` before `CTCLoss`.** |
-| `research/models/cnn_transformer/pretrain_fingerspelling.py` | — | ~~`scheduler.step()` called unconditionally even when `GradScaler` skipped `optimizer.step()` on NaN/Inf gradients, desynchronising `OneCycleLR`.~~ **Fixed: compare `scaler.get_scale()` before/after to detect skips.** |
-| `research/models/cnn_transformer/pretrain_fingerspelling.py` | — | ~~Last 1–3 batches per epoch dropped when `len(train_loader) % accum_steps != 0` — gradients accumulated but never applied.~~ **Fixed: explicit `_optimizer_step()` flush after the training loop if `remainder > 0`.** |
+| `research/models/islr/core/data/preprocessing.py` | — | ~~BASE_PATH double-prefixing: `frame_stacked_data` prepended `BASE_PATH` to an already-absolute path built by `dataset.py`. Fixed: `pd.read_parquet(file_path)` directly.~~ **Fixed.** |
+| `research/models/islr/core/model/landmark_conformer.py` | — | ~~Hand dominance swap inverted: `lh_energy > rh_energy` triggered swap when LH was already dominant.~~ **Fixed: `rh_energy > lh_energy`.** |
+| `research/models/islr/core/model/normalization.py` | — | ~~`RobustNormalization` mutated input in-place, corrupting TTA source tensors.~~ **Fixed: clones output before writing.** |
+| `research/models/islr/core/data/augmentation.py` | — | ~~`random_flip` double-negated velocity x-coords (two loop passes, each covering full tensor).~~ **Fixed: single pass.** |
+| `research/models/islr/core/data/augmentation.py` | — | ~~`random_flip` swapped only hand blocks; pose limbs and eyebrows/lip corners stayed un-swapped, producing anatomically impossible mirrors.~~ **Removed: redundant once `HandDominanceModule` mirrors every right-dominant input.** |
+| `research/models/islr/core/data/preprocessing.py` | — | ~~A never-detected hand was stored as 0 = "at the nose", indistinguishable from a hand at the face; the FS LMDB also wrote 0 for every missing frame.~~ **Fixed: `hand_presence()` flags + gap filling in both datasets.** |
+| `research/models/islr/core/data/augmentation.py` | — | ~~`augment_sample` spatial shift drew an independent ±0.02 offset per feature column, distorting hand shape (≈ 0.22 mean change in joint-angle cosines vs 0.28 natural spread).~~ **Fixed: one rigid offset per axis.** |
+| `research/models/islr/core/data/augmentation.py` | — | ~~`time_stretch` cropped stretched batches back to T, cutting the last 10–23% of nearly every sign (buckets make most samples ≈ T).~~ **Fixed: returns the longer batch.** |
+| `research/models/islr/core/model/landmark_conformer.py` | — | ~~`HandDominanceModule` swapped LH/RH slots without mirroring, so the dominant slot held right-hand anatomy for some signers and left-hand anatomy for others.~~ **Fixed: full horizontal mirror (`MIRROR_PERM` + x negation).** |
+| `research/models/islr/isolated/train.py` | — | ~~GRL λ applied twice (inside `grad_reverse` and as `grl_lam * adv_loss`): backbone got −λ², discriminator trained at λ×.~~ **Fixed: `loss = sign_loss + adv_loss`.** |
+| `research/models/islr/isolated/train.py` | — | ~~Per-frame σ=0.01 noise on all features in the train loop — as large as the whole Δ1 velocity signal and ≈ 0.19 change in joint-angle cosines.~~ **Removed** (dataset-level σ=3e-3 noise before velocity remains). |
+| `research/models/islr/isolated/train.py` | — | ~~Train accuracy scored against `y_a` only under mixup, roughly halving it (Runs 002/003 logged ~0.42).~~ **Fixed: `lam·acc_a + (1−lam)·acc_b`.** |
+| `research/models/islr/isolated/train.py` | — | ~~Warmup "head" prefixes hardcoded `lh_geo_proj`/`rh_geo_proj`/`feat_fuse` (present in any current backbone) and omitted `dist_proj`.~~ **Fixed: head = keys missing from the checkpoint.** |
+| `research/models/islr/core/data/augmentation.py` | — | ~~`mixup_batch` discarded the shuffled sample's mask.~~ **Fixed: returns `mask \| mask[index]`.** |
+| `research/models/islr/isolated/train.py` | — | ~~Class weights built from `value_counts()` of present labels only — an absent class shortened the vector and shifted every later weight onto the wrong class.~~ **Fixed: reindexed over `range(NUM_CLASSES)`.** |
+| `research/models/islr/isolated/train.py` | — | ~~OneCycleLR `steps_per_epoch=len(train_loader)` ignored gradient accumulation, making schedule 2–4× slower.~~ **Fixed: `total_steps` computed from actual optimizer step counts per phase.** |
+| `research/models/islr/isolated/train.py` | — | ~~Phase 2 loop `range(epoch_idx+1, total_steps)` ran too many epochs after early stopping.~~ **Fixed: `range(NUM_EPOCHS_PHASE2)`.** |
+| `research/models/islr/isolated/train.py` | — | ~~Validation used 5× stochastic TTA, making checkpoint selection noisy.~~ **Fixed: `evaluate_epoch` is deterministic; TTA reserved for final reporting via `evaluate_epoch_tta`.** |
+| `research/models/islr/core/model/conformer.py` | — | ~~Depthwise conv ran over padded positions, leaking zeros into valid boundary frames.~~ **Fixed: conv residual zeroed at padded positions.** |
+| `research/models/islr/core/data/augmentation.py` | — | ~~`mixup_batch` paired lh-dominant with rh-dominant samples, producing ambiguous hand slot assignments when `HandDominanceModule` runs inside the model.~~ **Fixed: dominance-aware pairing shuffles within same-dominance groups.** |
+| `research/models/islr/core/data/preprocessing.py` + `model/landmark_conformer.py` | — | ~~Double normalization: `normalize_values` zeroed the nose before LMDB, so `RobustNormalization` in the model always fell through to the shoulder-center branch (nose appeared missing).~~ **Fixed: `normalize_values` implements the full nose→shoulder→hip fallback; `RobustNormalization` removed from model.** LMDB must be rebuilt (`_NORM_VERSION` bump auto-invalidates). |
+| `research/models/islr/isolated/train.py` | — | ~~`FocalLoss` used scalar `alpha=0.25` — a 4× global loss scaling, not per-class weighting.~~ **Fixed: inverse-frequency per-class weights from train.csv, mean-normalised, registered as a buffer.** |
+| `research/models/islr/isolated/train.py` | — | ~~A single NaN batch under fp16 AMP poisoned the conv-module BatchNorm running stats: GradScaler protected the weights, but eval (running stats) collapsed to chance permanently while train mode looked fine (Run 004, epoch 55).~~ **Fixed: bf16 autocast on Ampere+; non-finite-loss guard restores BN buffers and skips the backward.** |
+| `research/models/islr/isolated/train.py` | — | ~~TTA held 5 full-batch logit tensors simultaneously (OOM risk on long sequences).~~ **Fixed: running sum accumulation; only one extra tensor in memory at a time.** |
+| `research/models/islr/core/model/conformer.py` | — | ~~`SinusoidalPositionalEncoding` raised `IndexError` when `T > max_len=512`.~~ **Fixed: on-the-fly PE generation in `forward()` without mutating the registered buffer (thread-safe).** |
+| `research/models/islr/core/config.py` + `model/landmark_conformer.py` | — | ~~`SELECTED_FACE_INDICES` built by iterating `FACE_LANDMARK_INDICES.values()` — a dict key reordering would silently corrupt the eyebrow/mouth slice in the model.~~ **Fixed: explicit key ordering in config.py + runtime assertion in `LandmarkConformer.__init__`.** |
+| `research/models/islr/core/data/preprocessing.py` + `model/landmark_conformer.py` | — | ~~`normalize_values` subtracted the pose-nose z from hand/face z (different MediaPipe depth frames): stored wrist z ≈ 1.5 + jitter, 52–82% of wrist velocity energy, dominating dominance energy and hand–nose distance.~~ **Fixed in-model (`_fix_depth`, xy for dominance/distance/scale); no LMDB rebuild.** |
+| `research/models/islr/core/data/augmentation.py` | — | ~~`finger_dropout_batch` zeroed fingers before wrist subtraction → finger = −wrist.~~ **Fixed: collapse onto the wrist.** |
+| `research/models/islr/core/model/landmark_conformer.py` | — | ~~`_hand_geometry` divided fingertip distances by mean MCP distance + 1e-6: when finger dropout collapsed all four MCPs but not the thumb, features reached 2.6e5 (0.15% of training clips ≈ 9% of batches, each such batch's update dominated by one clip under gradient clipping; exposed by the VQ commitment loss, 5e4). Every run since Run 004 trained with it; eval unaffected (no finger dropout).~~ **Fixed: distance features are 0 when hand scale ≤ 0.02 (real hands ≥ 0.036).** |
+| `research/models/islr/core/data/augmentation.py` + `train.py` | — | ~~Batch stretch and TTA tempo jitter interpolated Δ1 with positions (inconsistent velocity) and blended short clips' last frames with padding.~~ **Fixed: `_resample_prefix` (valid frames only, Δ1 rebuilt).** |
+| `research/models/islr/core/data/dataset.py` | — | ~~Never-detected hands got random geometry from noise/shift in training only.~~ **Fixed: re-zeroed after `augment_sample`; TTA noise skips them.** |
+| `research/models/islr/core/model/conformer.py` | — | ~~Padding leaked into the depthwise conv (LayerNorm/pointwise biases) and BatchNorm statistics (max Δlogit 0.165 on a 6-frame clip).~~ **Fixed: re-mask before conv + `MaskedBatchNorm1d`.** |
+| `research/models/islr/core/model/landmark_conformer.py` | — | ~~`forward()` mutated its input in place (same tensor twice → Δlogit 7.8).~~ **Fixed: clone at the boundary.** |
+| `research/models/islr/core/model/landmark_conformer.py` | — | ~~Dominance energies averaged over padded frames (100 pad frames: dom_ratio 0.998 → 0.969); zero motion → 0.~~ **Fixed: mask-averaged, neutral 0.5.** |
+| `research/models/islr/core/data/augmentation.py` + `train.py` | — | ~~Mixup on raw clips could flip dominance before the in-model mirror; different-length partners left single-source tails under the union mask; TTA noise broke Δ1 and wrote into padding.~~ **Fixed: canonicalise before mixup, time-aligned partners, anchor mask; noise on valid positions + Δ1 rebuilt.** |
+| `research/models/islr/core/data/dataset.py` | — | ~~`BucketBatchSampler` fixed batch membership for all epochs.~~ **Fixed: per-epoch pooled sort.** |
+| `research/models/islr/isolated/train.py` + `signer_diagnostics.py` | — | ~~Clean-train line printed between best-val and its per-signer line → diagnostics parsed nothing.~~ **Fixed: order restored; parser tolerant.** |
+| `research/models/islr/core/data/dataset.py` | — | ~~Length sidecar `_lengths_<CACHE_VERSION>.json` ignored `max_frames` and split membership — a run with a different cap (or an equal-size split) reused stale lengths, mis-bucketing batches.~~ **Fixed: keyed on CACHE_VERSION + max_frames + md5 of the split's paths.** |
+| `research/models/islr/core/data/dataset.py` | — | ~~LMDB opened with `map_size=1<<40` (1 TiB) on flat files over NAS — caused `lmdb.open()` to hang for 45+ minutes at mmap time.~~ **Fixed: flat-file reads use `os.path.getsize() + 256 MB` as map_size.** |
+| `research/models/islr/pretrain/fingerspelling.py` | — | ~~CTC loss computed inside `autocast` (FP16) — underflows with long sequences (max_frames=384).~~ **Fixed: `logits.float().log_softmax(-1)` before `CTCLoss`.** |
+| `research/models/islr/pretrain/fingerspelling.py` | — | ~~`scheduler.step()` called unconditionally even when `GradScaler` skipped `optimizer.step()` on NaN/Inf gradients, desynchronising `OneCycleLR`.~~ **Fixed: compare `scaler.get_scale()` before/after to detect skips.** |
+| `research/models/islr/pretrain/fingerspelling.py` | — | ~~Last 1–3 batches per epoch dropped when `len(train_loader) % accum_steps != 0` — gradients accumulated but never applied.~~ **Fixed: explicit `_optimizer_step()` flush after the training loop if `remainder > 0`.** |
 
 ## Data
 
@@ -314,10 +316,10 @@ Columns: `frame`, `type`, `landmark_index`, `x`, `y`, `z`
 
 **Conformer kernel size**: must be significantly smaller than the average sequence length. VQ-VAE chunk size 8 → 40–80 frame signs produce 5–10 tokens. `encoder_kernel_size=7` fits within the sequence; larger values operate mostly on padding.
 
-**Validation splits** (`cnn_transformer/data/dataset.py:get_data_loaders`): default is a fixed `GroupShuffleSplit(test_size=0.1, random_state=42)` → 3 val signers (2044, 37779, 53618) — kept so runs stay comparable. `--val-fold k` uses unshuffled `GroupKFold(--n-folds, default 7)` by `participant_id` (deterministic; 3 signers ≈ 13–14k samples per fold); training every fold is k-fold CV by signer. Every epoch also prints per-signer val accuracy and the spread — signer variance is large, so pooled 1-point changes are not meaningful on their own.
+**Validation splits** (`islr/core/data/dataset.py:get_data_loaders`): default is a fixed `GroupShuffleSplit(test_size=0.1, random_state=42)` → 3 val signers (2044, 37779, 53618) — kept so runs stay comparable. `--val-fold k` uses unshuffled `GroupKFold(--n-folds, default 7)` by `participant_id` (deterministic; 3 signers ≈ 13–14k samples per fold); training every fold is k-fold CV by signer. Every epoch also prints per-signer val accuracy and the spread — signer variance is large, so pooled 1-point changes are not meaningful on their own.
 
 **Best model selection**: Phase 1 saves checkpoints based on val reconstruction loss (not total loss). The diversity term dominates total loss magnitude and is a poor ranking signal.
 
-**Per-sample augmentation** (`cnn_transformer/train.py`): each sample in a batch gets an independent augmentation decision. Vectorized for rotation/finger dropout. All temporal resampling (batch stretch, per-clip stretch, TTA tempo jitter) goes through `AdvancedAugmentation._resample_prefix`: valid frames only, Δ1 rebuilt from positions. Finger dropout collapses a finger onto its wrist (→ exactly 0 after `WristNormalization`); hands never detected in a clip are kept exactly zero through noise/shift. Geometric transforms touch only coordinate channels (`:PRESENCE_START`), never the presence flags. Coordinate noise is added once, in `ASLDataset` (`augment_sample`, before velocity is computed). Time stretch: `--stretch-mode batch` (default, Runs 001–005: one 0.8–1.3× factor per batch, p=0.5) or `sample` (`resample_per_sample`: independent factor per clip, Δ1 recomputed from the resampled positions). Motivated by signer diagnostics: the hardest signers' signs last ~2× longer (median 45–56 frames vs ~22) at normal per-frame speed. Hand dropout (`--hand-drop-prob`, `--hand-drop-min/max`, default off; `augmentation.hand_dropout`, applied in `ASLDataset` to training data only, after `hand_presence()` and before noise/velocity): per detected hand, one span of 10–40% of the clip is frozen at the last detection with presence 0 — exactly how real MediaPipe gaps are stored (99.4% round-trip agreement with `hand_presence`). Motivated by the fraction of no-hand frames ranking per-signer accuracy (Spearman −0.94 over 6 val signers).
+**Per-sample augmentation** (`islr/isolated/train.py`): each sample in a batch gets an independent augmentation decision. Vectorized for rotation/finger dropout. All temporal resampling (batch stretch, per-clip stretch, TTA tempo jitter) goes through `AdvancedAugmentation._resample_prefix`: valid frames only, Δ1 rebuilt from positions. Finger dropout collapses a finger onto its wrist (→ exactly 0 after `WristNormalization`); hands never detected in a clip are kept exactly zero through noise/shift. Geometric transforms touch only coordinate channels (`:PRESENCE_START`), never the presence flags. Coordinate noise is added once, in `ASLDataset` (`augment_sample`, before velocity is computed). Time stretch: `--stretch-mode batch` (default, Runs 001–005: one 0.8–1.3× factor per batch, p=0.5) or `sample` (`resample_per_sample`: independent factor per clip, Δ1 recomputed from the resampled positions). Motivated by signer diagnostics: the hardest signers' signs last ~2× longer (median 45–56 frames vs ~22) at normal per-frame speed. Hand dropout (`--hand-drop-prob`, `--hand-drop-min/max`, default off; `augmentation.hand_dropout`, applied in `ASLDataset` to training data only, after `hand_presence()` and before noise/velocity): per detected hand, one span of 10–40% of the clip is frozen at the last detection with presence 0 — exactly how real MediaPipe gaps are stored (99.4% round-trip agreement with `hand_presence`). Motivated by the fraction of no-hand frames ranking per-signer accuracy (Spearman −0.94 over 6 val signers).
 
 **Label mapping**: 250 ASL signs indexed 0–249. Mapping lives in `data/asl-is-lmdb/sign_to_prediction_index_map.json` (downloaded with the LMDB dataset).

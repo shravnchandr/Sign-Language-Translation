@@ -20,7 +20,7 @@ recogniser from leaning on the templates' word order.
 Sign names are the keys of sign_to_prediction_index_map.json (lower case).
 
 Run as a script to print samples and vocabulary coverage:
-  PYTHONPATH=research/models uv run python -m cnn_transformer.data.phrase_grammar
+  PYTHONPATH=research/models uv run python -m islr.phrases.grammar
 """
 
 from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple

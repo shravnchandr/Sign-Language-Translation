@@ -12,7 +12,7 @@ then reports:
     classifier on the identical trimmed clips (its own 128-frame cap), with McNemar
 
 Usage:
-  PYTHONPATH=research/models uv run python -m cnn_transformer.phrase_breakdown \
+  PYTHONPATH=research/models uv run python -m islr.phrases.breakdown \
     --checkpoint results/results_phrases01/checkpoints/phrases_fold0_graph/best_phrases.pth \
     --iso-checkpoint results/results_fold0_graph/checkpoints/fold0_graph/best_phase1.pth \
     --out results/results_phrases01/breakdown.txt
@@ -26,10 +26,10 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from .data.dataset import get_data_loaders
-from .data.phrase_dataset import phrase_datasets
-from .error_review import load_model
-from .export_onnx import load_ctc_model
+from ..core.data.dataset import get_data_loaders
+from .dataset import phrase_datasets
+from ..isolated.error_review import load_model
+from ..export.export_onnx import load_ctc_model
 
 
 def align(ref: list, hyp: list) -> list:

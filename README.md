@@ -67,7 +67,7 @@ These are synthetic phrases (citation-form clips, artificial transitions, no coa
 
 ## Architectures
 
-### 1 — LandmarkConformer (`research/models/cnn_transformer/`)
+### 1 — LandmarkConformer (`research/models/islr/`)
 
 End-to-end supervised classification. Processes raw landmarks into three parallel feature streams, fuses them, then runs Conformer blocks over the sequence.
 
@@ -175,34 +175,18 @@ docs/                  # local notes (gitignored); EXPERIMENT_LOG.md is tracked
 
 research/
 ├── models/
-│   ├── cnn_transformer/         # LandmarkConformer (end-to-end)
-│   │   ├── config.py                   # Landmark layout constants, feature dimensions
-│   │   ├── pretrain_fingerspelling.py  # CTC pre-training on ASL Fingerspelling
-│   │   ├── train.py                    # Training loop (isolated signs)
-│   │   ├── train_phrases.py            # CTC training on synthetic continuous phrases
-│   │   ├── phrase_breakdown.py         # Full phrase val breakdown (length / signer / timing)
-│   │   ├── export_onnx.py              # Phrase model → ONNX + labels + preprocessing spec
-│   │   ├── browser_fixtures.py         # Golden test cases for a browser port
-│   │   ├── error_review.py             # HTML kit to review val errors
-│   │   ├── signer_diagnostics.py       # Per-signer data stats vs accuracy
-│   │   ├── cross_dataset_eval.py       # Score a checkpoint on WLASL's unseen signers
-│   │   ├── sign_reliability.py         # Per-sign accuracy / confusions / score thresholds for the app
-│   │   ├── model/
-│   │   │   ├── landmark_conformer.py   # Main model
-│   │   │   ├── graph_conformer.py      # GraphConformer (--arch graph)
-│   │   │   ├── conformer.py            # ConformerBlock, SinusoidalPositionalEncoding
-│   │   │   ├── normalization.py        # WristNormalization
-│   │   │   └── grl.py                  # SignerDiscriminator, ganin_lambda
-│   │   └── data/
-│   │       ├── dataset.py              # ASLDataset, BucketBatchSampler, get_data_loaders
-│   │       ├── augmentation.py         # AdvancedAugmentation (7 types), mixup_batch
-│   │       ├── build_lmdb.py           # One-time LMDB archive builder
-│   │       ├── build_wlasl_lmdb.py     # WLASL → ASL-Signs-compatible LMDB (+ all-gloss mode)
-│   │       ├── build_fingerspelling_lmdb.py  # Fingerspelling LMDB builder
-│   │       ├── fingerspelling_dataset.py     # FingerspellingDataset, collate_ctc
-│   │       ├── phrase_grammar.py       # ASL-style gloss templates over the 250 signs
-│   │       └── phrase_dataset.py       # SyntheticPhraseDataset (clips stitched on the fly)
-│   ├── vqvae_seq2seq/          # Factorized VQ-VAE pipeline
+│   ├── islr/                    # Current work, organised by approach (python -m islr.<sub>.<module>)
+│   │   ├── core/                       # Shared by every approach
+│   │   │   ├── config.py               # Landmark layout constants, feature dimensions
+│   │   │   ├── model/                  # LandmarkConformer, GraphConformer (--arch graph), VQ, GRL, SupCon
+│   │   │   └── data/                   # Datasets, augmentation, LMDB builders (ASL Signs, fingerspelling, WLASL)
+│   │   ├── isolated/                   # A: isolated-sign classifier — train.py, error_review, signer_diagnostics
+│   │   ├── pretrain/                   # B: fingerspelling CTC pre-training — fingerspelling.py
+│   │   ├── phrases/                    # C (current product model): continuous CTC on synthetic phrases —
+│   │   │                               #    train.py, dataset.py, grammar.py, breakdown.py
+│   │   ├── evaluation/                 # cross_dataset.py (WLASL), sign_reliability.py (per-sign, for the app)
+│   │   └── export/                     # export_onnx.py (browser model), browser_fixtures.py
+│   ├── vqvae_seq2seq/          # Approach 0 (dormant): factorized VQ-VAE → translator
 │   │   ├── vqvae/
 │   │   │   ├── vqvae_model.py          # Main VQ-VAE model
 │   │   │   ├── vector_quantizer.py     # EMAVectorQuantizer, FactorizedVectorQuantizer
@@ -217,7 +201,7 @@ research/
 │   │   │   └── beam_search.py          # Beam search with CTC prefix scoring
 │   │   └── scripts/
 │   │       └── precompute_tokens.py    # Pre-tokenize dataset with frozen VQ-VAE
-│   └── st_gcn/                  # ST-GCN baseline
+│   └── st_gcn/                  # Legacy ST-GCN baseline (superseded by --arch graph)
 │       ├── graph_structure.py
 │       ├── st_gcn_layers.py
 │       └── st_gcn_model.py
@@ -277,12 +261,12 @@ Extract to `data/Isolated_ASL_Recognition/` and `data/ASL_Fingerspelling_Recogni
 git clone https://github.com/shravnchandr/Sign-Language-Translation.git && cd Sign-Language-Translation
 mkdir -p ~/.kaggle && mv ~/kaggle.json ~/.kaggle/ && chmod 600 ~/.kaggle/kaggle.json
 bash scripts/setup_runpod.sh        # uv + tmux, CUDA check, LMDB from the build notebook's output, key check
-bash scripts/run_pipeline_cnn_transformer.sh --skip-pretrain --num-workers 8
+bash scripts/run_pipeline_isolated.sh --skip-pretrain --num-workers 8
 tmux attach -t islr         # training runs in a detached tmux session; detach with Ctrl-b d
 ```
 
 The pipeline relaunches itself in tmux (session `islr`) and logs to
-`logs/cnn_transformer_<timestamp>.log`; pass `--no-tmux` to run in the foreground.
+`logs/isolated_<timestamp>.log`; pass `--no-tmux` to run in the foreground.
 
 **Before stopping the pod** (its disk is erased on stop), pull checkpoints and logs:
 
@@ -293,17 +277,17 @@ bash scripts/runpod_results.sh receive <code>        # on your machine → runs/
 
 ```bash
 # Recommended: pre-built LMDBs, skip pre-training
-bash scripts/run_pipeline_cnn_transformer.sh --skip-pretrain
+bash scripts/run_pipeline_isolated.sh --skip-pretrain
 
 # With CTC pre-training (uses downloaded FS LMDB — no 189 GB download needed)
-bash scripts/run_pipeline_cnn_transformer.sh
+bash scripts/run_pipeline_isolated.sh
 
 # Re-use an existing backbone checkpoint
-bash scripts/run_pipeline_cnn_transformer.sh \
+bash scripts/run_pipeline_isolated.sh \
   --pretrained-backbone checkpoints/pretrain_fs/backbone_best.pth
 
 # Quick smoke test
-bash scripts/run_pipeline_cnn_transformer.sh --skip-pretrain \
+bash scripts/run_pipeline_isolated.sh --skip-pretrain \
   --phase1-epochs 2 --phase2-epochs 1
 ```
 
@@ -327,17 +311,17 @@ bash scripts/run_pipeline_cnn_transformer.sh --skip-pretrain \
 
 ```bash
 # CTC on synthetic phrases, initialised from a fold-0 isolated checkpoint (GPU; inside tmux)
-PYTHONPATH=research/models uv run python -m cnn_transformer.train_phrases --val-fold 0 --arch graph \
+PYTHONPATH=research/models uv run python -m islr.phrases.train --val-fold 0 --arch graph \
   --init <fold0 best_phase1.pth> --out-dir checkpoints/phrases_fold0_graph
 
 # Full validation breakdown (CPU)
-PYTHONPATH=research/models uv run python -m cnn_transformer.phrase_breakdown \
+PYTHONPATH=research/models uv run python -m islr.phrases.breakdown \
   --checkpoint <best_phrases.pth> --iso-checkpoint <fold0 best_phase1.pth> --out <breakdown.txt>
 
 # ONNX export (+ labels.json, preprocess.json) and browser test fixtures
 PYTHONPATH=research/models uv run --with onnx --with onnxruntime --with onnxscript \
-  python -m cnn_transformer.export_onnx --checkpoint <best_phrases.pth> --out-dir exports/phrases01
-PYTHONPATH=research/models uv run --with onnxruntime python -m cnn_transformer.browser_fixtures \
+  python -m islr.export.export_onnx --checkpoint <best_phrases.pth> --out-dir exports/phrases01
+PYTHONPATH=research/models uv run --with onnxruntime python -m islr.export.browser_fixtures \
   --parquet <competition parquets> --concat --out-dir exports/phrases01/fixtures
 ```
 

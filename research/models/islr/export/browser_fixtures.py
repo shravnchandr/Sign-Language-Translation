@@ -24,7 +24,7 @@ a part is not detected). --concat also writes all inputs back to back as one
 multi-sign phrase.
 
 Usage:
-  PYTHONPATH=research/models uv run --with onnxruntime python -m cnn_transformer.browser_fixtures \
+  PYTHONPATH=research/models uv run --with onnxruntime python -m islr.export.browser_fixtures \
     --parquet data/Isolated_ASL_Recognition/train_landmark_files/16069/100015657.parquet \
               data/Isolated_ASL_Recognition/train_landmark_files/18796/1001373962.parquet \
     --concat --out-dir exports/phrases01/fixtures
@@ -39,8 +39,8 @@ import numpy as np
 import pandas as pd
 import torch
 
-from . import config as C
-from .data.preprocessing import frame_stacked_data
+from ..core import config as C
+from ..core.data.preprocessing import frame_stacked_data
 from .export_onnx import clip_features
 
 _PARTS = {"pose": 33, "left_hand": 21, "right_hand": 21, "face": 468}

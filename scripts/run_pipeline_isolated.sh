@@ -6,26 +6,26 @@
 #   2. Fine-tuning (with backbone from stage 0 if available)
 #
 # Usage:
-#   bash scripts/run_pipeline_cnn_transformer.sh
-#   bash scripts/run_pipeline_cnn_transformer.sh --skip-pretrain               # skip FS LMDB + pre-training
-#   bash scripts/run_pipeline_cnn_transformer.sh --skip-fs-lmdb                # skip FS LMDB build but still pre-train
-#   bash scripts/run_pipeline_cnn_transformer.sh --pretrained-backbone checkpoints/pretrain_fs/backbone_best.pth
-#   bash scripts/run_pipeline_cnn_transformer.sh --phase1-epochs 10 --phase2-epochs 5  # quick test
-#   bash scripts/run_pipeline_cnn_transformer.sh --map-size-gb 200
-#   bash scripts/run_pipeline_cnn_transformer.sh --allow-errors
-#   bash scripts/run_pipeline_cnn_transformer.sh --val-fold 0              # signer fold 0 of 7 (CV)
-#   bash scripts/run_pipeline_cnn_transformer.sh --stretch-mode sample --stretch-min 0.5 --stretch-max 2.0 --stretch-prob 0.8
-#   bash scripts/run_pipeline_cnn_transformer.sh --max-frames 256           # keep long clips longer (default 128)
-#   bash scripts/run_pipeline_cnn_transformer.sh --hand-drop-prob 0.5       # simulate hand-tracking gaps (default off)
-#   bash scripts/run_pipeline_cnn_transformer.sh --loss ce --seed 1         # loss ablation / another seed
-#   bash scripts/run_pipeline_cnn_transformer.sh --mixup-prob 0 / --finger-drop-prob 0 / --zero-parts face / --no-depth   # ablations
-#   bash scripts/run_pipeline_cnn_transformer.sh --supcon-weight 0.2        # cross-signer contrastive loss
-#   bash scripts/run_pipeline_cnn_transformer.sh --grl-lambda 0             # GRL off (also --dropout, --drop-path-max)
-#   bash scripts/run_pipeline_cnn_transformer.sh --aug-rotate 30 --aug-shear 0.15 --aug-scale 0.2 --aug-affine-prob 0.75
-#   bash scripts/run_pipeline_cnn_transformer.sh --arch graph               # GraphConformer: hand-skeleton graph encoder
-#   bash scripts/run_pipeline_cnn_transformer.sh --arch graph --bone-aug-prob 0.5   # + bone-length (hand proportion) augmentation
-#   bash scripts/run_pipeline_cnn_transformer.sh --arch graph --val-fold 0  # FS pre-train (same arch/seed) then fine-tune
-#   bash scripts/run_pipeline_cnn_transformer.sh --arch graph --fs-cleanup  # ... and delete the FS LMDB (~16 GiB) after pre-training
+#   bash scripts/run_pipeline_isolated.sh
+#   bash scripts/run_pipeline_isolated.sh --skip-pretrain               # skip FS LMDB + pre-training
+#   bash scripts/run_pipeline_isolated.sh --skip-fs-lmdb                # skip FS LMDB build but still pre-train
+#   bash scripts/run_pipeline_isolated.sh --pretrained-backbone checkpoints/pretrain_fs/backbone_best.pth
+#   bash scripts/run_pipeline_isolated.sh --phase1-epochs 10 --phase2-epochs 5  # quick test
+#   bash scripts/run_pipeline_isolated.sh --map-size-gb 200
+#   bash scripts/run_pipeline_isolated.sh --allow-errors
+#   bash scripts/run_pipeline_isolated.sh --val-fold 0              # signer fold 0 of 7 (CV)
+#   bash scripts/run_pipeline_isolated.sh --stretch-mode sample --stretch-min 0.5 --stretch-max 2.0 --stretch-prob 0.8
+#   bash scripts/run_pipeline_isolated.sh --max-frames 256           # keep long clips longer (default 128)
+#   bash scripts/run_pipeline_isolated.sh --hand-drop-prob 0.5       # simulate hand-tracking gaps (default off)
+#   bash scripts/run_pipeline_isolated.sh --loss ce --seed 1         # loss ablation / another seed
+#   bash scripts/run_pipeline_isolated.sh --mixup-prob 0 / --finger-drop-prob 0 / --zero-parts face / --no-depth   # ablations
+#   bash scripts/run_pipeline_isolated.sh --supcon-weight 0.2        # cross-signer contrastive loss
+#   bash scripts/run_pipeline_isolated.sh --grl-lambda 0             # GRL off (also --dropout, --drop-path-max)
+#   bash scripts/run_pipeline_isolated.sh --aug-rotate 30 --aug-shear 0.15 --aug-scale 0.2 --aug-affine-prob 0.75
+#   bash scripts/run_pipeline_isolated.sh --arch graph               # GraphConformer: hand-skeleton graph encoder
+#   bash scripts/run_pipeline_isolated.sh --arch graph --bone-aug-prob 0.5   # + bone-length (hand proportion) augmentation
+#   bash scripts/run_pipeline_isolated.sh --arch graph --val-fold 0  # FS pre-train (same arch/seed) then fine-tune
+#   bash scripts/run_pipeline_isolated.sh --arch graph --fs-cleanup  # ... and delete the FS LMDB (~16 GiB) after pre-training
 #
 # Fingerspelling data is fetched only when pre-training actually runs (not with
 # --skip-pretrain or --pretrained-backbone): if the FS LMDB is not at its default
@@ -33,16 +33,16 @@
 # verifies it, after checking there is enough free disk.
 #
 # Recommended (downloaded LMDB datasets, skip all local builds):
-#   bash scripts/run_pipeline_cnn_transformer.sh --skip-pretrain
-#   bash scripts/run_pipeline_cnn_transformer.sh --pretrain-epochs 30   # pre-train longer (default 20, patience 5)
+#   bash scripts/run_pipeline_isolated.sh --skip-pretrain
+#   bash scripts/run_pipeline_isolated.sh --pretrain-epochs 30   # pre-train longer (default 20, patience 5)
 #
 # tmux: started outside tmux, the pipeline relaunches itself in a detached tmux
 # session (default name "islr") so it survives a closed terminal / browser tab,
-# and tees all output to logs/cnn_transformer_<timestamp>.log.
+# and tees all output to logs/isolated_<timestamp>.log.
 #   tmux attach -t islr        # watch live; detach again with Ctrl-b then d
-#   tail -f logs/cnn_transformer_*.log
-#   bash scripts/run_pipeline_cnn_transformer.sh --no-tmux ...   # run in the foreground
-#   bash scripts/run_pipeline_cnn_transformer.sh --tmux-session exp2 ...  # parallel/other run
+#   tail -f logs/isolated_*.log
+#   bash scripts/run_pipeline_isolated.sh --no-tmux ...   # run in the foreground
+#   bash scripts/run_pipeline_isolated.sh --tmux-session exp2 ...  # parallel/other run
 
 set -e
 ORIG_ARGS=("$@")
@@ -69,9 +69,9 @@ export PYTHONUNBUFFERED=1
 
 # ── Defaults ────────────────────────────────────────────────────────────────
 DATA_DIR="data/asl-is-lmdb"          # downloaded from shravnchandr/asl-is-lmdb
-CACHE_DIR="data/cache/cnn_transformer"
+CACHE_DIR="data/cache/islr"
 LMDB_PATH="data/asl-is-lmdb/is.lmdb.mdb"
-CHECKPOINT_DIR="checkpoints/cnn_transformer"
+CHECKPOINT_DIR="checkpoints/islr"
 PHASE1_EPOCHS=80
 PHASE2_EPOCHS=0    # cosine warmdown; never beat Phase 1 best in Runs 002/003
 PATIENCE=20
@@ -164,7 +164,7 @@ if [ "$USE_TMUX" = true ] && [ -z "${TMUX:-}" ]; then
         exit 1
     fi
     mkdir -p logs
-    LOG="logs/cnn_transformer_$(date +%Y%m%d_%H%M%S).log"
+    LOG="logs/isolated_$(date +%Y%m%d_%H%M%S).log"
     # Child runs with --no-tmux (no recursion). The pane stays open afterwards
     # (exec bash) so the final output and exit code can still be inspected.
     RUN_CMD=$(printf '%q ' bash "$SELF" "${ORIG_ARGS[@]}" --no-tmux)
@@ -222,7 +222,7 @@ if [ "$SKIP_PRETRAIN" = false ]; then
         echo ""
         echo "[FS LMDB] Building / resuming fingerspelling LMDB..."
         mkdir -p "$(dirname "$FS_LMDB_PATH")" "$(dirname "$FS_LMDB_CSV")"
-        uv run python -m cnn_transformer.data.build_fingerspelling_lmdb \
+        uv run python -m islr.core.data.build_fingerspelling_lmdb \
             --data-dir  "$FS_DATA_DIR" \
             --lmdb-path "$FS_LMDB_PATH" \
             --out-csv   "$FS_LMDB_CSV" \
@@ -246,7 +246,7 @@ if [ "$SKIP_PRETRAIN" = false ]; then
     echo ""
     echo "[Pretrain] CTC pre-training on ASL Fingerspelling..."
     mkdir -p "$PRETRAIN_CHECKPOINT_DIR"
-    uv run python -m cnn_transformer.pretrain_fingerspelling \
+    uv run python -m islr.pretrain.fingerspelling \
         --data-dir   "$FS_DATA_DIR" \
         --lmdb-path  "$FS_LMDB_PATH" \
         --lmdb-csv   "$FS_LMDB_CSV" \
@@ -270,7 +270,7 @@ fi
 if [ "$SKIP_LMDB" = false ]; then
     echo ""
     echo "[LMDB] Building / resuming ASL LMDB archive (existing keys are skipped)..."
-    uv run python -m cnn_transformer.data.build_lmdb \
+    uv run python -m islr.core.data.build_lmdb \
         --data-dir  "$DATA_DIR" \
         --lmdb-path "$LMDB_PATH" \
         $( [ -n "$MAP_SIZE_GB" ]   && echo "--map-size-gb $MAP_SIZE_GB" ) \
@@ -284,7 +284,7 @@ fi
 # ── Stage 2: Fine-tuning ──────────────────────────────────────────────────────
 echo ""
 echo "[Train] Running two-phase LandmarkConformer training..."
-uv run python -m cnn_transformer.train \
+uv run python -m islr.isolated.train \
     --data-dir "$DATA_DIR" \
     --cache-dir "$CACHE_DIR" \
     ${LMDB_PATH:+--lmdb-path "$LMDB_PATH"} \

@@ -13,13 +13,13 @@ import torch.optim as optim
 from torch.amp.autocast_mode import autocast
 from torch.amp.grad_scaler import GradScaler
 from tqdm import tqdm
-from .data.dataset import clean_subset_loader, get_data_loaders
-from .data.augmentation import AdvancedAugmentation, mixup_batch
-from .model.landmark_conformer import HandDominanceModule, LandmarkConformer
-from .model.graph_conformer import GraphConformer
-from .model.grl import ganin_lambda
-from .model.supcon import CrossSignerSupCon
-from .model.vq import EMAQuantizer
+from ..core.data.dataset import clean_subset_loader, get_data_loaders
+from ..core.data.augmentation import AdvancedAugmentation, mixup_batch
+from ..core.model.landmark_conformer import HandDominanceModule, LandmarkConformer
+from ..core.model.graph_conformer import GraphConformer
+from ..core.model.grl import ganin_lambda
+from ..core.model.supcon import CrossSignerSupCon
+from ..core.model.vq import EMAQuantizer
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 use_amp = device.type == "cuda"
@@ -445,12 +445,12 @@ def main():
     )
     parser.add_argument(
         "--cache-dir",
-        default="data/cache/cnn_transformer",
+        default="data/cache/islr",
         help="Directory for per-sample .pt cache (built on first run, reused after)",
     )
     parser.add_argument(
         "--checkpoint-dir",
-        default="checkpoints/cnn_transformer",
+        default="checkpoints/islr",
         help="Directory to save model checkpoints",
     )
     parser.add_argument(
@@ -596,7 +596,7 @@ def main():
         "--lmdb-path",
         default="data/asl-is-lmdb/is.lmdb.mdb",
         help="Path to LMDB archive. Download from shravnchandr/asl-is-lmdb or "
-        "build locally with: python -m cnn_transformer.data.build_lmdb",
+        "build locally with: python -m islr.core.data.build_lmdb",
     )
     parser.add_argument(
         "--pretrained-backbone",

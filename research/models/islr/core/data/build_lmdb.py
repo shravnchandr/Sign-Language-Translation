@@ -7,9 +7,9 @@ overhead: one file open per process, then random-access reads.
 
 Run once before training (from the project root):
 
-    PYTHONPATH=research/models uv run python -m cnn_transformer.data.build_lmdb \\
+    PYTHONPATH=research/models uv run python -m islr.core.data.build_lmdb \\
         --data-dir  data/Isolated_ASL_Recognition \\
-        --lmdb-path data/cache/cnn_transformer/asl.lmdb
+        --lmdb-path data/cache/islr/asl.lmdb
 
 Resume safety: existing keys are skipped, so an interrupted run can be
 restarted without re-processing completed samples.
@@ -45,7 +45,7 @@ def _process_sample(args: tuple) -> tuple:
     """
     import io
     import torch
-    from cnn_transformer.data.preprocessing import frame_stacked_data
+    from islr.core.data.preprocessing import frame_stacked_data
 
     path, full_path = args
     try:

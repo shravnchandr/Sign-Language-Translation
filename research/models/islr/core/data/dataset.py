@@ -92,7 +92,7 @@ class ASLDataset(Dataset):
 
     LMDB is the preferred backend on RunPod / network-attached storage: a single
     file avoids the per-open() overhead of 94k individual .pt files.  Build it
-    once with `python -m cnn_transformer.data.build_lmdb`.
+    once with `python -m islr.core.data.build_lmdb`.
 
     The .pt cache is the fallback when LMDB hasn't been built yet.
 
@@ -383,7 +383,7 @@ def get_data_loaders(
         data_dir:    Directory with train.csv and sign_to_prediction_index_map.json.
         cache_dir:   Directory for per-sample .pt files (fallback when LMDB not built).
         lmdb_path:   Path to LMDB archive (recommended on network storage). Build with
-                     `python -m cnn_transformer.data.build_lmdb`.
+                     `python -m islr.core.data.build_lmdb`.
         batch_size:  Samples per batch.
         num_workers: DataLoader worker processes.
         max_frames:  Truncate sequences longer than this.
