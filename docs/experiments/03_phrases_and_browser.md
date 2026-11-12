@@ -1,0 +1,242 @@
+# Continuous phrases and the browser model (approach C)
+
+phrases01–05, ONNX export and browser conventions, Kaggle GPU runner, live-test diagnoses, per-sign reliability. Entries in chronological order; paths are as they were at the time.
+
+---
+
+### Phrases 01 — synthetic continuous CTC, fold 0 (`phrases_fold0_graph`, 2026-11-11)
+`train_phrases.py --val-fold 0 --arch graph --init <fold0_graph best_phase1.pth>`, all defaults
+(40k train phrases/epoch redrawn, 3k fixed val phrases from the 3 held-out signers, 1–5 signs,
+30 % random, holdout 10 %, lr 3e-4 OneCycle, 30 epochs). A40 bf16, ~4m40s/epoch, ~2.4 h.
+Val kinds: seen 2,065 / unseen 224 / random 711. Results in `results/results_phrases01/` (gitignored).
+
+| Epoch | Val WER | Exact | Single (n=194) | 34503 / 49445 / 62590 | random / seen / unseen |
+|---|---|---|---|---|---|
+| 1 | 0.842 | 0.003 | 0.036 | | 0.969 / 0.785 / 0.811 |
+| 6 | 0.392 | 0.342 | 0.412 | 0.480 / 0.487 / 0.210 | 0.528 / 0.332 / 0.358 |
+| 13 | 0.325 | 0.425 | 0.531 | 0.409 / 0.398 / 0.170 | 0.442 / 0.271 / 0.318 |
+| **24 (best)** | **0.294** | **0.466** | **0.624** | 0.391 / 0.352 / 0.141 | 0.383 / 0.252 / 0.296 |
+| 30 | 0.299 | 0.455 | 0.608 | 0.392 / 0.368 / 0.141 | 0.378 / 0.261 / 0.312 |
+
+Train loss 0.17 at the end vs val loss flat at ~1.5 from epoch 11 (CTC loss also penalises
+confidence; WER kept improving until the LR had decayed).
+
+**Short-phrase subset** (`val_examples.jsonl` = the 300 *shortest* val phrases, 1–3 signs, WER
+0.250 vs 0.294 overall): 383 correct / 116 substitutions / 7 insertions / 2 deletions over 501
+signs. Substitutions dominate *in this subset*; diffuse, several are the isolated review's
+look-alikes (sleep→nap, mouth→chin, say→chin, see→look). (An earlier version of this entry
+concluded "segmentation is essentially solved" from this subset — not supported; see below.)
+
+**Full 3,000-phrase breakdown** (`phrase_breakdown.py`, epoch-24 checkpoint, val rebuilt exactly as in training, CPU;
+reproduces WER 0.293 / exact 0.467). Rates per reference sign:
+
+| Signs | Phrases | WER | Exact | Sub | Del | Ins |
+|---|---|---|---|---|---|---|
+| 1 | 194 | 0.397 | 0.624 | 0.335 | 0.005 | 0.057 |
+| 2 | 882 | 0.279 | 0.557 | 0.243 | 0.015 | 0.021 |
+| 3 | 1,370 | 0.260 | 0.477 | 0.209 | 0.032 | 0.018 |
+| 4 | 361 | 0.317 | 0.305 | 0.252 | 0.055 | 0.010 |
+| 5 | 193 | 0.402 | 0.140 | 0.298 | 0.089 | 0.015 |
+
+- Substitutions dominate at every length, but **deletions grow with length** (0.5 % → 8.9 %), almost
+  all from the two weaker signers (5-sign del: 34503 0.170, 49445 0.100, 62590 0.016). On 4–5-sign
+  phrases, those downsampled to the 384-frame cap delete more (34503 0.210 vs 0.094 full-length;
+  49445 0.113 vs 0.075) — the cap contributes, but full-length phrases of these signers still delete
+  more than 62590 (0.010), and downsampled phrases are also the longest/slowest (confounded).
+  Candidate fix to test: `--max-frames 512`.
+- Correct sign count ≠ correct boundaries. Proxy check: the frame where CTC emits each correctly
+  recognised sign lies inside that sign's own clip span for 5,699/6,145 (92.7 %), substitutions
+  1,781/2,006 (88.8 %); the rest fire in transitions or a neighbouring clip. Emission timing, not a
+  boundary metric.
+- Signer: 62590 WER 0.140 vs 34503 0.390 / 49445 0.352; the gap widens with length.
+
+**Single sign, controlled** (same 194 trimmed clips, same input features; isolated classifier given
+its 128-frame cap): classifier 131/194 = 67.5 %, CTC 121/194 = 62.4 %; both right 106, classifier
+only 25, CTC only 15 (McNemar χ² 2.5, p ≈ 0.11 — not significant). Binomial 95 % CI for 62.4 % at
+n = 194 ≈ 55–69 % (the earlier "±3.5 pts" was one standard error).
+
+**Reading:**
+- The run learns stitched sequences, including held-out combinations: unseen sequences cost ~4 pts
+  WER over seen (0.294 vs 0.251); random sequences 0.383 (possibly also because they use signs the
+  templates rarely use — not checked).
+- Isolated-sign accuracy is not established as a ceiling: context could resolve ambiguous signs in
+  natural phrases, and nothing here measures that.
+- Synthetic stitched phrases (citation-form clips, interpolated transitions, no coarticulation or
+  non-manuals) are an unvalidated proxy for natural signing — neither a demonstrated upper nor
+  lower bound until tested on real continuous signing.
+
+### Browser export + training-data conventions (2026-11-11)
+`export_onnx.py` → `sign_ctc.onnx` (26.8 MiB fp32, `features` (1, T, 788), 8 ≤ T ≤ 512, all-valid mask
+built in): max |Δlogit| vs PyTorch 2.3e-4, identical frame argmax on 32/32 LMDB inputs (single clips
+and stitched phrases). Needed one model change: `HandDominanceModule` mirrors with `torch.where`
+instead of boolean indexing (bit-identical on a 16-sequence test). `browser_fixtures.py` writes
+raw-frame → feature → logit fixtures; an independent re-implementation of the written feature rules
+matches them to 4e-7, 0 presence mismatches. (Review fix, same day: fixtures were computed by the
+training pipeline, which re-infers presence from filled coordinates — a hand detected only at frame
+77 was flagged at frame 104 — and skipped the 384-frame subsample (a 2,100-frame concat stayed
+2,100). They are now built from the raw frames by an explicit contract: presence = actual
+detection, subsample before Δ1; the training pipeline is reported as a cross-check.) Conventions a live camera pipeline must reproduce,
+measured on the LMDB:
+- **Unmirrored video:** pose 11 (left shoulder) x > pose 12 x in 600/600 clips.
+- **Hand slots by body side:** `left_hand` wrist nearest pose 15 (left wrist) for 574/576 hands —
+  not MediaPipe Tasks' handedness label (which assumes a mirrored selfie image).
+- **Portrait ≈ 3:4 frames:** p99 |dy| / |dx| of hand bones in normalised coords 0.76–0.82 (45k hand
+  frames; per signer 0.67–1.08) ≈ width/height. Mean shoulder drop below the nose / shoulder width
+  = 0.40 (p10–p90 0.34–0.45, 2,000 clips); an uncropped 16:9 frame gives ≈ 0.9. Uncropped
+  landscape on held-out clips: accuracy 62 % → 14 %.
+- Simulated integration mistakes on 150 held-out clips (accuracy, correct pipeline 62 %): y flipped
+  0 %, planar xyz layout 0 %, pose-first layout 2 %, hand slots swapped 2 %, no nose subtraction 13 %,
+  presence all 1 27 %, z = 0 47 %, missing hand = 0 instead of held 51 %, Δ1 = 0 59 %, 10 fps 61 %.
+
+### Training on Kaggle GPU instead of RunPod (2026-11-11)
+`notebooks/kaggle/kaggle_run.py` runs any module as a private Kaggle notebook (T4 16 GB, 4 CPUs,
+Python 3.13, torch 2.11.0+cu130, 12 h per run). Private datasets: `asl-is-lmdb`, `islr-checkpoints`
+(fold0_graph, phrases01), `wlasl-lmdb`. Smoke test (`islr-phrases-smoke`: phrase CTC, 1,600 train /
+300 val phrases, 2 epochs) needed three fixes before it was usable:
+1. **Forked DataLoader workers** inherited the parent's LMDB environment; py-lmdb refused to reopen
+   it and the dataset fell back to parquets → FileNotFoundError. RunPod's Python 3.14 defaults to
+   forkserver, so this never showed there. All DataLoaders now use forkserver (`worker_context`).
+2. **Emulated bf16 on the T4:** `is_bf16_supported()` returns True; now bf16 only at compute
+   capability ≥ 8 (A40 unchanged), fp16 + GradScaler otherwise. No non-finite batches in the smoke.
+3. **Input-disk reads:** fp16 alone did not change speed (~1 batch/s; batches arrived 4 at a time
+   every ~4 s = data-bound). Copying the 6 GB LMDB to local disk (33 s) → ~6 batches/s steady, epoch
+   time 1m20s → 30s on the smoke set; losses identical to the uncopied run (only I/O changed).
+Estimate for a default phrase run (1,250 batches + 3,000 val phrases): ~4–5 min/epoch, 30 epochs
+≈ 2.5 h — comparable to the A40 (4m40s/epoch).
+
+### phrases02: wider tempo range, 0.5–2× (2026-11-11)
+Hypothesis: the phrase model transfers worse to WLASL than the isolated classifier (45.4 % vs
+64.2 %) because it was trained at tempo 0.8–1.25× while WLASL signers sign at other speeds.
+`islr-phrases02-tempo` (Kaggle T4, fp16): phrases01's recipe with `--tempo-min 0.5 --tempo-max 2.0`,
+same init (fold0_graph), same fold-0 val phrases; WLASL eval of both checkpoints in the same notebook.
+4m22s/epoch, early stop at epoch 28, best epoch 22, no non-finite batches.
+
+| | phrases01 (0.8–1.25×, A40 bf16) | phrases02 (0.5–2×, T4 fp16) |
+|---|---|---|
+| Synthetic val WER (best epoch) | 0.294 | 0.287 |
+| exact / single-sign (n = 194) | 0.466 / 0.624 | 0.471 / 0.588 |
+| per-signer WER 34503 / 49445 / 62590 | 0.391 / 0.352 / 0.141 | 0.377 / 0.351 / 0.135 |
+| WLASL single-sign exact decode | 45.4 % | 46.0 % |
+| WLASL, aspect correction undone | 24.7 % | 23.3 % |
+| WLASL clips with / without both hands | 26.9 % / 58.2 % | 28.0 % / 58.5 % |
+| one-hand mode on two-hand clips | 26.9 → 37.1 % (+124 / −54) | 28.0 → 39.9 % (+137 / −56, p 5e-9) |
+| WLASL per-signer median (p10, p90) | 43.5 % (0, 67) | 44.8 % (0, 67) |
+
+The Kaggle run reproduced phrases01's WLASL numbers exactly (0.4536, as measured on CPU), so the
+eval is deterministic across machines. **The tempo hypothesis is not supported:** WLASL +0.7 points
+(≈ 11 clips of 1,671 net; the per-clip results were not saved, so no paired test — treat it as no
+change), synthetic WER −0.007 (single seed and different hardware/precision — within noise). The
+gap to the classifier (64.2 %) remains ~18 points. Not yet separated: the phrase score demands an
+exact one-token decode (any insertion or deletion fails) while the classifier takes an argmax over
+250 classes, so part of the gap may be the metric — next check is scoring the phrase model as a
+classifier (best non-blank class over time) on the same clips. One-hand mode helps both models on
+WLASL two-hand clips; the 0 % p10 signers are still uninspected.
+
+### phrases03: WLASL training signers mixed into phrase training (2026-11-11)
+`build_wlasl_lmdb.signer_split`: WLASL signers sorted by clip count, dealt snake-wise → train half
+33 signers / 847 clips, test half 34 / 824 clips; both have all 206 signs and 40 / 42 % two-hand
+clips. `train_phrases --extra-data-dir {WLASL_DIR} --extra-frac 0.15`: 15 % of phrases come from WLASL
+train-half signers (each in proportion to its clips; one signer per phrase as before, ~2.6 signs),
+the rest from the 18 ASL Signs training signers as before; phrases01's recipe otherwise (tempo
+0.8–1.25×). Each WLASL clip is reused ~19× per epoch — overfitting to those signers is possible and is
+what the held-out test half measures. Baselines on the **test half**: classifier 66.7 %; phrases01
+exact 44.2 % / pooled 57.0 % (two-hand clips exact 25.8 %); phrases02 44.2 % / 57.8 %.
+Kaggle notebook `islr-phrases03-wlasl` (commit 6ede152).
+
+**Result** (T4 fp16, 3m53s/epoch, early stop at 28, best epoch 22). Paired on the 824 test-half
+clips; phrases01 rescored in the same notebook = the local CSV clip for clip.
+
+| WLASL test half (34 unseen signers) | phrases01 | phrases03 | paired |
+|---|---|---|---|
+| exact decode | 44.2 % | **80.1 %** | +313 / −17, p 1e-71 |
+| pooled top-1 / top-5 | 57.0 / 75.6 % | 81.2 / 94.5 % | top-1 +219 / −20 |
+| two-hand clips (345), exact | 25.8 % | 76.8 % | p 2e-45 (classifier 53.0 %) |
+| one-hand clips (479), exact | 57.4 % | 82.5 % | p 9e-28 (classifier 76.6 %) |
+| aspect correction undone | 24.3 % | 39.2 % | |
+| decodes with 0 / 1 / 2+ signs | 35 / 605 / 184 | 0 / 811 / 13 | |
+| one-hand mode on two-hand clips (345) | 25.8 → 39.4 % (helps, +71 / −24, p 1e-6) | 76.8 → 57.1 % (**hurts**, +13 / −81, p 4e-13) | |
+| signers with ≥ 20 clips improved | | 11 / 11 | |
+| ASL Signs synthetic val WER | 0.294 | 0.296 | in-domain unchanged |
+
+Also beats the fold0_graph classifier on the same clips (81.2 vs 66.7 %, +166 / −47).
+**Leakage check:** no shared video ids, no identical clips across halves, and a test clip's nearest
+same-sign train-half clip (32-frame upper-body trajectory) is no closer than its nearest other-signer
+test-half clip (median 2.22 vs 2.10; none < 0.05). WLASL signer ids could still merge or split real
+people; not checkable here.
+
+What this does and does not show: ~850 clips (≈ 4 per sign) gave +36 points on new WLASL signers
+without costing anything in-domain, and the model now uses a second hand (two-hand clips 26 → 77 %;
+removing the base hand now hurts). But the test signers come from the **same websites / recording
+setups** as the train half, so part of the gain is adaptation to WLASL's recording style (one-hand
+clips also rose 57 → 83 %, single-sign decodes 73 → 98 %). It is evidence that a small amount of
+two-handed, differently-recorded data matters a lot — not yet that the model works on a webcam.
+Consequences: one-hand mode should be off for phrases03; exported to `exports/phrases03/`
+(ONNX parity 1.06e-4, 32/32 argmax) for live testing in the browser.
+
+### phrases04: viewpoint augmentation on top of phrases03 (2026-11-12)
+Live use of phrases03 needed several camera angles / distances before a sign was recognised. A
+synthetic sweep on the WLASL test half (phrases03, scratch script, not committed) showed distance
+alone costs nothing (shoulder-width scaling: ×0.5 / ×2 = 80.1 %), while horizontal stretch (aspect,
+body turn) cost 2–14 points (×0.75 78.3, ×1.33 75.2, ×0.6 69.4, ×1.67 65.9 %), vertical squash ×0.75
+75.2 %, tilt −25° 75.1 %. Phrase training only used ±15° rotation at p 0.5. New flags `--aug-shear`,
+`--aug-scale` (training only, default off) pass `spatial_affine`'s existing shear / per-axis scale
+through. phrases04 = phrases03 + `--aug-rotate 20 --aug-shear 0.15 --aug-scale 0.3
+--aug-affine-prob 0.8`; evaluated on the clean (unaugmented) test half. Kaggle `islr-phrases04-viewpoint`
+(commit 34f183e), 3m52s/epoch, ran all 30 epochs, best epoch 24.
+
+| WLASL test half (824 clips) | phrases03 | phrases04 | paired |
+|---|---|---|---|
+| exact decode | 80.1 % | 80.8 % | +50 / −44, p 0.61 |
+| pooled top-1 / top-5 | 81.2 / 94.5 % | 82.6 / 96.1 % | top-5 +23 / −10, p 0.035 |
+| two-hand clips (345), exact | 76.8 % | 78.6 % | p 0.47 |
+| **aspect correction undone** (raw landscape x) | 39.2 % | **77.4 %** | +338 / −23, p 6e-73 |
+| ASL Signs synthetic val WER | 0.296 | 0.291 | |
+
+Clean accuracy unchanged (top-5 slightly up), and the one real framing shift we have — WLASL's own
+uncorrected landscape coordinates, x off by a factor ~2.3 (median aspect k) — went from 39 % to 77 %:
+on WLASL's held-out signers, the model is much less sensitive to a horizontal mis-scaling of the
+coordinates. That is all this tests: a 2D coordinate distortion of WLASL clips. It does not show the
+crop / x-rescale can be skipped in the app, and real 3D body or head turns, camera pitch, occlusion
+and tracking degradation at distance remain untested. Selection caveat: the augmentation was chosen
+from a sweep on this same test half, so these numbers are development evidence, not an independent
+test — fresh camera recordings are the next independent check. Exported to `exports/phrases04/`.
+
+### Live report: PEN / PENCIL → boat (phrases04) — diagnosis (2026-11-12)
+Both are in the vocabulary (pen 167, pencil 168; 399 / 392 ASL Signs clips). Offline findings:
+- **Weak even in-domain.** On fold-0 held-out ASL Signs signers (all 14,076 val clips scored, trimmed
+  as in the browser; overall 62.2 % exact / 65.1 % pooled): pen 38 %, pencil 40 % pooled, mostly
+  confused with each other (pen → pencil 17 of 39 errors, pencil → pen 21 of 34). Boat 67 %.
+- **No boat attraction offline.** 0 of 120 held-out pen/pencil clips → boat; boat is the wrong answer
+  for 0.6 % of the errors on the 321 val clips with both hands in a frame, and 3 / 824 on WLASL test.
+- **Second-hand data.** Both hands in a frame: pen 2.8 %, pencil 2.6 %, boat 3.8 % of ASL Signs clips.
+  WLASL has no PEN, 5 PENCIL (1 in the train half; hands ~1 shoulder width apart) and 8 BOAT (5 in the
+  train half, hands touching: wrist gap 0.07 sw) — boat is the most frequent hands-touching sign
+  among the train half's 37 such clips.
+- **Synthetic base hand does not reproduce it.** A static base hand (shape from the WLASL pencil clips)
+  inserted 0.1 / 0.25 / ~0.7 shoulder widths from the active wrist of the one-hand held-out pen /
+  pencil clips: boat ≤ 3 % of predictions; pencil rises 42 → 49–53 %, pen falls 39 → 23–29 % (toward
+  pencil). So "a base hand → boat" is not supported, within the limits of a static synthetic hand.
+Next: the live landmarks themselves (frames from the app, `browser_fixtures` format) to check what
+the model actually receives (slots, mirroring, framing ratio, presence) before changing data.
+MS-ASL has 50 PENCIL / 24 BOAT clips but no usable landmarks (re-extraction from YouTube).
+
+### Per-sign reliability for the app — phrases04 (2026-11-12)
+`sign_reliability.py` scores every clip by signers the checkpoint never saw (ASL Signs fold-0 val,
+14,076 clips + WLASL test half, 824) the way the app can: "pooled" = per sign, max over the
+segment's frames of its softmax probability (blank excluded). Output `exports/phrases04/sign_reliability.json`
+(per sign: n, top-1/3/5, exact decode, top-3 confusions; calibration table; thresholds).
+
+| | top-1 | top-3 | top-5 | exact decode |
+|---|---|---|---|---|
+| combined (14,900) | 66.0 % | 81.9 % | 86.0 % | 63.3 % |
+| ASL Signs fold 0 | 65.1 % | 81.1 % | 85.4 % | 62.2 % |
+| WLASL test half | 82.7 % | 94.3 % | 96.1 % | 80.8 % |
+
+Calibration (top-1 accuracy by top-1 pooled probability p1): < 0.2 → 8 %, 0.5–0.6 → 36 %, 0.8–0.9 →
+57 %, ≥ 0.9 → 88 % (55 % of clips). Thresholds: p1 ≥ 0.685 keeps 72 % of clips at 80 % precision;
+≥ 0.928 keeps 51 % at 90 %; ≥ 0.988 keeps 34 % at 95 %. Product reading: show the top 3 (82 %),
+and a "not sure" state below ~0.7. Most frequent confusions are near-synonyms (cat → kitty, goose →
+duck, wake ↔ awake, mouth → lips, pencil ↔ pen, man → dad). Calibration is on held-out *dataset*
+signers; live webcam calibration is unmeasured.
+
+---

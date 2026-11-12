@@ -22,7 +22,7 @@ Approaches, all under `research/models/` (current work in the `islr` package, or
 - `scripts/` — shell pipelines (`run_pipeline_isolated.sh`, `run_pipeline_vqvae_seq2seq.sh`, `setup_runpod.sh`, `runpod_results.sh`; they `cd` to the repo root themselves) and Kaggle runners (`kaggle_run.py`, `extract_aslcitizen.py`).
 - `notebooks/` — by approach: `data/` (LMDB builders, WLASL MediaPipe extraction, `build-wlasl-*` Kaggle kernel folders; `legacy/`), `exploration/`, `early_transformers/`, `vqvae/`, `first_place/`. Index in `notebooks/README.md`.
 - `archive/research/` — superseded prototypes, feature experiments and tools (reference only).
-- Gitignored: `data/`, `exports/`, `results/`, `docs/` (except `docs/EXPERIMENT_LOG.md`). The local ASL Signs LMDB is `data/asl-is-lmdb/is.lmdb.mdb` (+ train.csv, sign map), the same layout as the Kaggle dataset and the scripts' defaults. Paths in older EXPERIMENT_LOG entries predate this layout (reorganised 2026-11-12: `cnn_transformer` → `islr`).
+- Gitignored: `data/`, `exports/`, `results/`, `docs/` (except `docs/experiments/`, the experiment log). The local ASL Signs LMDB is `data/asl-is-lmdb/is.lmdb.mdb` (+ train.csv, sign map), the same layout as the Kaggle dataset and the scripts' defaults. Paths in older experiment-log entries predate this layout (reorganised 2026-11-12: `cnn_transformer` → `islr`).
 
 ## Commands
 

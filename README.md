@@ -16,7 +16,7 @@ All runs use a signer-independent val split (no val signer seen during training)
 | `fold0_graph` + per-signer BatchNorm adaptation (AdaBN, offline) | 0.697 | BN statistics re-estimated from half of each held-out signer's unlabelled clips, scored on the other half |
 | fixed + graph + FS-pretrained ensemble, each with AdaBN | **0.721** | best fold-0 result so far |
 
-Bone-length augmentation, fingerspelling pre-training (alone) and a cross-signer contrastive loss gave no gain on fold 0 (details in `docs/EXPERIMENT_LOG.md`).
+Bone-length augmentation, fingerspelling pre-training (alone) and a cross-signer contrastive loss gave no gain on fold 0 (details in `docs/experiments/`).
 
 **Earlier runs (fixed 3-signer split, not comparable with the folds):**
 
@@ -177,7 +177,7 @@ archive/research/      # superseded prototypes, feature experiments and tools (k
 data/                  # datasets (gitignored) — see below
 exports/               # ONNX exports for the browser (gitignored)
 results/               # run outputs pulled from RunPod / Kaggle (gitignored)
-docs/                  # local notes (gitignored); EXPERIMENT_LOG.md is tracked
+docs/                  # local notes (gitignored); docs/experiments/ = the experiment log (tracked)
 
 research/
 ├── models/
