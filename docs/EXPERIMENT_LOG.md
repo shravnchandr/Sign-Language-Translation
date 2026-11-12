@@ -1012,6 +1012,22 @@ hands are hard either way (~44 % vs 62 % overall). Two-handed signs need data wi
   (unlocated) producer. Raw re-extraction would need the YouTube videos (C-UDA; many links dead).
   Annotations local: 5,811 of 25,513 clips are on our signs.
 
+### Training on Kaggle GPU instead of RunPod (2026-11-11)
+`notebooks/kaggle/kaggle_run.py` runs any module as a private Kaggle notebook (T4 16 GB, 4 CPUs,
+Python 3.13, torch 2.11.0+cu130, 12 h per run). Private datasets: `asl-is-lmdb`, `islr-checkpoints`
+(fold0_graph, phrases01), `wlasl-lmdb`. Smoke test (`islr-phrases-smoke`: phrase CTC, 1,600 train /
+300 val phrases, 2 epochs) needed three fixes before it was usable:
+1. **Forked DataLoader workers** inherited the parent's LMDB environment; py-lmdb refused to reopen
+   it and the dataset fell back to parquets → FileNotFoundError. RunPod's Python 3.14 defaults to
+   forkserver, so this never showed there. All DataLoaders now use forkserver (`worker_context`).
+2. **Emulated bf16 on the T4:** `is_bf16_supported()` returns True; now bf16 only at compute
+   capability ≥ 8 (A40 unchanged), fp16 + GradScaler otherwise. No non-finite batches in the smoke.
+3. **Input-disk reads:** fp16 alone did not change speed (~1 batch/s; batches arrived 4 at a time
+   every ~4 s = data-bound). Copying the 6 GB LMDB to local disk (33 s) → ~6 batches/s steady, epoch
+   time 1m20s → 30s on the smoke set; losses identical to the uncopied run (only I/O changed).
+Estimate for a default phrase run (1,250 batches + 3,000 val phrases): ~4–5 min/epoch, 30 epochs
+≈ 2.5 h — comparable to the A40 (4m40s/epoch).
+
 ---
 
 ## Pending Ideas (not yet implemented)
