@@ -10,8 +10,9 @@ with placeholders filled in:
     {IS_LMDB_DIR}  folder of is.lmdb.mdb + train.csv + sign map (shravnchandr/asl-is-lmdb)
     {CKPT_DIR}     root of shravnchandr/islr-checkpoints (fold0_graph/, phrases01/)
     {WLASL_DIR}    folder of wlasl.lmdb.mdb + train.csv (shravnchandr/wlasl-lmdb)
+    {WLASL_ALL_DIR} folder of wlasl_all.lmdb.mdb (all 2,000 glosses; shravnchandr/wlasl-all-lmdb)
     {OUT}          /kaggle/working/out — everything written here is the run's output
-The IS / WLASL LMDB folders are copied to local disk first (/kaggle/input is slow for
+The IS / WLASL / WLASL-all LMDB folders are copied to local disk first (/kaggle/input is slow for
 random reads); --no-copy reads them in place.
 stdout/stderr also go to {OUT}/run.log.
 
@@ -37,7 +38,8 @@ import tempfile
 from pathlib import Path
 
 REPO_URL = "https://github.com/shravnchandr/Sign-Language-Translation.git"
-DATASETS = ["shravnchandr/asl-is-lmdb", "shravnchandr/islr-checkpoints", "shravnchandr/wlasl-lmdb"]
+DATASETS = ["shravnchandr/asl-is-lmdb", "shravnchandr/islr-checkpoints", "shravnchandr/wlasl-lmdb",
+            "shravnchandr/wlasl-all-lmdb"]
 KAGGLE = shlex.split(os.environ.get("KAGGLE_CLI", "uvx --with six kaggle"))
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -86,13 +88,14 @@ paths = {
     "IS_LMDB_DIR": os.path.dirname(find("is.lmdb.mdb") or ""),
     "CKPT_DIR": os.path.dirname(os.path.dirname(find("fold0_graph/best_phase1.pth") or "/x/x")),
     "WLASL_DIR": os.path.dirname(find("wlasl.lmdb.mdb") or ""),
+    "WLASL_ALL_DIR": os.path.dirname(find("wlasl_all.lmdb.mdb") or ""),
     "OUT": "/kaggle/working/out",
 }
 os.makedirs(paths["OUT"], exist_ok=True)
 # /kaggle/input is slow for random reads: the phrase loader read ~125 ms per phrase from it
 # (4 ms from a local disk). Copy the LMDB folders to local disk first (minutes, once per run).
 import shutil, time
-for key in ("IS_LMDB_DIR", "WLASL_DIR") if LOCAL_COPY else ():
+for key in ("IS_LMDB_DIR", "WLASL_DIR", "WLASL_ALL_DIR") if LOCAL_COPY else ():
     if paths[key]:
         t0, dst = time.time(), f"/tmp/{key.lower()}"
         shutil.copytree(paths[key], dst, dirs_exist_ok=True)
