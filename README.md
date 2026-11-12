@@ -27,12 +27,12 @@ Bone-length augmentation, fingerspelling pre-training (alone) and a cross-signer
 | 003 | + multi-scale velocity (Δ1/Δ2/Δ5), face split, depth | 0.7432 | slight regression — more features need more epochs to converge |
 | 004 | + geometry stream, hand presence, normalization fix, augmentation / handedness / GRL fixes | 0.7590 (TTA 0.7610) | best at epoch 50; a NaN batch at epoch 55 broke eval for the remaining epochs |
 | 005 | Run 004 + bf16 AMP, non-finite batch guard | **0.7665** (TTA 0.7669) | clean 80 epochs; plateaued — run-to-run noise ≈ 1 pt on this split |
-| — | Factorized VQ-VAE + Conformer | WIP | — |
+| — | Factorized VQ-VAE + Conformer | — | dormant (approach 0) |
 | — | ST-GCN | — | superseded by `--arch graph` (wrong graph indexing, by-sign split) |
 
 ### Continuous signing (synthetic phrases)
 
-There is no openly licensed continuous ASL dataset with this vocabulary and MediaPipe landmarks, so phrases are stitched on the fly from isolated clips (`train_phrases.py`): one signer per phrase, clips trimmed to the hand activity, 3–8 interpolated transition frames, 1–5 signs per phrase (70 % ASL-style gloss templates, 30 % random sequences). A CTC head over the 250 signs + blank is trained from the fold-0 GraphConformer; validation phrases are built only from the 3 held-out signers, and 10 % of gloss sequences are never trained on.
+There is no openly licensed continuous ASL dataset with this vocabulary and MediaPipe landmarks, so phrases are stitched on the fly from isolated clips (`islr/phrases/`): one signer per phrase, clips trimmed to the hand activity, 3–8 interpolated transition frames, 1–5 signs per phrase (70 % ASL-style gloss templates, 30 % random sequences). A CTC head over the 250 signs + blank is trained from the fold-0 GraphConformer; validation phrases are built only from the 3 held-out signers, and 10 % of gloss sequences are never trained on.
 
 | `phrases01` (fold 0, 3,000 val phrases) | |
 |---|---|
@@ -43,15 +43,26 @@ There is no openly licensed continuous ASL dataset with this vocabulary and Medi
 
 These are synthetic phrases (citation-form clips, artificial transitions, no coarticulation or facial grammar): an unvalidated proxy for real signing until tested on real recordings.
 
+**Current browser model: `phrases04`** (`exports/phrases04/`). Each step changed one thing and was scored on WLASL signers never used in training (824 clips, single sign, exact decode):
+
+| Model | Change | WLASL held-out signers | ASL Signs synthetic WER |
+|---|---|---|---|
+| `phrases01` | ASL Signs only | 44.2 % | 0.294 |
+| `phrases02` | wider tempo range (0.5–2×) | no clear change (paired p = 0.54) | 0.287 |
+| `phrases03` | + half of WLASL's signers (two-handed data, 15 % of phrases) | **80.1 %** | 0.296 |
+| `phrases04` | + viewpoint augmentation (per-axis scale, shear, rotation) | 80.8 % (77.4 % with WLASL's framing correction undone; phrases03 39.2 %) | 0.291 |
+
+On ASL Signs' held-out signers phrases04 ranks the right sign first 65 % of the time and in its top 3 81 %; `sign_reliability.json` gives per-sign accuracy, common confusions (often near-synonyms: cat/kitty, pen/pencil, wake/awake) and score thresholds for a "not sure" state. Caveats: the WLASL halves share recording sources, the viewpoint augmentation was chosen on the same test half, and live webcam use is still untested beyond anecdotes.
+
 ### Running in the browser
 
-`export_onnx.py` exports the phrase model to ONNX for onnxruntime-web (verified against PyTorch), with `labels.json` and a `preprocess.json` describing the input features; `browser_fixtures.py` writes golden raw-frame → feature → output test cases. The app itself is [ASL-App](https://github.com/shravnchandr/ASL-App). A live camera pipeline has to reproduce the training data's conventions, measured on the dataset:
+`islr/export/export_onnx.py` exports the phrase model to ONNX for onnxruntime-web (verified against PyTorch), with `labels.json` and a `preprocess.json` describing the input features; `islr/export/browser_fixtures.py` writes golden raw-frame → feature → output test cases. The app itself is [ASL-App](https://github.com/shravnchandr/ASL-App). A live camera pipeline has to reproduce the training data's conventions, measured on the dataset:
 
 - **Unmirrored frames**, hands assigned to slots by distance to the pose wrists (MediaPipe's handedness label assumes a mirrored selfie image).
 - **Portrait ≈ 3:4 framing** — landmark x is a fraction of the image width and y of the height; an uncropped landscape webcam drops held-out accuracy from 62 % to 14 %.
-- **Cross-dataset check (WLASL, 67 unseen signers, 206 shared signs):** the isolated fold-0 graph model scores 64.2 % top-1 after aspect correction (30.6 % without), close to its 68.6 % on held-out ASL Signs signers; the phrase model 45.4 % (55.5 % scored like a classifier — most of the rest of its gap is extra decoded signs). Built by `data/build_wlasl_lmdb.py` on Kaggle.
+- **Cross-dataset check (WLASL, 67 unseen signers, 206 shared signs):** the isolated fold-0 graph model scores 64.2 % top-1 after aspect correction (30.6 % without), close to its 68.6 % on held-out ASL Signs signers; the phrase model 45.4 % (55.5 % scored like a classifier — most of the rest of its gap is extra decoded signs). Built by `islr/core/data/build_wlasl_lmdb.py` on Kaggle.
 - **Training with half of WLASL's signers (`phrases03`):** mixing the 847 clips of 33 WLASL signers into phrase training (15 % of phrases) raises single-sign accuracy on the other 34 WLASL signers from 44.2 % to **80.1 %** (two-hand clips 25.8 → 76.8 %), with ASL Signs val WER unchanged (0.296 vs 0.294) and no duplicate clips across the halves. The halves share recording sources, so part of the gain is adaptation to WLASL's recording style; live webcam use is still untested.
-- **Second hand rarely present in training.** Both hands are detected in the same frame in a median **2 %** of training clips, even for two-handed signs (shoe 1 %, chocolate 4 %) — a limitation of the source data (WLASL, extracted with the same MediaPipe Holistic, tracks both). The models see a second hand rarely; how much they use it is not measured. A live base hand may push predictions off (anecdotally CHOCOLATE → police). **One-hand mode** (pass only the more active hand) is an experimental option for `phrases01`, to compare against the two-hand path — do not use it with `phrases03`, where it lowers two-hand clips from 76.8 % to 57.1 %. On WLASL's genuinely two-handed clips it raises the phrase model 26.9 % → 37.1 % (p < 0.001; classifier 49.1 → 51.4 %, p = 0.13). On ASL Signs held-out clips: on the 575 held-out clips with both hands detected somewhere, removing the less active hand raised phrase-model accuracy 44.2 % → 49.0 % (+66 / −38, McNemar p = 0.01), but on the 321 with both hands in the same frame it changed nothing (43.9 % → 44.5 %, +26 / −24, p = 0.89).
+- **Second hand rarely present in training.** Both hands are detected in the same frame in a median **2 %** of training clips, even for two-handed signs (shoe 1 %, chocolate 4 %) — a limitation of the source data (WLASL, extracted with the same MediaPipe Holistic, tracks both). The models see a second hand rarely; how much they use it is not measured. A live base hand may push predictions off (anecdotally CHOCOLATE → police). **One-hand mode** (pass only the more active hand) is an experimental option for `phrases01`, to compare against the two-hand path — do not use it with `phrases03`/`phrases04`, which were trained with two-handed WLASL clips (it lowers two-hand clips from 76.8 % to 57.1 %). On WLASL's genuinely two-handed clips it raises the phrase model 26.9 % → 37.1 % (p < 0.001; classifier 49.1 → 51.4 %, p = 0.13). On ASL Signs held-out clips: on the 575 held-out clips with both hands detected somewhere, removing the less active hand raised phrase-model accuracy 44.2 % → 49.0 % (+66 / −38, McNemar p = 0.01), but on the 321 with both hands in the same frame it changed nothing (43.9 % → 44.5 %, +26 / −24, p = 0.89).
 
 ## Research Directions
 
@@ -67,7 +78,7 @@ These are synthetic phrases (citation-form clips, artificial transitions, no coa
 
 ## Architectures
 
-### 1 — LandmarkConformer (`research/models/islr/`)
+### LandmarkConformer backbone — approaches A–C (`research/models/islr/`)
 
 End-to-end supervised classification. Processes raw landmarks into three parallel feature streams, fuses them, then runs Conformer blocks over the sequence.
 
@@ -109,7 +120,7 @@ The geometry stream is the key addition: raw XYZ obscures hand shape because it 
 
 ---
 
-### 2 — Factorized VQ-VAE + Conformer (`research/models/vqvae_seq2seq/`)
+### Approach 0 — Factorized VQ-VAE + Conformer (dormant, `research/models/vqvae_seq2seq/`)
 
 Two-phase pipeline: unsupervised discrete tokenization followed by supervised sequence-to-label translation.
 
@@ -134,7 +145,7 @@ A Conformer encoder (6 layers, d_model=256, kernel=7) reads the 5–10 token seq
 
 ---
 
-### 3 — ST-GCN (`research/models/st_gcn/`)
+### ST-GCN (legacy, `research/models/st_gcn/`)
 
 Spatial-Temporal Graph Convolutional Network. Legacy baseline, superseded by `--arch graph` (its graph indexing was wrong and it used a by-sign split, so its numbers are not comparable).
 
@@ -255,13 +266,15 @@ kaggle competitions download -c asl-fingerspelling       # Fingerspelling (~189 
 
 Extract to `data/Isolated_ASL_Recognition/` and `data/ASL_Fingerspelling_Recognition/` respectively.
 
+**Other datasets.** WLASL (C-UDA) is used for cross-dataset tests and, by signer half, for training. ASL Citizen (webcam recordings by Deaf signers) is under the Microsoft Research License — **research use only**: its landmarks are extracted privately (`scripts/extract_aslcitizen.py`) and models trained on it are not exported for the app. PopSign ASL v1.0 (CC BY 4.0, the source of ASL Signs) is the permissive option for product data.
+
 **Parquet format:** columns `frame`, `type`, `landmark_index`, `x`, `y`, `z`. Types: `pose` (33), `left_hand` (21), `right_hand` (21), `face` (468) — 543 landmarks per frame.
 
 ---
 
 ## Training
 
-### LandmarkConformer
+### Approach A — isolated classifier (LandmarkConformer / GraphConformer)
 
 **On a fresh RunPod pod (no persistent volume):**
 
@@ -315,7 +328,7 @@ bash scripts/run_pipeline_isolated.sh --skip-pretrain \
 
 > **LMDB cache invalidation:** any change to `config.py` that affects `ALL_COLUMNS` (face landmark selection, `INCLUDE_DEPTH`, `INCLUDE_FACE`) requires rebuilding the LMDB. `CACHE_VERSION` is an MD5 of `ALL_COLUMNS` so stale archives are never silently reused.
 
-### Continuous phrases and browser export
+### Approach C — continuous phrases and browser export
 
 ```bash
 # CTC on synthetic phrases, initialised from a fold-0 isolated checkpoint (GPU; inside tmux)
@@ -331,9 +344,31 @@ PYTHONPATH=research/models uv run --with onnx --with onnxruntime --with onnxscri
   python -m islr.export.export_onnx --checkpoint <best_phrases.pth> --out-dir exports/phrases04
 PYTHONPATH=research/models uv run --with onnxruntime python -m islr.export.browser_fixtures \
   --parquet <competition parquets> --concat --out-dir exports/phrases04/fixtures
+
+# Per-sign reliability for the app (held-out ASL Signs signers + WLASL test half; CPU)
+PYTHONPATH=research/models uv run python -m islr.evaluation.sign_reliability \
+  --checkpoint <best_phrases.pth> --wlasl-dir data/wlasl-lmdb --out exports/phrases04/sign_reliability.json
+
+# Cross-dataset score on WLASL's held-out signer half (paired comparisons via --per-clip)
+PYTHONPATH=research/models uv run python -m islr.evaluation.cross_dataset \
+  --checkpoint <best_phrases.pth> --data-dir data/wlasl-lmdb --signers test --out <json> --per-clip <csv>
 ```
 
-### VQ-VAE Pipeline
+### Training on Kaggle GPUs
+
+`scripts/kaggle_run.py` runs any repo module as a private Kaggle notebook (T4, 12 h per run) on the pushed commit, with the private datasets mounted (`{IS_LMDB_DIR}`, `{CKPT_DIR}`, `{WLASL_DIR}`, `{WLASL_ALL_DIR}`, output in `{OUT}`); `::` chains commands. phrases04 was trained this way:
+
+```bash
+python3 scripts/kaggle_run.py push phrases04-viewpoint --gpu -- \
+  islr.phrases.train --data-dir {IS_LMDB_DIR} --lmdb-path {IS_LMDB_DIR}/is.lmdb.mdb --val-fold 0 --arch graph \
+    --init {CKPT_DIR}/fold0_graph/best_phase1.pth --out-dir {OUT}/phrases04 --num-workers 4 \
+    --extra-data-dir {WLASL_DIR} --extra-frac 0.15 --aug-rotate 20 --aug-shear 0.15 --aug-scale 0.3 --aug-affine-prob 0.8 \
+  :: islr.evaluation.cross_dataset --checkpoint {OUT}/phrases04/best_phrases.pth --data-dir {WLASL_DIR} --signers test --out {OUT}/wlasl.json
+python3 scripts/kaggle_run.py status phrases04-viewpoint
+python3 scripts/kaggle_run.py output phrases04-viewpoint     # → results/kaggle/ (inbox), then file under results/phrases/
+```
+
+### Approach 0 — VQ-VAE pipeline (dormant)
 
 ```bash
 # Full pipeline
