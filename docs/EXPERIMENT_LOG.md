@@ -1154,6 +1154,25 @@ and tracking degradation at distance remain untested. Selection caveat: the augm
 from a sweep on this same test half, so these numbers are development evidence, not an independent
 test — fresh camera recordings are the next independent check. Exported to `exports/phrases04/`.
 
+### Live report: PEN / PENCIL → boat (phrases04) — diagnosis (2026-11-12)
+Both are in the vocabulary (pen 167, pencil 168; 399 / 392 ASL Signs clips). Offline findings:
+- **Weak even in-domain.** On fold-0 held-out ASL Signs signers (all 14,076 val clips scored, trimmed
+  as in the browser; overall 62.2 % exact / 65.1 % pooled): pen 38 %, pencil 40 % pooled, mostly
+  confused with each other (pen → pencil 17 of 39 errors, pencil → pen 21 of 34). Boat 67 %.
+- **No boat attraction offline.** 0 of 120 held-out pen/pencil clips → boat; boat is the wrong answer
+  for 0.6 % of the errors on the 321 val clips with both hands in a frame, and 3 / 824 on WLASL test.
+- **Second-hand data.** Both hands in a frame: pen 2.8 %, pencil 2.6 %, boat 3.8 % of ASL Signs clips.
+  WLASL has no PEN, 5 PENCIL (1 in the train half; hands ~1 shoulder width apart) and 8 BOAT (5 in the
+  train half, hands touching: wrist gap 0.07 sw) — boat is the most frequent hands-touching sign
+  among the train half's 37 such clips.
+- **Synthetic base hand does not reproduce it.** A static base hand (shape from the WLASL pencil clips)
+  inserted 0.1 / 0.25 / ~0.7 shoulder widths from the active wrist of the one-hand held-out pen /
+  pencil clips: boat ≤ 3 % of predictions; pencil rises 42 → 49–53 %, pen falls 39 → 23–29 % (toward
+  pencil). So "a base hand → boat" is not supported, within the limits of a static synthetic hand.
+Next: the live landmarks themselves (frames from the app, `browser_fixtures` format) to check what
+the model actually receives (slots, mirroring, framing ratio, presence) before changing data.
+MS-ASL has 50 PENCIL / 24 BOAT clips but no usable landmarks (re-extraction from YouTube).
+
 ---
 
 ## Pending Ideas (not yet implemented)
