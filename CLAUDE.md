@@ -13,7 +13,7 @@ Two approaches are under active development, both under `research/models/`:
 | Factorized VQ-VAE → Conformer translator | `research/models/vqvae_seq2seq/` | Primary pipeline |
 | LandmarkConformer (end-to-end) | `research/models/cnn_transformer/` | Kaggle training target |
 | GraphConformer (hand-skeleton graph encoder) | `research/models/cnn_transformer/` (`--arch graph`) | Fold 0: 0.686 (vs 0.677 conformer; ensemble 0.703) |
-| Continuous CTC on synthetic phrases | `research/models/cnn_transformer/train_phrases.py` | Fold 0 `phrases01`: WER 0.294 on held-out signers' synthetic phrases; `phrases03` (+ WLASL train-half signers, 15 % of phrases): same WER, WLASL held-out signers 44.2 → 80.1 % single-sign; `phrases04` (+ `--aug-scale 0.3 --aug-shear 0.15 --aug-rotate 20 --aug-affine-prob 0.8`): 80.8 %, and 77.4 % (phrases03 39.2 %) with WLASL's aspect correction undone; ONNX export for the browser |
+| Continuous CTC on synthetic phrases | `research/models/cnn_transformer/train_phrases.py` | Fold 0 `phrases01`: WER 0.294 on held-out signers' synthetic phrases; `phrases03` (+ WLASL train-half signers, 15 % of phrases): same WER, WLASL held-out signers 44.2 → 80.1 % single-sign; `phrases04` (+ `--aug-scale 0.3 --aug-shear 0.15 --aug-rotate 20 --aug-affine-prob 0.8`): 80.8 %, and 77.4 % (phrases03 39.2 %) with WLASL's aspect correction undone (2D coordinate distortion only; augmentation chosen on that same test half — not an independent test); ONNX export for the browser |
 | ST-GCN (legacy) | `research/models/st_gcn/` | Superseded by `--arch graph` — wrong graph indexing, by-sign split; not comparable |
 
 ## Commands

@@ -1147,9 +1147,12 @@ through. phrases04 = phrases03 + `--aug-rotate 20 --aug-shear 0.15 --aug-scale 0
 
 Clean accuracy unchanged (top-5 slightly up), and the one real framing shift we have — WLASL's own
 uncorrected landscape coordinates, x off by a factor ~2.3 (median aspect k) — went from 39 % to 77 %:
-the model no longer depends on the 3:4 crop / x-rescale being right. Not measured: real 3D head or
-body turns, camera pitch, and tracking quality at distance; live testing decides. Exported to
-`exports/phrases04/`.
+on WLASL's held-out signers, the model is much less sensitive to a horizontal mis-scaling of the
+coordinates. That is all this tests: a 2D coordinate distortion of WLASL clips. It does not show the
+crop / x-rescale can be skipped in the app, and real 3D body or head turns, camera pitch, occlusion
+and tracking degradation at distance remain untested. Selection caveat: the augmentation was chosen
+from a sweep on this same test half, so these numbers are development evidence, not an independent
+test — fresh camera recordings are the next independent check. Exported to `exports/phrases04/`.
 
 ---
 
