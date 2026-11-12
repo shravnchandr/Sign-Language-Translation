@@ -130,7 +130,7 @@ print(f"  CACHE_VERSION {CACHE_VERSION}: {hits}/{len(vals)} keys found | "
       f"{len(df):,} samples, {df['participant_id'].nunique()} signers, {n_signs} signs")
 assert hits == len(vals), (
     "LMDB keys do not match the training code: this archive was built with an older "
-    "version. Rebuild it on Kaggle (archive/notebooks/tools/create-is-lmdb.ipynb) and re-run."
+    "version. Rebuild it on Kaggle (notebooks/data/legacy/create-is-lmdb.ipynb) and re-run."
 )
 x = torch.load(io.BytesIO(first), weights_only=True)
 assert x.ndim == 2 and x.shape[1] == COORD_FEAT, f"sample shape {tuple(x.shape)}, expected (T, {COORD_FEAT})"

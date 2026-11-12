@@ -164,10 +164,16 @@ Spatial-Temporal Graph Convolutional Network. Legacy baseline, superseded by `--
 
 ```
 research/models/       # model code (PYTHONPATH=research/models) — see tree below
-scripts/               # RunPod / local pipelines: run_pipeline_*.sh, setup_runpod.sh, runpod_results.sh
-notebooks/kaggle/      # Kaggle notebooks + runners: kaggle_run.py (any module on a Kaggle GPU),
-                       #   extract_aslcitizen.py, LMDB / TFRecord builders, WLASL MediaPipe extraction
-archive/               # superseded exploratory notebooks, prototypes and tools (kept for reference)
+scripts/               # tools: run_pipeline_isolated.sh / run_pipeline_vqvae_seq2seq.sh, setup_runpod.sh,
+                       #   runpod_results.sh, kaggle_run.py (any module on a Kaggle GPU),
+                       #   extract_aslcitizen.py (ASL Citizen landmarks, research only)
+notebooks/             # by approach — see notebooks/README.md
+  data/                #   dataset builders + MediaPipe extraction (LMDBs, WLASL); legacy/ older builders
+  exploration/         #   early data exploration
+  early_transformers/  #   first classifier attempts
+  vqvae/               #   approach 0 (VQ-VAE → translator)
+  first_place/         #   1st-place Kaggle solution reproduced on our signer fold
+archive/research/      # superseded prototypes, feature experiments and tools (kept for reference)
 data/                  # datasets (gitignored) — see below
 exports/               # ONNX exports for the browser (gitignored)
 results/               # run outputs pulled from RunPod / Kaggle (gitignored)
