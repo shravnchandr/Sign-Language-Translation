@@ -1,0 +1,1123 @@
+{
+ "_note": "ASL Citizen gloss -> ASL Signs label. identical: same name; variant: numbered ASL-LEX variant of a same-named gloss (may be a different sign form); synonym: probably the same sign, chosen by a non-signer, not reviewed. Score the three kinds separately.",
+ "AFTER": {
+  "sign": "after",
+  "kind": "identical"
+ },
+ "AIRPLANE": {
+  "sign": "airplane",
+  "kind": "identical"
+ },
+ "ALL": {
+  "sign": "all",
+  "kind": "identical"
+ },
+ "ANIMAL": {
+  "sign": "animal",
+  "kind": "identical"
+ },
+ "ANY": {
+  "sign": "any",
+  "kind": "identical"
+ },
+ "APPLE": {
+  "sign": "apple",
+  "kind": "identical"
+ },
+ "ARM1": {
+  "sign": "arm",
+  "kind": "variant"
+ },
+ "ARM2": {
+  "sign": "arm",
+  "kind": "variant"
+ },
+ "ARM3": {
+  "sign": "arm",
+  "kind": "variant"
+ },
+ "AUNT": {
+  "sign": "aunt",
+  "kind": "identical"
+ },
+ "AWAKE": {
+  "sign": "awake",
+  "kind": "identical"
+ },
+ "BACKYARD": {
+  "sign": "backyard",
+  "kind": "identical"
+ },
+ "BAD": {
+  "sign": "bad",
+  "kind": "identical"
+ },
+ "BALLOON": {
+  "sign": "balloon",
+  "kind": "identical"
+ },
+ "BATH": {
+  "sign": "bath",
+  "kind": "identical"
+ },
+ "BECAUSE": {
+  "sign": "because",
+  "kind": "identical"
+ },
+ "BED1": {
+  "sign": "bed",
+  "kind": "variant"
+ },
+ "BED2": {
+  "sign": "bed",
+  "kind": "variant"
+ },
+ "BEDROOM": {
+  "sign": "bedroom",
+  "kind": "identical"
+ },
+ "BEE1": {
+  "sign": "bee",
+  "kind": "variant"
+ },
+ "BEE2": {
+  "sign": "bee",
+  "kind": "variant"
+ },
+ "BEFORE": {
+  "sign": "before",
+  "kind": "identical"
+ },
+ "BETTER": {
+  "sign": "better",
+  "kind": "identical"
+ },
+ "BIRD": {
+  "sign": "bird",
+  "kind": "identical"
+ },
+ "BLACK": {
+  "sign": "black",
+  "kind": "identical"
+ },
+ "BLOW": {
+  "sign": "blow",
+  "kind": "identical"
+ },
+ "BLUE": {
+  "sign": "blue",
+  "kind": "identical"
+ },
+ "BOAT": {
+  "sign": "boat",
+  "kind": "identical"
+ },
+ "BOOK": {
+  "sign": "book",
+  "kind": "identical"
+ },
+ "BOY": {
+  "sign": "boy",
+  "kind": "identical"
+ },
+ "BROTHER": {
+  "sign": "brother",
+  "kind": "identical"
+ },
+ "BROWN": {
+  "sign": "brown",
+  "kind": "identical"
+ },
+ "BUG": {
+  "sign": "bug",
+  "kind": "identical"
+ },
+ "BYE": {
+  "sign": "bye",
+  "kind": "identical"
+ },
+ "CAN1": {
+  "sign": "can",
+  "kind": "variant"
+ },
+ "CAN2": {
+  "sign": "can",
+  "kind": "variant"
+ },
+ "CAR": {
+  "sign": "car",
+  "kind": "identical"
+ },
+ "CARROT1": {
+  "sign": "carrot",
+  "kind": "variant"
+ },
+ "CARROT2": {
+  "sign": "carrot",
+  "kind": "variant"
+ },
+ "CARROT3": {
+  "sign": "carrot",
+  "kind": "variant"
+ },
+ "CAT1": {
+  "sign": "cat",
+  "kind": "variant"
+ },
+ "CAT2": {
+  "sign": "cat",
+  "kind": "variant"
+ },
+ "CAT3": {
+  "sign": "cat",
+  "kind": "variant"
+ },
+ "CEREAL": {
+  "sign": "cereal",
+  "kind": "identical"
+ },
+ "CHAIR": {
+  "sign": "chair",
+  "kind": "identical"
+ },
+ "CHEEK": {
+  "sign": "cheek",
+  "kind": "identical"
+ },
+ "CHILD": {
+  "sign": "child",
+  "kind": "identical"
+ },
+ "CHIN": {
+  "sign": "chin",
+  "kind": "identical"
+ },
+ "CHOCOLATE": {
+  "sign": "chocolate",
+  "kind": "identical"
+ },
+ "CLEAN": {
+  "sign": "clean",
+  "kind": "identical"
+ },
+ "CLOSE": {
+  "sign": "close",
+  "kind": "identical"
+ },
+ "CLOSET1": {
+  "sign": "closet",
+  "kind": "variant"
+ },
+ "CLOSET2": {
+  "sign": "closet",
+  "kind": "variant"
+ },
+ "CLOUD1": {
+  "sign": "cloud",
+  "kind": "variant"
+ },
+ "CLOUD2": {
+  "sign": "cloud",
+  "kind": "variant"
+ },
+ "CLOUD3": {
+  "sign": "cloud",
+  "kind": "variant"
+ },
+ "CLOUD4": {
+  "sign": "cloud",
+  "kind": "variant"
+ },
+ "CLOWN": {
+  "sign": "clown",
+  "kind": "identical"
+ },
+ "COW": {
+  "sign": "cow",
+  "kind": "identical"
+ },
+ "COWBOY": {
+  "sign": "cowboy",
+  "kind": "identical"
+ },
+ "CROCODILE": {
+  "sign": "alligator",
+  "kind": "synonym"
+ },
+ "CRY1": {
+  "sign": "cry",
+  "kind": "variant"
+ },
+ "CRY2": {
+  "sign": "cry",
+  "kind": "variant"
+ },
+ "CRY3": {
+  "sign": "cry",
+  "kind": "variant"
+ },
+ "CRY4": {
+  "sign": "cry",
+  "kind": "variant"
+ },
+ "CUT": {
+  "sign": "cut",
+  "kind": "identical"
+ },
+ "CUTE1": {
+  "sign": "cute",
+  "kind": "variant"
+ },
+ "CUTE2": {
+  "sign": "cute",
+  "kind": "variant"
+ },
+ "DANCE": {
+  "sign": "dance",
+  "kind": "identical"
+ },
+ "DIRTY": {
+  "sign": "dirty",
+  "kind": "identical"
+ },
+ "DOG1": {
+  "sign": "dog",
+  "kind": "variant"
+ },
+ "DOG2": {
+  "sign": "dog",
+  "kind": "variant"
+ },
+ "DOG3": {
+  "sign": "dog",
+  "kind": "variant"
+ },
+ "DOG4": {
+  "sign": "dog",
+  "kind": "variant"
+ },
+ "DOLL": {
+  "sign": "doll",
+  "kind": "identical"
+ },
+ "DONKEY": {
+  "sign": "donkey",
+  "kind": "identical"
+ },
+ "DOWN": {
+  "sign": "down",
+  "kind": "identical"
+ },
+ "DRAWER": {
+  "sign": "drawer",
+  "kind": "identical"
+ },
+ "DRINK1": {
+  "sign": "drink",
+  "kind": "variant"
+ },
+ "DRINK2": {
+  "sign": "drink",
+  "kind": "variant"
+ },
+ "DROP": {
+  "sign": "drop",
+  "kind": "identical"
+ },
+ "DRY": {
+  "sign": "dry",
+  "kind": "identical"
+ },
+ "DRYER": {
+  "sign": "dryer",
+  "kind": "identical"
+ },
+ "DUCK1": {
+  "sign": "duck",
+  "kind": "variant"
+ },
+ "DUCK2": {
+  "sign": "duck",
+  "kind": "variant"
+ },
+ "EAR": {
+  "sign": "ear",
+  "kind": "identical"
+ },
+ "ELEPHANT": {
+  "sign": "elephant",
+  "kind": "identical"
+ },
+ "EMPTY1": {
+  "sign": "empty",
+  "kind": "variant"
+ },
+ "EMPTY2": {
+  "sign": "empty",
+  "kind": "variant"
+ },
+ "EYES": {
+  "sign": "eye",
+  "kind": "synonym"
+ },
+ "FACE": {
+  "sign": "face",
+  "kind": "identical"
+ },
+ "FALL1": {
+  "sign": "fall",
+  "kind": "variant"
+ },
+ "FALL2": {
+  "sign": "fall",
+  "kind": "variant"
+ },
+ "FARM": {
+  "sign": "farm",
+  "kind": "identical"
+ },
+ "FAST": {
+  "sign": "fast",
+  "kind": "identical"
+ },
+ "FATHER": {
+  "sign": "dad",
+  "kind": "synonym"
+ },
+ "FIND": {
+  "sign": "find",
+  "kind": "identical"
+ },
+ "FINE1": {
+  "sign": "fine",
+  "kind": "variant"
+ },
+ "FINE2": {
+  "sign": "fine",
+  "kind": "variant"
+ },
+ "FINGER": {
+  "sign": "finger",
+  "kind": "identical"
+ },
+ "FINISH": {
+  "sign": "finish",
+  "kind": "identical"
+ },
+ "FIREMAN1": {
+  "sign": "fireman",
+  "kind": "variant"
+ },
+ "FIREMAN2": {
+  "sign": "fireman",
+  "kind": "variant"
+ },
+ "FIRST": {
+  "sign": "first",
+  "kind": "identical"
+ },
+ "FISH": {
+  "sign": "fish",
+  "kind": "identical"
+ },
+ "FLAG1": {
+  "sign": "flag",
+  "kind": "variant"
+ },
+ "FLAG2": {
+  "sign": "flag",
+  "kind": "variant"
+ },
+ "FLOWER": {
+  "sign": "flower",
+  "kind": "identical"
+ },
+ "FOR": {
+  "sign": "for",
+  "kind": "identical"
+ },
+ "FRENCHFRIES": {
+  "sign": "frenchfries",
+  "kind": "identical"
+ },
+ "FROG": {
+  "sign": "frog",
+  "kind": "identical"
+ },
+ "GIFT": {
+  "sign": "gift",
+  "kind": "identical"
+ },
+ "GIRAFFE": {
+  "sign": "giraffe",
+  "kind": "identical"
+ },
+ "GIRL": {
+  "sign": "girl",
+  "kind": "identical"
+ },
+ "GIVE": {
+  "sign": "give",
+  "kind": "identical"
+ },
+ "GO": {
+  "sign": "go",
+  "kind": "identical"
+ },
+ "GRANDFATHER": {
+  "sign": "grandpa",
+  "kind": "synonym"
+ },
+ "GRANDMOTHER": {
+  "sign": "grandma",
+  "kind": "synonym"
+ },
+ "GRASS": {
+  "sign": "grass",
+  "kind": "identical"
+ },
+ "GREEN": {
+  "sign": "green",
+  "kind": "identical"
+ },
+ "GUM": {
+  "sign": "gum",
+  "kind": "identical"
+ },
+ "HAIR1": {
+  "sign": "hair",
+  "kind": "variant"
+ },
+ "HAIR2": {
+  "sign": "hair",
+  "kind": "variant"
+ },
+ "HAPPY": {
+  "sign": "happy",
+  "kind": "identical"
+ },
+ "HAT1": {
+  "sign": "hat",
+  "kind": "variant"
+ },
+ "HAT2": {
+  "sign": "hat",
+  "kind": "variant"
+ },
+ "HATE": {
+  "sign": "hate",
+  "kind": "identical"
+ },
+ "HAVE": {
+  "sign": "have",
+  "kind": "identical"
+ },
+ "HEAD": {
+  "sign": "head",
+  "kind": "identical"
+ },
+ "HEAR1": {
+  "sign": "hear",
+  "kind": "variant"
+ },
+ "HEAR2": {
+  "sign": "hear",
+  "kind": "variant"
+ },
+ "HELICOPTER1": {
+  "sign": "helicopter",
+  "kind": "variant"
+ },
+ "HELICOPTER2": {
+  "sign": "helicopter",
+  "kind": "variant"
+ },
+ "HELICOPTER3": {
+  "sign": "helicopter",
+  "kind": "variant"
+ },
+ "HELLO": {
+  "sign": "hello",
+  "kind": "identical"
+ },
+ "HEN": {
+  "sign": "hen",
+  "kind": "identical"
+ },
+ "HIDE": {
+  "sign": "hide",
+  "kind": "identical"
+ },
+ "HIGH": {
+  "sign": "high",
+  "kind": "identical"
+ },
+ "HOME": {
+  "sign": "home",
+  "kind": "identical"
+ },
+ "HORSE": {
+  "sign": "horse",
+  "kind": "identical"
+ },
+ "HOT": {
+  "sign": "hot",
+  "kind": "identical"
+ },
+ "HUNGRY": {
+  "sign": "hungry",
+  "kind": "identical"
+ },
+ "ICECREAM": {
+  "sign": "icecream",
+  "kind": "identical"
+ },
+ "IF": {
+  "sign": "if",
+  "kind": "identical"
+ },
+ "IN": {
+  "sign": "into",
+  "kind": "synonym"
+ },
+ "JACKET1": {
+  "sign": "jacket",
+  "kind": "variant"
+ },
+ "JACKET2": {
+  "sign": "jacket",
+  "kind": "variant"
+ },
+ "JACKET3": {
+  "sign": "jacket",
+  "kind": "variant"
+ },
+ "JACKET4": {
+  "sign": "jacket",
+  "kind": "variant"
+ },
+ "JUMP": {
+  "sign": "jump",
+  "kind": "identical"
+ },
+ "KISS1": {
+  "sign": "kiss",
+  "kind": "variant"
+ },
+ "KISS2": {
+  "sign": "kiss",
+  "kind": "variant"
+ },
+ "KISS3": {
+  "sign": "kiss",
+  "kind": "variant"
+ },
+ "LAMP1": {
+  "sign": "lamp",
+  "kind": "variant"
+ },
+ "LAMP2": {
+  "sign": "lamp",
+  "kind": "variant"
+ },
+ "LATER": {
+  "sign": "later",
+  "kind": "identical"
+ },
+ "LIKE": {
+  "sign": "like",
+  "kind": "identical"
+ },
+ "LION": {
+  "sign": "lion",
+  "kind": "identical"
+ },
+ "LIPS": {
+  "sign": "lips",
+  "kind": "identical"
+ },
+ "LISTEN": {
+  "sign": "listen",
+  "kind": "identical"
+ },
+ "LOUD": {
+  "sign": "loud",
+  "kind": "identical"
+ },
+ "MAD": {
+  "sign": "mad",
+  "kind": "identical"
+ },
+ "MAKE": {
+  "sign": "make",
+  "kind": "identical"
+ },
+ "MAN": {
+  "sign": "man",
+  "kind": "identical"
+ },
+ "MANY": {
+  "sign": "many",
+  "kind": "identical"
+ },
+ "MILK1": {
+  "sign": "milk",
+  "kind": "variant"
+ },
+ "MILK2": {
+  "sign": "milk",
+  "kind": "variant"
+ },
+ "MINE": {
+  "sign": "minemy",
+  "kind": "synonym"
+ },
+ "MOON": {
+  "sign": "moon",
+  "kind": "identical"
+ },
+ "MORNING": {
+  "sign": "morning",
+  "kind": "identical"
+ },
+ "MOTHER": {
+  "sign": "mom",
+  "kind": "synonym"
+ },
+ "MOUSE": {
+  "sign": "mouse",
+  "kind": "identical"
+ },
+ "MOUTH": {
+  "sign": "mouth",
+  "kind": "identical"
+ },
+ "MUST": {
+  "sign": "haveto",
+  "kind": "synonym"
+ },
+ "MY": {
+  "sign": "minemy",
+  "kind": "synonym"
+ },
+ "NAPKIN": {
+  "sign": "napkin",
+  "kind": "identical"
+ },
+ "NEXTTO": {
+  "sign": "beside",
+  "kind": "synonym"
+ },
+ "NIGHT1": {
+  "sign": "night",
+  "kind": "variant"
+ },
+ "NIGHT2": {
+  "sign": "night",
+  "kind": "variant"
+ },
+ "NO": {
+  "sign": "no",
+  "kind": "identical"
+ },
+ "NOSE": {
+  "sign": "nose",
+  "kind": "identical"
+ },
+ "NOT": {
+  "sign": "not",
+  "kind": "identical"
+ },
+ "NOW": {
+  "sign": "now",
+  "kind": "identical"
+ },
+ "OLD": {
+  "sign": "old",
+  "kind": "identical"
+ },
+ "ON": {
+  "sign": "on",
+  "kind": "identical"
+ },
+ "OPEN": {
+  "sign": "open",
+  "kind": "identical"
+ },
+ "ORANGE": {
+  "sign": "orange",
+  "kind": "identical"
+ },
+ "OTHER": {
+  "sign": "another",
+  "kind": "synonym"
+ },
+ "OUTSIDE": {
+  "sign": "outside",
+  "kind": "identical"
+ },
+ "OWL": {
+  "sign": "owl",
+  "kind": "identical"
+ },
+ "PEN": {
+  "sign": "pen",
+  "kind": "identical"
+ },
+ "PENCIL": {
+  "sign": "pencil",
+  "kind": "identical"
+ },
+ "PENNY": {
+  "sign": "penny",
+  "kind": "identical"
+ },
+ "PERSON": {
+  "sign": "person",
+  "kind": "identical"
+ },
+ "PIG": {
+  "sign": "pig",
+  "kind": "identical"
+ },
+ "PIZZA1": {
+  "sign": "pizza",
+  "kind": "variant"
+ },
+ "PIZZA2": {
+  "sign": "pizza",
+  "kind": "variant"
+ },
+ "PLEASE": {
+  "sign": "please",
+  "kind": "identical"
+ },
+ "POLICEMAN1": {
+  "sign": "police",
+  "kind": "synonym"
+ },
+ "POLICEMAN2": {
+  "sign": "police",
+  "kind": "synonym"
+ },
+ "PRETEND": {
+  "sign": "pretend",
+  "kind": "identical"
+ },
+ "PRETTY": {
+  "sign": "pretty",
+  "kind": "identical"
+ },
+ "QUIET": {
+  "sign": "quiet",
+  "kind": "identical"
+ },
+ "RADIO": {
+  "sign": "radio",
+  "kind": "identical"
+ },
+ "RAIN": {
+  "sign": "rain",
+  "kind": "identical"
+ },
+ "READ": {
+  "sign": "read",
+  "kind": "identical"
+ },
+ "RED": {
+  "sign": "red",
+  "kind": "identical"
+ },
+ "REFRIGERATOR": {
+  "sign": "refrigerator",
+  "kind": "identical"
+ },
+ "RIDE1": {
+  "sign": "ride",
+  "kind": "variant"
+ },
+ "RIDE2": {
+  "sign": "ride",
+  "kind": "variant"
+ },
+ "ROOM": {
+  "sign": "room",
+  "kind": "identical"
+ },
+ "SAD": {
+  "sign": "sad",
+  "kind": "identical"
+ },
+ "SAME1": {
+  "sign": "same",
+  "kind": "variant"
+ },
+ "SAME2": {
+  "sign": "same",
+  "kind": "variant"
+ },
+ "SCISSORS": {
+  "sign": "scissors",
+  "kind": "identical"
+ },
+ "SEE": {
+  "sign": "see",
+  "kind": "identical"
+ },
+ "SHIRT1": {
+  "sign": "shirt",
+  "kind": "variant"
+ },
+ "SHIRT2": {
+  "sign": "shirt",
+  "kind": "variant"
+ },
+ "SHOES": {
+  "sign": "shoe",
+  "kind": "synonym"
+ },
+ "SHOWER": {
+  "sign": "shower",
+  "kind": "identical"
+ },
+ "SICK": {
+  "sign": "sick",
+  "kind": "identical"
+ },
+ "SLEEP": {
+  "sign": "sleep",
+  "kind": "identical"
+ },
+ "SMILE1": {
+  "sign": "smile",
+  "kind": "variant"
+ },
+ "SMILE2": {
+  "sign": "smile",
+  "kind": "variant"
+ },
+ "SNOW1": {
+  "sign": "snow",
+  "kind": "variant"
+ },
+ "SNOW2": {
+  "sign": "snow",
+  "kind": "variant"
+ },
+ "STAIRS": {
+  "sign": "stairs",
+  "kind": "identical"
+ },
+ "STAY": {
+  "sign": "stay",
+  "kind": "identical"
+ },
+ "STICKY": {
+  "sign": "sticky",
+  "kind": "identical"
+ },
+ "STORY1": {
+  "sign": "story",
+  "kind": "variant"
+ },
+ "STORY2": {
+  "sign": "story",
+  "kind": "variant"
+ },
+ "STORY3": {
+  "sign": "story",
+  "kind": "variant"
+ },
+ "STUCK": {
+  "sign": "stuck",
+  "kind": "identical"
+ },
+ "SUN": {
+  "sign": "sun",
+  "kind": "identical"
+ },
+ "TABLE": {
+  "sign": "table",
+  "kind": "identical"
+ },
+ "TALK1": {
+  "sign": "talk",
+  "kind": "variant"
+ },
+ "TALK2": {
+  "sign": "talk",
+  "kind": "variant"
+ },
+ "TASTE": {
+  "sign": "taste",
+  "kind": "identical"
+ },
+ "TEETH": {
+  "sign": "tooth",
+  "kind": "synonym"
+ },
+ "THANKYOU": {
+  "sign": "thankyou",
+  "kind": "identical"
+ },
+ "THAT": {
+  "sign": "that",
+  "kind": "identical"
+ },
+ "THERE": {
+  "sign": "there",
+  "kind": "identical"
+ },
+ "THINK": {
+  "sign": "think",
+  "kind": "identical"
+ },
+ "THIRSTY": {
+  "sign": "thirsty",
+  "kind": "identical"
+ },
+ "TIGER": {
+  "sign": "tiger",
+  "kind": "identical"
+ },
+ "TIME": {
+  "sign": "time",
+  "kind": "identical"
+ },
+ "TOILET": {
+  "sign": "potty",
+  "kind": "synonym"
+ },
+ "TOMORROW": {
+  "sign": "tomorrow",
+  "kind": "identical"
+ },
+ "TONGUE": {
+  "sign": "tongue",
+  "kind": "identical"
+ },
+ "TOOTHBRUSH": {
+  "sign": "toothbrush",
+  "kind": "identical"
+ },
+ "TOUCH": {
+  "sign": "touch",
+  "kind": "identical"
+ },
+ "TOY1": {
+  "sign": "toy",
+  "kind": "variant"
+ },
+ "TOY2": {
+  "sign": "toy",
+  "kind": "variant"
+ },
+ "TOY3": {
+  "sign": "toy",
+  "kind": "variant"
+ },
+ "TRASH": {
+  "sign": "garbage",
+  "kind": "synonym"
+ },
+ "TREE": {
+  "sign": "tree",
+  "kind": "identical"
+ },
+ "TV": {
+  "sign": "TV",
+  "kind": "identical"
+ },
+ "UNCLE": {
+  "sign": "uncle",
+  "kind": "identical"
+ },
+ "UNDERWEAR1": {
+  "sign": "underwear",
+  "kind": "variant"
+ },
+ "UNDERWEAR2": {
+  "sign": "underwear",
+  "kind": "variant"
+ },
+ "UP": {
+  "sign": "up",
+  "kind": "identical"
+ },
+ "US": {
+  "sign": "weus",
+  "kind": "synonym"
+ },
+ "VACUUM": {
+  "sign": "vacuum",
+  "kind": "identical"
+ },
+ "WAIT": {
+  "sign": "wait",
+  "kind": "identical"
+ },
+ "WATER": {
+  "sign": "water",
+  "kind": "identical"
+ },
+ "WE": {
+  "sign": "weus",
+  "kind": "synonym"
+ },
+ "WET": {
+  "sign": "wet",
+  "kind": "identical"
+ },
+ "WHERE": {
+  "sign": "where",
+  "kind": "identical"
+ },
+ "WHITE": {
+  "sign": "white",
+  "kind": "identical"
+ },
+ "WHO": {
+  "sign": "who",
+  "kind": "identical"
+ },
+ "WHY": {
+  "sign": "why",
+  "kind": "identical"
+ },
+ "WILL": {
+  "sign": "will",
+  "kind": "identical"
+ },
+ "WOLF": {
+  "sign": "wolf",
+  "kind": "identical"
+ },
+ "YELLOW": {
+  "sign": "yellow",
+  "kind": "identical"
+ },
+ "YES": {
+  "sign": "yes",
+  "kind": "identical"
+ },
+ "YESTERDAY": {
+  "sign": "yesterday",
+  "kind": "identical"
+ },
+ "YOURSELF": {
+  "sign": "yourself",
+  "kind": "identical"
+ },
+ "YUCKY": {
+  "sign": "yucky",
+  "kind": "identical"
+ },
+ "ZEBRA": {
+  "sign": "zebra",
+  "kind": "identical"
+ },
+ "ZIPPER": {
+  "sign": "zipper",
+  "kind": "identical"
+ }
+}
