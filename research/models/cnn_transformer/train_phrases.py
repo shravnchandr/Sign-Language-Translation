@@ -51,7 +51,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from .data.augmentation import AdvancedAugmentation
-from .data.dataset import BucketBatchSampler, get_data_loaders
+from .data.dataset import BucketBatchSampler, get_data_loaders, worker_context
 from .data.fingerspelling_dataset import collate_ctc
 from .data.phrase_dataset import phrase_datasets
 from .model import GraphConformer, LandmarkConformer
@@ -177,6 +177,7 @@ def train(args):
           f"(kinds {kinds}; 1-sign phrases count as seen)")
 
     worker_kw = dict(num_workers=args.num_workers, collate_fn=collate_ctc,
+                     multiprocessing_context=worker_context(args.num_workers),
                      pin_memory=device.type == "cuda")
     # Validation in fixed order so evaluate() can map results back to phrases.
     val_order = np.argsort(val_ds.lengths(), kind="stable")

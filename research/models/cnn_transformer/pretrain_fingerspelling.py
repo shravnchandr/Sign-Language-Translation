@@ -43,7 +43,7 @@ from tqdm import tqdm
 from torch.utils.data import DataLoader, Subset
 
 from .data.augmentation import AdvancedAugmentation
-from .data.dataset import BucketBatchSampler
+from .data.dataset import BucketBatchSampler, worker_context
 from .data.fingerspelling_dataset import (
     FingerspellingDataset,
     collate_ctc,
@@ -139,6 +139,7 @@ def train(args):
         train_ds,
         batch_sampler=BucketBatchSampler([lengths[i] for i in train_idx], args.batch_size),
         num_workers=args.num_workers,
+        multiprocessing_context=worker_context(args.num_workers),
         collate_fn=collate_ctc,
         pin_memory=(device.type == "cuda"),
     )
@@ -146,6 +147,7 @@ def train(args):
         val_ds,
         batch_sampler=BucketBatchSampler([lengths[i] for i in val_idx], args.batch_size),
         num_workers=args.num_workers,
+        multiprocessing_context=worker_context(args.num_workers),
         collate_fn=collate_ctc,
         pin_memory=(device.type == "cuda"),
     )

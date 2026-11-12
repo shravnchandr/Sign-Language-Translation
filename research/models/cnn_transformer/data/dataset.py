@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import multiprocessing as mp
 import os
 import numpy as np
 import pandas as pd
@@ -27,6 +28,19 @@ except ImportError:
 
 _LMDB_ENV_CACHE = {}
 _CACHE_VERSION = CACHE_VERSION  # re-export for any code that still references it
+
+
+def worker_context(num_workers: int):
+    """DataLoader start method: forkserver whenever workers are used.
+
+    Forked workers inherit the parent's open LMDB environment, and py-lmdb refuses
+    to open the same path again in that process ("already open in this process") —
+    the Python ≤ 3.13 Linux default (Kaggle). forkserver, Python 3.14's default
+    (RunPod), starts workers without the parent's handles.
+    """
+    if num_workers > 0 and "forkserver" in mp.get_all_start_methods():
+        return "forkserver"
+    return None
 
 
 def _open_lmdb_env(lmdb_path: str):
@@ -473,6 +487,7 @@ def get_data_loaders(
         batch_sampler=BucketBatchSampler(train_dataset.lengths, batch_size),
         collate_fn=collate_batch,
         num_workers=num_workers,
+        multiprocessing_context=worker_context(num_workers),
         pin_memory=True,
         **worker_kwargs,
     )
@@ -481,6 +496,7 @@ def get_data_loaders(
         batch_sampler=BucketBatchSampler(test_dataset.lengths, batch_size),
         collate_fn=collate_batch,
         num_workers=num_workers,
+        multiprocessing_context=worker_context(num_workers),
         pin_memory=True,
         **worker_kwargs,
     )
@@ -517,6 +533,7 @@ def clean_subset_loader(
         batch_sampler=BucketBatchSampler(ds.lengths, batch_size),
         collate_fn=collate_batch,
         num_workers=num_workers,
+        multiprocessing_context=worker_context(num_workers),
         pin_memory=True,
         **worker_kwargs,
     )
