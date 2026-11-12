@@ -108,7 +108,7 @@ def train(args):
     # As train.py: bf16 on Ampere+ (no loss scaling, no fp16 overflow); fp16 +
     # GradScaler otherwise.
     amp_dtype = (
-        torch.bfloat16 if use_amp and torch.cuda.is_bf16_supported() else torch.float16
+        torch.bfloat16 if use_amp and torch.cuda.get_device_capability()[0] >= 8 else torch.float16
     )
     print(f"Device: {device}" + (f" | AMP {str(amp_dtype).replace('torch.', '')}" if use_amp else ""))
 

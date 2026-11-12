@@ -25,10 +25,11 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 use_amp = device.type == "cuda"
 # bf16 keeps fp32's exponent range, so activations can't overflow to inf the
 # way fp16 can (Run 004 hit a NaN batch at epoch 55 under fp16) and no loss
-# scaling is needed. Ampere and newer (A40/A100/3090/4090/H100) support it.
+# scaling is needed. Ampere and newer (A40/A100/3090/4090/H100) support it;
+# is_bf16_supported() is also True where bf16 is only emulated (T4: slow).
 amp_dtype = (
     torch.bfloat16
-    if use_amp and torch.cuda.is_bf16_supported()
+    if use_amp and torch.cuda.get_device_capability()[0] >= 8
     else torch.float16
 )
 if device.type == "cuda":

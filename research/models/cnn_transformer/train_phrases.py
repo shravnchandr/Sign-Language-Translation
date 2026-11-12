@@ -149,7 +149,7 @@ def train(args):
     out_dir.mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     use_amp = device.type == "cuda"
-    amp_dtype = torch.bfloat16 if use_amp and torch.cuda.is_bf16_supported() else torch.float16
+    amp_dtype = torch.bfloat16 if use_amp and torch.cuda.get_device_capability()[0] >= 8 else torch.float16
     print(f"Device: {device}" + (f" | AMP {str(amp_dtype).replace('torch.', '')}" if use_amp else ""))
 
     sign2idx = json.load(open(Path(args.data_dir) / "sign_to_prediction_index_map.json"))
