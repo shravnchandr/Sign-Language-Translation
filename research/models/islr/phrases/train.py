@@ -142,32 +142,59 @@ def evaluate(model, loader, val_ds, device, amp_dtype, use_amp, blank, criterion
     }
 
 
-def extra_source(args, is_train, sign2idx):
-    """ASL Signs training clips + the "train" half of WLASL's signers (signer_split), and
-    signer weights so that --extra-frac of the phrases come from WLASL signers (each in
-    proportion to its clips; ASL Signs signers uniform, as without extra data)."""
-    df = pd.read_csv(Path(args.extra_data_dir) / "train.csv")
-    if "wlasl_half" in df:  # all-gloss LMDB: halves fixed at build time (= the 206-sign split)
-        split = {h: df.loc[df["wlasl_half"] == h, "participant_id"].unique().tolist()
-                 for h in ("train", "test")}
+def _extra_clips(data_dir: str, lmdb_path: str, sign2idx: dict, kinds: list) -> tuple:
+    """One extra dataset's training clips: WLASL's "train" signer half (signer_split, or the
+    all-gloss LMDB's `wlasl_half`), or ASL Citizen's official train split (research use only)."""
+    df = pd.read_csv(Path(data_dir) / "train.csv")
+    if (df.get("source") == "aslcitizen").all():
+        name, default_lmdb = "ASL Citizen", "aslcitizen.lmdb.mdb"
+        held_out = df.loc[df["split"] != "train", "participant_id"].nunique()
+        df = df[df["split"] == "train"].copy()
     else:
-        split = signer_split(df)
-    df = df[df["participant_id"].isin(split["train"])].copy()
+        name, default_lmdb = "WLASL", "wlasl.lmdb.mdb"
+        if "wlasl_half" in df:  # all-gloss LMDB: halves fixed at build time (= the 206-sign split)
+            split = {h: df.loc[df["wlasl_half"] == h, "participant_id"].unique().tolist()
+                     for h in ("train", "test")}
+        else:
+            split = signer_split(df)
+        held_out = len(split["test"])
+        df = df[df["participant_id"].isin(split["train"])].copy()
+    if kinds and "kind" in df:
+        df = df[df["kind"].isin(kinds)]
     df["sign"] = df["sign"].map(sign2idx)
     if df["sign"].isna().any():
         raise SystemExit(f"{int(df['sign'].isna().sum())} extra clips have labels outside the "
                          "vocabulary — pass --vocab <extra dir>/sign_to_prediction_index_map.json")
     df["sign"] = df["sign"].astype(int)
-    extra = ASLDataset(df, args.extra_data_dir, lmdb_path=args.extra_lmdb_path
-                       or str(Path(args.extra_data_dir) / "wlasl.lmdb.mdb"), max_frames=1 << 20)
+    ds = ASLDataset(df, data_dir, lmdb_path=lmdb_path or str(Path(data_dir) / default_lmdb),
+                    max_frames=1 << 20)
+    return name, ds, held_out
+
+
+def extra_source(args, is_train, sign2idx):
+    """ASL Signs training clips + each --extra-data-dir's training signers, and signer
+    weights so that --extra-frac[i] of the phrases come from dataset i's signers (each in
+    proportion to its clips; ASL Signs signers uniform, as without extra data)."""
+    dirs, fracs = args.extra_data_dir, args.extra_frac
+    lmdbs = args.extra_lmdb_path or [""] * len(dirs)
+    if not (len(fracs) == len(dirs) == len(lmdbs)):
+        raise SystemExit("--extra-data-dir, --extra-frac and --extra-lmdb-path need one value per dataset")
+    if sum(fracs) >= 1:
+        raise SystemExit("--extra-frac values must sum to < 1")
     is_signers = is_train.df["participant_id"].astype(str).unique()
-    clips = extra.df["participant_id"].astype(str).value_counts()
-    weights = {s: (1 - args.extra_frac) / len(is_signers) for s in is_signers}
-    weights.update({s: args.extra_frac * n / clips.sum() for s, n in clips.items()})
-    print(f"Extra clips: {len(df):,} from {len(clips)} WLASL signers ({extra.df['sign'].nunique()} "
-          f"signs; {(df['both_hands'] > 0).mean():.0%} with both hands) → {args.extra_frac:.0%} "
-          f"of phrases; test signers held out: {len(split['test'])}")
-    return ConcatSource(is_train, extra), weights
+    weights = {s: (1 - sum(fracs)) / len(is_signers) for s in is_signers}
+    sources = [is_train]
+    for d, l, f in zip(dirs, lmdbs, fracs):
+        name, extra, held_out = _extra_clips(d, l, sign2idx, args.extra_kinds)
+        clips = extra.df["participant_id"].astype(str).value_counts()
+        if set(clips.index) & set(weights):
+            raise SystemExit(f"{name} signer ids collide with another source")
+        weights.update({s: f * n / clips.sum() for s, n in clips.items()})
+        print(f"Extra clips: {len(extra.df):,} from {len(clips)} {name} signers "
+              f"({extra.df['sign'].nunique()} signs; {(extra.df['both_hands'] > 0).mean():.0%} with "
+              f"both hands) → {f:.0%} of phrases; signers held out: {held_out}")
+        sources.append(extra)
+    return ConcatSource(*sources), weights
 
 
 def train(args):
@@ -198,6 +225,9 @@ def train(args):
     train_source, signer_weights = tl.dataset, None
     if args.extra_data_dir:
         train_source, signer_weights = extra_source(args, tl.dataset, sign2idx)
+    # ASL Citizen's license is research only: the checkpoint is marked and export_onnx refuses it
+    research_only = any(getattr(s, "df", pd.DataFrame()).get("source", pd.Series(dtype=str))
+                        .eq("aslcitizen").any() for s in getattr(train_source, "sources", ()))
     phrase_kw = dict(max_frames=args.max_frames, random_frac=args.random_frac,
                      max_signs=args.max_signs, transition=(args.trans_min, args.trans_max),
                      min_detected=args.min_detected, holdout_frac=args.holdout_frac)
@@ -307,7 +337,10 @@ def train(args):
                     "n_heads": args.n_heads,
                     "vocab": args.vocab or "sign_to_prediction_index_map.json",
                     "blank": blank, "val_fold": args.val_fold, "epoch": epoch + 1,
-                    "val_wer": r["wer"], "val_exact": r["exact"], "init": args.init}
+                    "val_wer": r["wer"], "val_exact": r["exact"], "init": args.init,
+                    "extra_data": [{"dir": d, "frac": f} for d, f in
+                                   zip(args.extra_data_dir, args.extra_frac)],
+                    "extra_kinds": args.extra_kinds, "research_only": research_only}
             if args.arch == "graph":
                 meta.update(graph_hidden=args.graph_hidden, graph_layers=args.graph_layers)
             (out_dir / "phrases_meta.json").write_text(json.dumps(meta, indent=2))
@@ -373,13 +406,17 @@ def main():
     p.add_argument("--bone-aug-prob", type=float, default=0.0)
     p.add_argument("--bone-aug-hand", type=float, default=0.15)
     p.add_argument("--bone-aug-bone", type=float, default=0.1)
-    p.add_argument("--extra-data-dir", default="",
-                   help="WLASL LMDB folder: mix its 'train' signer half into training")
-    p.add_argument("--extra-lmdb-path", default="")
+    p.add_argument("--extra-data-dir", nargs="+", default=[],
+                   help="extra LMDB folder(s) mixed into training: WLASL ('train' signer half) "
+                        "and/or ASL Citizen (official train split; research use only)")
+    p.add_argument("--extra-lmdb-path", nargs="+", default=[],
+                   help="one per --extra-data-dir (default <dir>/wlasl.lmdb.mdb or aslcitizen.lmdb.mdb)")
     p.add_argument("--vocab", default="",
                    help="wider label map (first 250 = ASL Signs map), e.g. the all-gloss WLASL map")
-    p.add_argument("--extra-frac", type=float, default=0.15,
-                   help="share of training phrases from the extra signers")
+    p.add_argument("--extra-frac", type=float, nargs="+", default=[0.15],
+                   help="share of training phrases from each extra dataset's signers")
+    p.add_argument("--extra-kinds", nargs="+", default=[],
+                   help="ASL Citizen gloss kinds to train on (identical / variant / synonym; default all)")
     train(p.parse_args())
 
 

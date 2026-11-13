@@ -147,6 +147,9 @@ def main() -> None:
     import onnxruntime as ort
 
     meta = json.loads((args.meta or args.checkpoint.with_name("phrases_meta.json")).read_text())
+    if meta.get("research_only"):
+        raise SystemExit("this checkpoint was trained on research-only data (ASL Citizen) and must "
+                         "not be exported for the app")
     sign2idx = json.loads(Path(args.vocab).read_text())
     labels = [s for s, _ in sorted(sign2idx.items(), key=lambda kv: kv[1])]
     model = load_ctc_model(args.checkpoint, meta, len(labels))
