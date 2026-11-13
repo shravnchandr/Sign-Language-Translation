@@ -225,9 +225,16 @@ def train(args):
     train_source, signer_weights = tl.dataset, None
     if args.extra_data_dir:
         train_source, signer_weights = extra_source(args, tl.dataset, sign2idx)
-    # ASL Citizen's license is research only: the checkpoint is marked and export_onnx refuses it
-    research_only = any(getattr(s, "df", pd.DataFrame()).get("source", pd.Series(dtype=str))
-                        .eq("aslcitizen").any() for s in getattr(train_source, "sources", ()))
+    # ASL Citizen's license is research only: the checkpoint is marked and export_onnx refuses it.
+    # The mark is inherited from an --init phrase checkpoint, so fine-tuning cannot launder it.
+    init_meta = Path(args.init).with_name("phrases_meta.json") if args.init else None
+    inherited = bool(init_meta and init_meta.exists()
+                     and json.loads(init_meta.read_text()).get("research_only"))
+    research_only = inherited or any(
+        getattr(s, "df", pd.DataFrame()).get("source", pd.Series(dtype=str)).eq("aslcitizen").any()
+        for s in getattr(train_source, "sources", ()))
+    if inherited:
+        print(f"--init {args.init} is research-only (ASL Citizen) → so is this checkpoint")
     phrase_kw = dict(max_frames=args.max_frames, random_frac=args.random_frac,
                      max_signs=args.max_signs, transition=(args.trans_min, args.trans_max),
                      min_detected=args.min_detected, holdout_frac=args.holdout_frac)
