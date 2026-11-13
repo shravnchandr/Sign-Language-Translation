@@ -19,7 +19,7 @@ Approaches, all under `research/models/` (current work in the `islr` package, or
 ## Repository layout
 
 - `research/models/islr/` — current code, by approach: `core/` (shared config, backbones, data) · `isolated/` (A) · `pretrain/` (B) · `phrases/` (C, current product model) · `evaluation/` · `export/`. Run as `PYTHONPATH=research/models python -m islr.<subpackage>.<module>`. `research/models/vqvae_seq2seq/` (approach 0, dormant) and `st_gcn/` (legacy) stay alongside.
-- `scripts/` — shell pipelines (`run_pipeline_isolated.sh`, `run_pipeline_vqvae_seq2seq.sh`, `setup_runpod.sh`, `runpod_results.sh`; they `cd` to the repo root themselves) and Kaggle runners (`kaggle_run.py`, `extract_aslcitizen.py`).
+- `scripts/` — shell pipelines (`run_pipeline_isolated.sh`, `run_pipeline_vqvae_seq2seq.sh`, `setup_runpod.sh`, `runpod_results.sh`; they `cd` to the repo root themselves) Kaggle runners (`kaggle_run.py`, `extract_aslcitizen.py`) and `download_kernel_output.py` (used by `setup_runpod.sh`).
 - `notebooks/` — by approach: `data/` (LMDB builders, WLASL MediaPipe extraction, `build-wlasl-*` Kaggle kernel folders; `legacy/`), `exploration/`, `early_transformers/`, `vqvae/`, `first_place/`. Index in `notebooks/README.md`.
 - `archive/research/` — superseded prototypes, feature experiments and tools (reference only).
 - `results/` (gitignored) is organised like the code: `isolated/<run>/`, `pretrain/<run>/`, `phrases/<run>/` (checkpoint + meta + `logs/` + eval outputs), `evaluation/` (`wlasl/` per-clip CSVs, `error_review/`, `signer_diagnostics/`); `results/kaggle/` is the inbox `kaggle_run.py output` downloads into — file each run under its approach afterwards. `exports/phrases04/` is the browser model (ONNX, labels, preprocess spec, `sign_reliability.json`, `fixtures/`).
@@ -62,9 +62,9 @@ PYTHONPATH=research/models uv run --with onnxruntime python -m islr.export.brows
 bash scripts/runpod_results.sh send run005       # on the pod, before stopping it (disk is erased on stop)
 bash scripts/runpod_results.sh receive <code>    # on your machine → runs/run005/ (gitignored)
 
-# VQ-VAE full pipeline (run from project root — requires research/models/ on PYTHONPATH)
-PYTHONPATH=research/models bash scripts/run_pipeline_vqvae_seq2seq.sh
-PYTHONPATH=research/models bash scripts/run_pipeline_vqvae_seq2seq.sh --vqvae-epochs 10 --translator-epochs 10
+# VQ-VAE full pipeline (cds to the repo root and sets PYTHONPATH itself)
+bash scripts/run_pipeline_vqvae_seq2seq.sh
+bash scripts/run_pipeline_vqvae_seq2seq.sh --vqvae-epochs 10 --translator-epochs 10
 
 # Train VQ-VAE (Phase 1)
 PYTHONPATH=research/models uv run python -m vqvae_seq2seq.vqvae.train_vqvae \
@@ -198,6 +198,7 @@ Organised by approach: `core/` (shared config, backbones, data) · `isolated/` (
 | `run_pipeline_isolated.sh` | Approach A on RunPod: optional FS LMDB + pre-training → fine-tune, in tmux |
 | `run_pipeline_vqvae_seq2seq.sh` | Approach 0 pipeline (dormant) |
 | `setup_runpod.sh` / `runpod_results.sh` | Fresh-pod setup (env, LMDB download/verify) / move results off the pod |
+| `download_kernel_output.py` | Streams a Kaggle notebook's saved output to disk (multi-GB safe, resumable); used by `setup_runpod.sh` for the LMDBs |
 | `kaggle_run.py` | `push <name> [--gpu] -- <module> <args> [:: <module> <args> ...]` / `status` / `output`: runs a repo module as a private Kaggle notebook `islr-<name>` (repo at the pushed HEAD, datasets mounted, placeholders {IS_LMDB_DIR} {CKPT_DIR} {WLASL_DIR} {WLASL_ALL_DIR} {OUT}, log in out/run.log) |
 | `extract_aslcitizen.py` | `push --shards N [--limit k --name …]` / `status`: MediaPipe Holistic 0.10.14 landmarks from the ASL Citizen videos on Kaggle CPU, sharded private notebooks `extract-aslcitizen-s<k>` (pinned image as the WLASL extraction; only mapped glosses unless `--all`). Research use only |
 

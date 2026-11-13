@@ -33,7 +33,7 @@ from torch.amp import autocast, GradScaler
 # Import VQ-VAE model from standalone training script
 # =============================================================================
 # We import the VQ-VAE model components to load the pre-trained checkpoint
-from notebooks.training.train_vqvae_standalone import (
+from train_vqvae_standalone import (  # sibling file; the script's folder is on sys.path
     ImprovedVQVAEConfig,
     ImprovedVQVAE,
     FastLandmarkProcessor,

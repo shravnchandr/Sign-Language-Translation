@@ -17,10 +17,11 @@
 #   brew install runpod/runpodctl/runpodctl
 
 set -euo pipefail
-cd "$(dirname "$0")/.."
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+cd "$(dirname "$SELF")/.."
 
 die() { echo "ERROR: $*" >&2; exit 1; }
-usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+usage() { sed -n '2,17p' "$SELF" | sed 's/^# \{0,1\}//'; exit 1; }
 
 command -v runpodctl >/dev/null 2>&1 || die "runpodctl not found.
   macOS:  brew install runpod/runpodctl/runpodctl

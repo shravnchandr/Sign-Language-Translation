@@ -178,7 +178,8 @@ Spatial-Temporal Graph Convolutional Network. Legacy baseline, superseded by `--
 research/models/       # model code (PYTHONPATH=research/models) — see tree below
 scripts/               # tools: run_pipeline_isolated.sh / run_pipeline_vqvae_seq2seq.sh, setup_runpod.sh,
                        #   runpod_results.sh, kaggle_run.py (any module on a Kaggle GPU),
-                       #   extract_aslcitizen.py (ASL Citizen landmarks, research only)
+                       #   extract_aslcitizen.py (ASL Citizen landmarks, research only),
+                       #   download_kernel_output.py (large Kaggle outputs; used by setup_runpod.sh)
 notebooks/             # by approach — see notebooks/README.md
   data/                #   dataset builders + MediaPipe extraction (LMDBs, WLASL); legacy/ older builders
   exploration/         #   early data exploration
@@ -373,7 +374,7 @@ python3 scripts/kaggle_run.py output phrases04-viewpoint     # → results/kaggl
 
 ```bash
 # Full pipeline
-PYTHONPATH=research/models bash scripts/run_pipeline_vqvae_seq2seq.sh
+bash scripts/run_pipeline_vqvae_seq2seq.sh
 
 # Phase 1 — train VQ-VAE
 PYTHONPATH=research/models uv run python -m vqvae_seq2seq.vqvae.train_vqvae \

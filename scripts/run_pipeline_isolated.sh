@@ -49,8 +49,8 @@ ORIG_ARGS=("$@")
 
 # Run from the repo root regardless of the caller's cwd (relative paths below
 # and in arguments are repo-relative).
-cd "$(dirname "$0")/.."
-SELF="$(pwd)/$(basename "$0")"
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+cd "$(dirname "$SELF")/.."
 
 # scripts/setup_runpod.sh installs uv into ~/.local/bin, which is only on PATH in shells
 # started afterwards — not the terminal that ran setup, nor a tmux session

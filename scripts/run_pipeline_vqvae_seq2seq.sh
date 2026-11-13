@@ -9,6 +9,9 @@
 
 set -e  # stop on any error
 
+# Run from the repo root regardless of the caller's cwd
+cd "$(dirname "$0")/.."
+
 # Make research/models importable as a package root
 export PYTHONPATH="$(pwd)/research/models${PYTHONPATH:+:$PYTHONPATH}"
 

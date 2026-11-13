@@ -7,7 +7,7 @@
 #
 #   data/asl-is-lmdb/  is.lmdb.mdb  train.csv  sign_to_prediction_index_map.json
 #
-# Kernel output is fetched by archive/research/tools/download_kernel_output.py rather than
+# Kernel output is fetched by scripts/download_kernel_output.py rather than
 # `kaggle kernels output`, which buffers each file fully in RAM (OOM risk on a
 # 15–20 GB LMDB). Downloads land in data/.kaggle_download/ — same filesystem as
 # data/asl-is-lmdb/, so the final move is an instant rename (peak disk ≈ 1× LMDB).
@@ -156,7 +156,7 @@ else
         echo "[data] Free disk: $(free_gb "$SRC") GB"
         if [ -n "$KERNEL" ]; then
             echo "[data] Downloading saved output of notebook $KERNEL ..."
-            uv run python archive/research/tools/download_kernel_output.py "$KERNEL" -p "$SRC" \
+            uv run python scripts/download_kernel_output.py "$KERNEL" -p "$SRC" \
                 --include '*.mdb' train.csv sign_to_prediction_index_map.json \
                 --exclude lock.mdb
         else

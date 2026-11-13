@@ -16,7 +16,7 @@ Credentials: ~/.kaggle/kaggle.json, or KAGGLE_USERNAME + KAGGLE_KEY
 (the kaggle package authenticates on import).
 
 Usage:
-  python research/tools/download_kernel_output.py shravnchandr/build-islt-lmdb \\
+  python scripts/download_kernel_output.py shravnchandr/build-islt-lmdb \\
       -p data/.kaggle_download --include '*.mdb' train.csv --exclude lock.mdb
 """
 
