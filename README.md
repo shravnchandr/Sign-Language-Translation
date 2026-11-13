@@ -43,7 +43,7 @@ There is no openly licensed continuous ASL dataset with this vocabulary and Medi
 
 These are synthetic phrases (citation-form clips, artificial transitions, no coarticulation or facial grammar): an unvalidated proxy for real signing until tested on real recordings.
 
-**Current browser model: `phrases04`** (`exports/phrases04/`). Each step changed one thing and was scored on WLASL signers never used in training (824 clips, single sign, exact decode):
+**Current browser model: `phrases05`** (`exports/phrases05/`; `phrases04` before 2026-11-12). Each step changed one thing and was scored on WLASL signers never used in training (824 clips, single sign, exact decode):
 
 | Model | Change | WLASL held-out signers | ASL Signs synthetic WER |
 |---|---|---|---|
@@ -51,11 +51,11 @@ These are synthetic phrases (citation-form clips, artificial transitions, no coa
 | `phrases02` | wider tempo range (0.5–2×) | no clear change (paired p = 0.54) | 0.287 |
 | `phrases03` | + half of WLASL's signers (two-handed data, 15 % of phrases) | **80.1 %** | 0.296 |
 | `phrases04` | + viewpoint augmentation (per-axis scale, shear, rotation) | 80.8 % (77.4 % with WLASL's framing correction undone; phrases03 39.2 %) | 0.291 |
-| `phrases05` | + all 2,000 WLASL glosses as extra labels, WLASL 30 % of phrases (not exported) | 83.7 % (paired vs phrases04 p = 0.025; pooled top-1 82.6 → 84.1 %, p = 0.26; ASL Signs held-out top-1 65.1 → 64.3 %) | 0.285 |
+| `phrases05` | + all 2,000 WLASL glosses as extra labels, WLASL 30 % of phrases — **current browser model** | 83.7 % (paired vs phrases04 p = 0.025; pooled top-1 82.6 → 84.1 %, p = 0.26; ASL Signs held-out top-1 65.1 → 64.3 %) | 0.285 |
 
 On **ASL Citizen** (51 unseen Deaf signers, webcam, 8,557 clips; research use only — no model is trained on it) the same order holds independently: phrases01 53.7 %, phrases03 69.0 %, phrases04 68.7 % (66.9 % with the framing correction undone, phrases03 44.2 %), **phrases05 72.4 %** (paired vs phrases04 p = 2e-19; pooled top-1 75.4 vs 74.2 %, p = 0.002), isolated classifier 65.2 %.
 
-On ASL Signs' held-out signers phrases04 ranks the right sign first 65 % of the time and in its top 3 81 %; `sign_reliability.json` gives per-sign accuracy, common confusions (often near-synonyms: cat/kitty, pen/pencil, wake/awake) and score thresholds for a "not sure" state. Caveats: the WLASL halves share recording sources, the viewpoint augmentation was chosen on the same test half, and live webcam use is still untested beyond anecdotes.
+On ASL Signs' held-out signers phrases05 ranks the right sign first 64 % of the time and in its top 3 81 % (phrases04 65 / 81 %); `sign_reliability.json` gives per-sign accuracy, common confusions (often near-synonyms: cat/kitty, pen/pencil, wake/awake) and score thresholds for a "not sure" state. Caveats: the WLASL halves share recording sources, the viewpoint augmentation was chosen on the same test half (ASL Citizen, above, is the independent check), and live webcam use is still untested beyond anecdotes.
 
 ### Running in the browser
 
@@ -190,7 +190,7 @@ notebooks/             # by approach — see notebooks/README.md
   first_place/         #   1st-place Kaggle solution reproduced on our signer fold
 archive/research/      # superseded prototypes, feature experiments and tools (kept for reference)
 data/                  # datasets (gitignored) — see below
-exports/               # browser-ready model (gitignored): phrases04/ = ONNX + labels + preprocess spec +
+exports/               # browser-ready model (gitignored): phrases05/ = ONNX + labels + preprocess spec +
                        #   sign_reliability.json + fixtures/
 results/               # run outputs (gitignored), by approach: isolated/, pretrain/, phrases/<run>/,
                        #   evaluation/ (wlasl, error_review, signer_diagnostics); kaggle/ = download inbox
@@ -345,13 +345,13 @@ PYTHONPATH=research/models uv run python -m islr.phrases.breakdown \
 
 # ONNX export (+ labels.json, preprocess.json) and browser test fixtures
 PYTHONPATH=research/models uv run --with onnx --with onnxruntime --with onnxscript \
-  python -m islr.export.export_onnx --checkpoint <best_phrases.pth> --out-dir exports/phrases04
+  python -m islr.export.export_onnx --checkpoint <best_phrases.pth> --out-dir exports/phrases05
 PYTHONPATH=research/models uv run --with onnxruntime python -m islr.export.browser_fixtures \
-  --parquet <competition parquets> --concat --out-dir exports/phrases04/fixtures
+  --parquet <competition parquets> --concat --out-dir exports/phrases05/fixtures
 
 # Per-sign reliability for the app (held-out ASL Signs signers + WLASL test half; CPU)
 PYTHONPATH=research/models uv run python -m islr.evaluation.sign_reliability \
-  --checkpoint <best_phrases.pth> --wlasl-dir data/wlasl-lmdb --out exports/phrases04/sign_reliability.json
+  --checkpoint <best_phrases.pth> --wlasl-dir data/wlasl-lmdb --out exports/phrases05/sign_reliability.json
 
 # Cross-dataset score on WLASL's held-out signer half (paired comparisons via --per-clip)
 PYTHONPATH=research/models uv run python -m islr.evaluation.cross_dataset \

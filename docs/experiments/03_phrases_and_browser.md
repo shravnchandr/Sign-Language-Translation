@@ -276,3 +276,14 @@ confounded. Not exported — phrases04 stays the browser model until a live test
 phrases04 68.7 % exact (+760 / −448, p = 2e-19), pooled top-1 75.4 vs 74.2 % (p = 0.002), identical
 glosses 79.0 vs 76.2 %; see [04](04_data_cross_dataset.md). phrases05 uses no ASL Citizen data, so it
 is eligible for the app; the ASL Signs held-out drop (65.1 → 64.3 % top-1) remains.
+
+### phrases05 exported as the browser model (2026-11-12)
+
+`exports/phrases05/` (`islr.export.export_onnx`; the 2,017-label head is cut to 250 + blank):
+ONNX vs PyTorch max |Δlogit| 6.3e-5, frame argmax 32/32. `labels.json` and the preprocessing in
+`preprocess.json` are identical to phrases04 (top-level `blank` 250; the nested `checkpoint_meta`
+keeps the training head's 2017), so the app swaps the ONNX + `sign_reliability.json` only.
+Fixtures (same two parquets): `100015657` → cloud, concat → cloud animal — as phrases04.
+Reliability: Kaggle run's `phrases05_reliability.json` (same checkpoint); 0.8 precision at
+pooled p1 ≥ 0.68 (phrases04 0.68), so the "not sure" cut ~0.7 is unchanged. `exports/phrases04/`
+kept until the app has switched.
