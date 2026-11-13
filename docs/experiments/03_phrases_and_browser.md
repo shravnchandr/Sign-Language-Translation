@@ -240,3 +240,34 @@ duck, wake ↔ awake, mouth → lips, pencil ↔ pen, man → dad). Calibration 
 signers; live webcam calibration is unmeasured.
 
 ---
+
+### phrases05: all 2,000 WLASL glosses as extra labels (2026-11-12)
+
+phrases04's recipe with the full WLASL vocabulary: train-half signers' clips of every gloss (2,017
+labels — the 250 first, then 1,767 WLASL-only glosses), 30 % of phrases (phrases04: 15 %, shared
+signs only). The idea: more signs to tell apart → features that separate signs better, even if the
+extra labels are cut off at export (`load_ctc_model` slices the head back to 250 + blank, exact).
+Kaggle `islr-phrases05-vocab` (commit 5d46edc, T4, 30 epochs × ~4.2 min):
+
+```
+islr.phrases.train ... --init fold0_graph/best_phase1.pth --extra-data-dir {WLASL_ALL_DIR}
+  --extra-lmdb-path {WLASL_ALL_DIR}/wlasl_all.lmdb.mdb --vocab {WLASL_ALL_DIR}/sign_to_prediction_index_map.json
+  --extra-frac 0.3 --aug-rotate 20 --aug-shear 0.15 --aug-scale 0.3 --aug-affine-prob 0.8
+```
+
+| | phrases04 | phrases05 | paired (824 clips) |
+|---|---|---|---|
+| Synthetic-phrase val WER (held-out ASL Signs signers) | 0.291 | 0.285 | — |
+| WLASL test half, single-sign exact decode | 80.8 % | **83.7 %** | +65 / −41, McNemar p = 0.025 |
+| WLASL test half, pooled top-1 | 82.6 % | 84.1 % | +54 / −42, p = 0.26 |
+| WLASL test half, framing correction undone | 77.4 % | 82.0 % | — |
+| WLASL top-5 | 96.1 % | 95.6 % | — |
+| ASL Signs fold-0 val, pooled top-1 / top-3 (14,076 clips) | 65.1 / 81.1 % | 64.3 / 80.9 % | not paired (phrases04 per-clip file not kept) |
+
+Reading: on WLASL's unseen signers the exact decode gains ~3 points (significant), but pooled
+top-1 — what the app's top-3 display uses — moves less and not significantly, so most of the gain
+is the decode emitting the right single sign more cleanly. On ASL Signs' held-out signers it is
+0.8 points *lower* (top-3 unchanged). The extra data is WLASL, so a WLASL gain partly reflects more
+in-domain data (WLASL is now 30 % of phrases, not 15 %) rather than the wider vocabulary; the two are
+confounded. Not exported — phrases04 stays the browser model until a live test or an independent set
+(ASL Citizen test split, research only) separates them.
