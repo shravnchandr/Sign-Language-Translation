@@ -40,18 +40,25 @@ import mediapipe as mp, pandas as pd, numpy as np, cv2
 print("mediapipe", mp.__version__, "| python", sys.version.split()[0], "| CPUs", os.cpu_count())
 """
 
-CELL_EXTRACT = """
+CELL_SELECT = """
 root = os.path.dirname(sorted(glob.glob("/kaggle/input/**/ASL_Citizen/splits", recursive=True))[0])
 splits = pd.concat([pd.read_csv(f"{root}/splits/{s}.csv").assign(split=s) for s in ("train", "val", "test")])
 gmap = json.load(open("/tmp/repo/research/models/islr/core/data/aslcitizen_gloss_map.json"))
 if not ALL:
     splits = splits[splits["Gloss"].isin(gmap)]
 splits = splits.sort_values("Video file").reset_index(drop=True)
+splits = splits.rename(columns={"Participant ID": "participant", "Gloss": "gloss", "Video file": "video"})
+splits["src"] = root + "/videos/" + splits["video"]
 mine = splits.iloc[SHARD::SHARDS]
 if LIMIT:
     mine = mine.head(LIMIT)
 print(f"{len(splits)} clips selected, shard {SHARD}/{SHARDS}: {len(mine)}")
-OUT = "/kaggle/working/aslcitizen_landmarks"
+"""
+
+# Shared by every extractor: `mine` (src, video, participant, split, gloss) → one competition-format
+# parquet per video in OUT/train_landmark_files/ + OUT/shard_<k>.csv. MAX_SIDE (None = full size)
+# downscales frames before MediaPipe (coordinates are normalised, so only tracking detail changes).
+CELL_RUN = """
 os.makedirs(f"{OUT}/train_landmark_files", exist_ok=True)
 
 PARTS = (("pose", 33, "pose_landmarks"), ("left_hand", 21, "left_hand_landmarks"),
@@ -69,13 +76,17 @@ INDEX = np.concatenate([np.arange(n) for _, n, _ in PARTS])
 def extract(job):
     video, out = job
     if os.path.exists(out):
-        return out, pd.read_parquet(out, columns=["frame"])["frame"].nunique()
+        return out, (pd.read_parquet(out, columns=["frame"])["frame"].nunique(), None, None, None)
     cap = cv2.VideoCapture(video)
-    frames = []
+    frames, size = [], (None, None)
     while True:
         ok, img = cap.read()
         if not ok:
             break
+        size = img.shape[1], img.shape[0]
+        if MAX_SIDE and max(size) > MAX_SIDE:
+            f = MAX_SIDE / max(size)
+            img = cv2.resize(img, (round(size[0] * f), round(size[1] * f)), interpolation=cv2.INTER_AREA)
         res = holistic.process(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
         xyz = np.full((N_LM, 3), np.nan, dtype=np.float32)
         i = 0
@@ -87,18 +98,20 @@ def extract(job):
         frames.append(xyz)
     cap.release()
     if not frames:
-        return out, 0
+        return out, (0, None, None, None)
     T = len(frames)
     xyz = np.concatenate(frames)
+    # unmirrored like ASL Signs when the signer's left shoulder (pose 11) is right of pose 12 in x
+    lr = np.nanmedian(np.stack(frames)[:, 11, 0] - np.stack(frames)[:, 12, 0])
     df = pd.DataFrame({"frame": np.repeat(np.arange(T), N_LM), "type": np.tile(TYPES, T),
                        "landmark_index": np.tile(INDEX, T), "x": xyz[:, 0], "y": xyz[:, 1], "z": xyz[:, 2]})
     df["row_id"] = df["frame"].astype(str) + "-" + df["type"] + "-" + df["landmark_index"].astype(str)
     df.to_parquet(out, index=False)
-    return out, T
+    return out, (T, size[0], size[1], float(lr))
 
 from multiprocessing import Pool
-jobs = [(f"{root}/videos/{v}", f"{OUT}/train_landmark_files/{os.path.splitext(v)[0]}.parquet")
-        for v in mine["Video file"]]
+jobs = [(src, f"{OUT}/train_landmark_files/{os.path.splitext(v)[0]}.parquet")
+        for src, v in zip(mine["src"], mine["video"])]
 t0, done = time.time(), []
 with Pool(os.cpu_count(), initializer=init) as pool:
     for i, r in enumerate(pool.imap(extract, jobs, chunksize=4)):
@@ -106,11 +119,15 @@ with Pool(os.cpu_count(), initializer=init) as pool:
         if i % 200 == 0:
             print(f"{i}/{len(jobs)} {time.time() - t0:.0f}s", flush=True)
 nf = dict(done)
-mine = mine.assign(path=[os.path.relpath(o, OUT) for _, o in jobs], n_frames=[nf[o] for _, o in jobs])
-mine = mine.rename(columns={"Participant ID": "participant", "Gloss": "gloss", "Video file": "video"})
+stats = [nf[o] for _, o in jobs]
+mine = mine.assign(path=[os.path.relpath(o, OUT) for _, o in jobs], n_frames=[t[0] for t in stats],
+                   width=[t[1] for t in stats], height=[t[2] for t in stats], lr_dx=[t[3] for t in stats])
 mine = mine[mine["n_frames"] > 0]
-mine[["path", "participant", "split", "gloss", "video", "n_frames"]].to_csv(f"{OUT}/shard_{SHARD}.csv", index=False)
-print(f"done: {len(mine)} clips in {(time.time() - t0) / 3600:.2f} h; frames median {mine['n_frames'].median()}")
+mine[["path", "participant", "split", "gloss", "video", "n_frames", "width", "height", "lr_dx"]].to_csv(
+    f"{OUT}/shard_{SHARD}.csv", index=False)
+print(f"done: {len(mine)} clips in {(time.time() - t0) / 3600:.2f} h; frames median {mine['n_frames'].median()}; "
+      f"frame sizes {mine.groupby(['width', 'height']).size().to_dict()}; "
+      f"unmirrored (pose 11 x > pose 12 x) {(mine['lr_dx'] > 0).mean():.0%}")
 """
 
 
@@ -120,13 +137,13 @@ def notebook(ref: str, shard: int, shards: int, all_clips: bool, limit: int = 0)
                 "source": src.strip("\n").splitlines(True)}
 
     head = (f"REF, SHARD, SHARDS, ALL, LIMIT, REPO_URL = {ref!r}, {shard}, {shards}, {all_clips}, "
-            f"{limit}, {REPO_URL!r}\n")
+            f"{limit}, {REPO_URL!r}\nMAX_SIDE, OUT = None, '/kaggle/working/aslcitizen_landmarks'\n")
     return {
         "cells": [
             {"cell_type": "markdown", "metadata": {},
              "source": [f"ASL Citizen → MediaPipe landmarks, shard {shard}/{shards} — **research use only** "
                         "(Microsoft Research License Terms). Generated by `scripts/extract_aslcitizen.py`."]},
-            code(head + CELL_SETUP), code(CELL_EXTRACT),
+            code(head + CELL_SETUP), code(CELL_SELECT + CELL_RUN),
         ],
         "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
                      "language_info": {"name": "python"}},

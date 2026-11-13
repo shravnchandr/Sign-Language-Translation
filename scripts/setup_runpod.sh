@@ -20,14 +20,14 @@
 # Kaggle credentials: ~/.kaggle/kaggle.json, or KAGGLE_USERNAME + KAGGLE_KEY.
 #
 # Usage (from the repo root):
-#   bash scripts/setup_runpod.sh                                         # build-islt-lmdb notebook output
-#   bash scripts/setup_runpod.sh --kernel <owner>/<notebook-slug>        # a different notebook
-#   bash scripts/setup_runpod.sh --dataset shravnchandr/asl-is-lmdb      # from a Kaggle dataset instead
+#   bash scripts/setup_runpod.sh                                         # dataset <kaggle user>/asl-is-lmdb
+#   bash scripts/setup_runpod.sh --kernel <owner>/<notebook-slug>        # a notebook's output instead
+#   bash scripts/setup_runpod.sh --dataset <owner>/asl-is-lmdb           # another account's dataset
 #   bash scripts/setup_runpod.sh --from /path/to/downloaded/dir          # files already on disk
 #   bash scripts/setup_runpod.sh --skip-env                              # data only
 #   bash scripts/setup_runpod.sh --force                                 # re-download even if verified
 #   bash scripts/setup_runpod.sh --with-fs                               # also the fingerspelling LMDB
-#                                                                #   (dataset shravnchandr/asl-fs-lmdb → data/asl-fs-lmdb/)
+#                                                                #   (dataset <kaggle user>/asl-fs-lmdb → data/asl-fs-lmdb/)
 
 set -euo pipefail
 CALLER_DIR="$(pwd)"
@@ -39,15 +39,17 @@ if ! command -v uv >/dev/null 2>&1 && [ -x "$HOME/.local/bin/uv" ]; then
 fi
 
 # ── Defaults ────────────────────────────────────────────────────────────────
-KERNEL="shravnchandr/build-islt-lmdb"
-DATASET=""
+# Owner of the private datasets: the account in ~/.kaggle/kaggle.json (or KAGGLE_USERNAME)
+OWNER="${KAGGLE_USERNAME:-$(python3 -c 'import json, os; print(json.load(open(os.path.expanduser("~/.kaggle/kaggle.json")))["username"])' 2>/dev/null || true)}"
+KERNEL=""
+DATASET="${OWNER:-shravnchandr}/asl-is-lmdb"
 FROM=""
 SKIP_ENV=false
 FORCE=false
 DEST="data/asl-is-lmdb"
 DL_DIR="data/.kaggle_download"   # same filesystem as $DEST → mv is a rename; removed after
 WITH_FS=false
-FS_DATASET="shravnchandr/asl-fs-lmdb"
+FS_DATASET="${OWNER:-shravnchandr}/asl-fs-lmdb"
 FS_DEST="data/asl-fs-lmdb"
 FS_FILES=(character_to_prediction_index.json train.csv fs.lmdb.mdb)
 # Peak disk for the FS download: fs.lmdb.mdb is 17.1 GB; if Kaggle serves it zipped,
