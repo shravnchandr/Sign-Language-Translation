@@ -12,6 +12,8 @@ with placeholders filled in:
     {WLASL_DIR}    folder of wlasl.lmdb.mdb + train.csv (<user>/wlasl-lmdb)
     {WLASL_ALL_DIR} folder of wlasl_all.lmdb.mdb (all 2,000 glosses; <user>/wlasl-all-lmdb)
     {INPUT}        /kaggle/input (e.g. outputs of notebooks mounted with --kernel)
+    {MODEL_<v>}    folder of model variation <v> mounted with --model <v> (Kaggle model <user>/islr,
+                   or islr-research for research-only checkpoints), e.g. {MODEL_phrases05}/best_phrases.pth
     {OUT}          /kaggle/working/out — everything written here is the run's output
 The IS / WLASL / WLASL-all LMDB folders are copied to local disk first (/kaggle/input is slow for
 random reads); --no-copy reads them in place.
@@ -57,7 +59,7 @@ def user() -> str:
     return os.environ.get("KAGGLE_USERNAME") or json.loads(cfg.read_text())["username"]
 
 
-def notebook(ref: str, commands: list[list[str]], local_copy: bool = True) -> dict:
+def notebook(ref: str, commands: list[list[str]], local_copy: bool = True, models: tuple = ()) -> dict:
     """commands: [[module, *args], ...], run in order; the first failure stops the notebook."""
     def code(src: str) -> dict:
         return {"cell_type": "code", "metadata": {}, "execution_count": None, "outputs": [],
@@ -70,7 +72,7 @@ def notebook(ref: str, commands: list[list[str]], local_copy: bool = True) -> di
                         + "; ".join(f"`python -m {c[0]}`" for c in commands)]},
             code(f"""
 import glob, os, subprocess, sys
-REF, COMMANDS, LOCAL_COPY = {ref!r}, {commands!r}, {local_copy!r}
+REF, COMMANDS, LOCAL_COPY, MODELS = {ref!r}, {commands!r}, {local_copy!r}, {list(models)!r}
 subprocess.run("pip install -q lmdb", shell=True, check=True)
 subprocess.run(f"git clone -q {REPO_URL} /tmp/repo && git -C /tmp/repo checkout -q {{REF}}",
                shell=True, check=True)
@@ -93,6 +95,9 @@ paths = {
     "INPUT": "/kaggle/input",
     "OUT": "/kaggle/working/out",
 }
+for v in MODELS:  # model variations mount as .../<model>/<framework>/<variation>/<version>/
+    hits = sorted(d for d in glob.glob(f"/kaggle/input/**/{v}/*/", recursive=True) if os.path.isdir(d))
+    paths[f"MODEL_{v}"] = hits[-1].rstrip("/") if hits else ""
 os.makedirs(paths["OUT"], exist_ok=True)
 # /kaggle/input is slow for random reads: the phrase loader read ~125 ms per phrase from it
 # (4 ms from a local disk). Copy the LMDB folders to local disk first (minutes, once per run).
@@ -131,6 +136,15 @@ with open(f"{paths['OUT']}/run.log", "w") as log:
     }
 
 
+def model_source(variation: str) -> str:
+    """'phrases05' → '<user>/islr/pyTorch/phrases05/<latest version>' (islr-research for phrases06*)."""
+    model = "islr-research" if variation.startswith("phrases06") or "research" in variation else "islr"
+    out = kaggle("models", "instances", "versions", "list", f"{user()}/{model}/pyTorch/{variation}", check=False)
+    versions = [int(f[0]) for f in map(str.split, out.splitlines())  # rows: version variation ...
+                if len(f) > 1 and f[0].isdigit() and f[1] == variation]
+    return f"{user()}/{model}/pyTorch/{variation}/{max(versions) if versions else 1}"
+
+
 def push(a: argparse.Namespace) -> None:
     ref = a.ref or subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"],
                                   capture_output=True, text=True, check=True).stdout.strip()
@@ -152,12 +166,14 @@ def push(a: argparse.Namespace) -> None:
     slug = f"{user()}/islr-{a.name}"
     with tempfile.TemporaryDirectory() as tmp:
         nb = Path(tmp) / f"islr-{a.name}.ipynb"
-        nb.write_text(json.dumps(notebook(ref, commands, not a.no_copy), indent=1))
+        variations = [m.rsplit("/", 2)[-2] if m.count("/") >= 4 else m for m in a.model]
+        nb.write_text(json.dumps(notebook(ref, commands, not a.no_copy, variations), indent=1))
         meta = {"id": slug, "title": f"islr-{a.name}", "code_file": nb.name, "language": "python",
                 "kernel_type": "notebook", "is_private": True, "enable_gpu": a.gpu,
                 "enable_tpu": False, "enable_internet": True, "keywords": [],
                 "dataset_sources": [f"{user()}/{d}" for d in DATASETS] + a.dataset, "kernel_sources": a.kernel,
-                "competition_sources": [], "model_sources": []}
+                "competition_sources": [],
+                "model_sources": [m if m.count("/") >= 4 else model_source(m) for m in a.model]}
         (Path(tmp) / "kernel-metadata.json").write_text(json.dumps(meta, indent=2))
         extra = ["--accelerator", a.accelerator] if a.gpu else []
         print(kaggle("kernels", "push", "-p", tmp, *extra).strip())
@@ -176,6 +192,9 @@ def main() -> None:
     s.add_argument("--dataset", action="append", default=[], help="extra dataset source")
     s.add_argument("--kernel", action="append", default=[],
                    help="mount another notebook's output (<user>/<slug>), e.g. extract-aslcitizen-s0")
+    s.add_argument("--model", action="append", default=[],
+                   help="mount a checkpoint from Kaggle Models: a variation of <user>/islr (e.g. phrases05; "
+                        "phrases06* → islr-research) or a full <owner>/<model>/<framework>/<variation>/<version>")
     s.add_argument("--no-copy", action="store_true",
                    help="read the LMDBs from /kaggle/input instead of a local copy")
     for name in ("status", "output"):
