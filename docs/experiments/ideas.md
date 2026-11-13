@@ -59,7 +59,7 @@ exactly `config.ALL_COLUMNS` — no rebuild needed. CPU smoke tests on 998 local
 4.84 → 3.10 in 8 epochs, CER leaving 1.0 at epoch 5 (normal CTC blank phase); fine-tune with a
 graph backbone + `--compile` + bone aug ran end to end; an arch mismatch exits with an error.
 
-**FS LMDB rebuilt on Kaggle (2026-11-10)** with `notebooks/Build_FS_LMDB.ipynb`: 67,208 sequences,
+**FS LMDB rebuilt on Kaggle (2026-11-10)** with `notebooks/data/build_fingerspelling_lmdb.ipynb`: 67,208 sequences,
 68 files, 94 signers, **0 errors, 4 min** on 4 CPU workers (column-subset reads), 15.9 GiB, built in
 `/kaggle/tmp`; published as a new version of `shravnchandr/asl-fs-lmdb`.
 
