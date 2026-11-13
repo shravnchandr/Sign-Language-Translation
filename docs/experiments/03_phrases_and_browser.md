@@ -271,3 +271,8 @@ is the decode emitting the right single sign more cleanly. On ASL Signs' held-ou
 in-domain data (WLASL is now 30 % of phrases, not 15 %) rather than the wider vocabulary; the two are
 confounded. Not exported — phrases04 stays the browser model until a live test or an independent set
 (ASL Citizen test split, research only) separates them.
+
+**Update (same day): the independent ASL Citizen test separates them** — phrases05 72.4 % vs
+phrases04 68.7 % exact (+760 / −448, p = 2e-19), pooled top-1 75.4 vs 74.2 % (p = 0.002), identical
+glosses 79.0 vs 76.2 %; see [04](04_data_cross_dataset.md). phrases05 uses no ASL Citizen data, so it
+is eligible for the app; the ASL Signs held-out drop (65.1 → 64.3 % top-1) remains.

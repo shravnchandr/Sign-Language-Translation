@@ -11,7 +11,7 @@ has never seen — in the browser, from a webcam.
 | 0. VQ-VAE → translator | `research/models/vqvae_seq2seq/` | dormant | — |
 | A. Isolated classifier | `islr/isolated/` | fold 0: 0.686 single (GraphConformer), 0.708 ensemble | [01](01_isolated_runs.md), [02](02_isolated_folds.md) |
 | B. Fingerspelling pre-training | `islr/pretrain/` | no single-model gain; useful ensemble member | [02](02_isolated_folds.md) |
-| **C. Continuous phrases (CTC)** — product model | `islr/phrases/` | phrases04: WLASL unseen signers 80.8 % single-sign, ASL Signs held-out 65 % top-1 / 81 % top-3 | [03](03_phrases_and_browser.md) |
+| **C. Continuous phrases (CTC)** — product model | `islr/phrases/` | phrases04: WLASL unseen signers 80.8 % single-sign, ASL Signs held-out 65 % top-1 / 81 % top-3; ASL Citizen (independent, research only) phrases04 68.7 %, phrases05 72.4 % | [03](03_phrases_and_browser.md) |
 
 Data findings (one-hand training data, WLASL / MS-ASL / ASL Citizen) are in [04](04_data_cross_dataset.md);
 open ideas in [ideas](ideas.md); Kaggle leaderboard context and the 1st-place recipe in

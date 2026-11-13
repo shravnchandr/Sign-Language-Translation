@@ -114,3 +114,47 @@ per-frame log-probability over the clip, blank excluded) and writes per-clip CSV
   in a median 2 % of clips). By source, signingsavvy is lowest (54 %, 344 clips), aslbrick highest
   (80 %); clips where a hand is visible > 90 % of frames score lower (53 %), likely hands held up
   before / after the sign.
+
+### ASL Citizen: independent test on 51 unseen Deaf signers (2026-11-12, research use only)
+
+The first test set that played no part in any choice so far (WLASL's test half guided the
+viewpoint augmentation). ASL Citizen (Microsoft Research License — research only; landmarks and
+LMDB never leave private Kaggle notebooks; no model trained on it) — webcam recordings by Deaf
+signers, landscape, unmirrored. Landmarks: `scripts/extract_aslcitizen.py` (3 CPU shards, same
+MediaPipe Holistic 0.10.14 / settings / image as WLASL). LMDB + scoring in one private GPU notebook
+(`islr-aslcitizen-eval`, commit b7d6f8b): `islr.core.data.build_aslcitizen_lmdb` (same worker as
+WLASL: aspect correction to 0.40) then `islr.evaluation.cross_dataset` per checkpoint; outputs
+`results/evaluation/aslcitizen/`.
+
+Data: 8,557 clips with a gloss mapped onto the 250 (225 signs; kinds: 5,241 identical name, 2,705
+numbered ASL-LEX variant, 611 synonym chosen by a non-signer), 51 signers, 0 errors. Raw shoulder
+ratio median 0.72 (portrait ASL Signs 0.40) → aspect k median 1.81 (WLASL: smaller). Both hands in
+some frame: 47 % of clips (ASL Signs median 2 %). All splits scored (no model saw any of these
+signers); official test split alone is within ~2.5 points of the total for every model.
+
+| Model | Exact decode / top-1 | Framing correction undone | Pooled top-1 | Top-5 | Identical / variant / synonym | Two-hand clips (3,987) | Signer p10 / median / p90 |
+|---|---|---|---|---|---|---|---|
+| fold0_graph (isolated classifier) | 65.2 % | 39.0 % | — | 81.9 % | 74.6 / 47.8 / 60.9 | 51.8 % | 58 / 67 / 80 |
+| phrases01 (ASL Signs only) | 53.7 % | 34.7 % | 63.0 % | 81.1 % | 60.9 / 39.1 / 55.8 | 34.3 % | 40 / 55 / 69 |
+| phrases03 (+ WLASL train half) | 69.0 % | 44.2 % | 73.5 % | 88.7 % | 76.6 / 55.9 / 61.2 | 60.4 % | 56 / 70 / 80 |
+| phrases04 (+ viewpoint aug) — app model | 68.7 % | 66.9 % | 74.2 % | 88.8 % | 76.2 / 56.0 / 61.5 | 59.3 % | 56 / 69 / 81 |
+| **phrases05 (+ all WLASL glosses, 30 %)** | **72.4 %** | **71.8 %** | **75.4 %** | **89.8 %** | 79.0 / 61.1 / 65.6 | 65.6 % | 64 / 72 / 84 |
+
+Paired (exact decode, same 8,557 clips): phrases01 → 03 +1,640 / −331 (p ≈ 1e-207); 03 → 04
++503 / −522 (p = 0.57); **04 → 05 +760 / −448 (p = 2e-19)**; pooled 04 → 05 +542 / −443
+(p = 0.002); fold0_graph → phrases04 +1,088 / −781 (p = 1e-12).
+
+What it shows:
+- The WLASL findings replicate on independent signers and recording conditions: WLASL training
+  signers (two-handed data) are the big step (+15 points; two-hand clips 34 → 60 %), and
+  phrases05's gain over phrases04 — not significant for pooled top-1 on WLASL (p = 0.26) — is
+  clear here, including pooled top-1, the score the app's top-3 uses. The bottom-tenth signer
+  improves most (56 → 64 %).
+- Viewpoint augmentation (phrases04) adds nothing when framing is corrected but makes the models
+  robust when it is not: 44.2 → 66.9 % with the correction undone (phrases05 71.8 %). ASL Citizen's
+  raw framing is far from ASL Signs' (k 1.81), so this is the strongest evidence yet that the app's
+  framing step matters less with these models — still 2D coordinate distortion, not body turns.
+- Variant glosses score ~20 points below identical ones for every model — plausibly a different
+  sign form under the same English word, so the identical-name number (79 % for phrases05) is the
+  fairer accuracy estimate. Synonym mappings (unreviewed) are in between.
+- Still isolated citation signs from a dataset, not live continuous use.

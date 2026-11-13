@@ -53,6 +53,8 @@ These are synthetic phrases (citation-form clips, artificial transitions, no coa
 | `phrases04` | + viewpoint augmentation (per-axis scale, shear, rotation) | 80.8 % (77.4 % with WLASL's framing correction undone; phrases03 39.2 %) | 0.291 |
 | `phrases05` | + all 2,000 WLASL glosses as extra labels, WLASL 30 % of phrases (not exported) | 83.7 % (paired vs phrases04 p = 0.025; pooled top-1 82.6 → 84.1 %, p = 0.26; ASL Signs held-out top-1 65.1 → 64.3 %) | 0.285 |
 
+On **ASL Citizen** (51 unseen Deaf signers, webcam, 8,557 clips; research use only — no model is trained on it) the same order holds independently: phrases01 53.7 %, phrases03 69.0 %, phrases04 68.7 % (66.9 % with the framing correction undone, phrases03 44.2 %), **phrases05 72.4 %** (paired vs phrases04 p = 2e-19; pooled top-1 75.4 vs 74.2 %, p = 0.002), isolated classifier 65.2 %.
+
 On ASL Signs' held-out signers phrases04 ranks the right sign first 65 % of the time and in its top 3 81 %; `sign_reliability.json` gives per-sign accuracy, common confusions (often near-synonyms: cat/kitty, pen/pencil, wake/awake) and score thresholds for a "not sure" state. Caveats: the WLASL halves share recording sources, the viewpoint augmentation was chosen on the same test half, and live webcam use is still untested beyond anecdotes.
 
 ### Running in the browser
