@@ -95,17 +95,19 @@ def signer_split(df: pd.DataFrame) -> dict:
 
 
 def _process(args: tuple) -> tuple:
-    """Worker: parquet → corrected coords bytes + stats (self-contained imports)."""
+    """Worker: (path, full path[, correct=True]) → corrected coords bytes + stats (self-contained imports)."""
     import numpy as np
     import torch
 
     from islr.core.data.build_wlasl_lmdb import aspect_factor
     from islr.core.data.preprocessing import frame_stacked_data, hand_presence
 
-    path, full_path = args
+    path, full_path, *opt = args
     try:
         coords = frame_stacked_data(full_path)
         k, raw = aspect_factor(coords)
+        if opt and not opt[0]:  # no aspect correction (portrait data such as PopSign); raw ratio kept
+            k = 1.0
         coords[:, 0::3] *= k  # x
         coords[:, 2::3] *= k  # z
         t = torch.from_numpy(coords)

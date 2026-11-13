@@ -66,6 +66,7 @@ def main() -> None:
     gmap = {k: v for k, v in json.loads(_GLOSS_MAP.read_text()).items() if not k.startswith("_")}
 
     shards = sorted(args.input_root.rglob("shard_*.csv"))
+    shards = [c for c in shards if "aslcitizen" in str(c).lower()] or shards  # not PopSign's shards
     if not shards:
         raise SystemExit(f"no shard_*.csv under {args.input_root}")
     parts = []

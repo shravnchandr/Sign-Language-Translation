@@ -144,10 +144,13 @@ def evaluate(model, loader, val_ds, device, amp_dtype, use_amp, blank, criterion
 
 def _extra_clips(data_dir: str, lmdb_path: str, sign2idx: dict, kinds: list) -> tuple:
     """One extra dataset's training clips: WLASL's "train" signer half (signer_split, or the
-    all-gloss LMDB's `wlasl_half`), or ASL Citizen's official train split (research use only)."""
+    all-gloss LMDB's `wlasl_half`), or the official train split of ASL Citizen (research use
+    only) or PopSign (CC BY 4.0)."""
     df = pd.read_csv(Path(data_dir) / "train.csv")
-    if (df.get("source") == "aslcitizen").all():
-        name, default_lmdb = "ASL Citizen", "aslcitizen.lmdb.mdb"
+    source = df["source"].iloc[0] if "source" in df and df["source"].nunique() == 1 else None
+    if source in ("aslcitizen", "popsign"):  # official signer-disjoint splits: train signers only
+        name, default_lmdb = {"aslcitizen": ("ASL Citizen", "aslcitizen.lmdb.mdb"),
+                              "popsign": ("PopSign", "popsign.lmdb.mdb")}[source]
         held_out = df.loc[df["split"] != "train", "participant_id"].nunique()
         df = df[df["split"] == "train"].copy()
     else:

@@ -179,6 +179,7 @@ Organised by approach: `core/` (shared config, backbones, data) · `isolated/` (
 | `core/data/fingerspelling_dataset.py` | `FingerspellingDataset`, `collate_ctc`, `load_char_map` — CTC pre-training data pipeline |
 | `core/data/_cache_keys.py` | `CACHE_VERSION` hash, `lmdb_key`/`lmdb_length_key` helpers |
 | `core/data/build_aslcitizen_lmdb.py` | ASL Citizen landmark shards (`extract_aslcitizen.py` outputs, found by `shard_*.csv` under `--input-root`) → LMDB + train.csv in the WLASL builder's format (same worker: `frame_stacked_data` + aspect correction; participant_id = 800000 + participant; `kind` from the gloss map; official `split`). **Research use only** — build in a private notebook, never publish |
+| `core/data/build_popsign_lmdb.py` | PopSign ASL v1.0 landmark shards (`extract_popsign.py` outputs) → LMDB + train.csv in the same format, **without** aspect correction (portrait phone video like ASL Signs; raw shoulder ratio 0.41); participant_id = 700000 + user number; folder names matched to the 250 labels ignoring case. CC BY 4.0 — shippable with attribution; likely signer overlap with ASL Signs (same game) |
 | `core/data/aslcitizen_gloss_map.json` | ASL Citizen gloss → ASL Signs label (225 signs, 8,557 clips): `identical` (171 glosses), `variant` (89 numbered ASL-LEX variants, may be different sign forms), `synonym` (20, chosen by a non-signer) — score the kinds separately. **Research use only** (see Data) |
 | `pretrain/fingerspelling.py` | CTC pre-training loop — saves `backbone_best.pth` for fine-tuning |
 | `isolated/train.py` | Two-phase training loop with TTA evaluation |
@@ -202,6 +203,7 @@ Organised by approach: `core/` (shared config, backbones, data) · `isolated/` (
 | `setup_runpod.sh` / `runpod_results.sh` | Fresh-pod setup (env, LMDB download/verify) / move results off the pod |
 | `download_kernel_output.py` | Streams a Kaggle notebook's saved output to disk (multi-GB safe, resumable); used by `setup_runpod.sh` for the LMDBs |
 | `kaggle_run.py` | `push <name> [--gpu] -- <module> <args> [:: <module> <args> ...]` / `status` / `output`: runs a repo module as a private Kaggle notebook `islr-<name>` (repo at the pushed HEAD, datasets mounted, placeholders {IS_LMDB_DIR} {CKPT_DIR} {WLASL_DIR} {WLASL_ALL_DIR} {INPUT} {OUT}, `--kernel <user>/<slug>` mounts another notebook's output, log in out/run.log) |
+| `extract_popsign.py` | `push --shards N [--per-pair 4 --max-side 1280]` / `status`: landmarks from the PopSign ASL v1.0 game train videos (Kaggle mirror `mrgeislinger/popsign-asl-v1-0-game-*`, 111,406 videos, 31 signers) — `--per-pair` clips per (signer, sign), evenly spaced; shares the extraction cell with `extract_aslcitizen.py` (frame size + mirroring check per clip). Max 5 CPU sessions per account |
 | `extract_aslcitizen.py` | `push --shards N [--limit k --name …]` / `status`: MediaPipe Holistic 0.10.14 landmarks from the ASL Citizen videos on Kaggle CPU, sharded private notebooks `extract-aslcitizen-s<k>` (pinned image as the WLASL extraction; only mapped glosses unless `--all`). Research use only |
 
 ## Known Bugs
