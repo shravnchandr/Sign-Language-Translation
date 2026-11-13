@@ -338,3 +338,22 @@ Reading — two different effects:
   the model better on other signers too.
 - For the product: data like this helps, but ASL Citizen cannot ship. PopSign ASL (CC BY 4.0, the same
   250 signs) is the candidate for the shippable version — to check next.
+
+### phrases05-long: phrases05 with a 60-epoch schedule (2026-11-13)
+
+Was phrases05 still learning at epoch 30? Same recipe with `--epochs 60 --patience 15` (OneCycleLR
+spans all 60); Kaggle `islr-phrases05-long` (commit 2c6dc76; first run on the schandranyc account),
+outputs `results/phrases/phrases05-long/`, Kaggle Models variation `schandranyc/islr/pyTorch/phrases05-long`.
+Best val WER 0.271 at epoch 40 (phrases05: 0.285), early stop at 55.
+
+| | phrases05 (30 ep) | phrases05-long (60 ep) |
+|---|---|---|
+| Val WER (synthetic phrases, held-out signers) | 0.285 | **0.271** |
+| ASL Signs held-out (fold 0, 14,076 clips) exact / pooled top-1 | 61.9 / 64.3 % | **63.2 / 65.6 %** |
+| WLASL test half exact / pooled top-1 | 83.7 / 84.1 % | 83.0 / 83.4 % |
+| Reliability: share of clips kept at 90 % precision | 49.7 % | 51.3 % |
+
+Paired: ASL Signs held-out exact +1042 / −861 (p = 4e-5), pooled +960 / −781 (p = 2e-5); WLASL exact
++33 / −39 (p = 0.56). Reading: longer training helps on the training dataset's own (unseen) signers
+but does not carry over to WLASL's different recording conditions. ASL Citizen score to follow (needs
+the shards re-extracted on the new account). Not a reason to replace the browser model yet.
