@@ -287,3 +287,54 @@ Fixtures (same two parquets): `100015657` → cloud, concat → cloud animal —
 Reliability: Kaggle run's `phrases05_reliability.json` (same checkpoint); 0.8 precision at
 pooled p1 ≥ 0.68 (phrases04 0.68), so the "not sure" cut ~0.7 is unchanged. `exports/phrases04/`
 kept until the app has switched.
+
+### phrases05b: phrases05's 30 % WLASL share, shared signs only (ablation, 2026-11-12)
+
+Separates phrases05's two changes (WLASL 15 → 30 % of phrases, and all 2,000 glosses as labels).
+phrases04 recipe with `--extra-data-dir {WLASL_DIR} --extra-frac 0.3` (847 clips, 206 signs, no
+`--vocab`); Kaggle `islr-phrases05b-shared30` (commit c0cc105). Val WER 0.287.
+
+| | phrases04 (15 %) | phrases05b (30 %, shared) | phrases05 (30 %, all glosses) |
+|---|---|---|---|
+| ASL Citizen test split (3,408 clips, 11 signers), exact / pooled top-1 | 67.2 / 73.2 % | 68.5 / 74.6 % | 70.9 / 74.4 % |
+| WLASL test half, exact | 80.8 % | 82.8 % | 83.7 % |
+| ASL Signs held-out top-1 | 65.1 % | 65.3 % | 64.3 % |
+
+Paired on ASL Citizen test: 04 → 05b exact +222 / −177 (p = 0.03), pooled +187 / −141 (p = 0.01);
+05b → 05 exact +267 / −184 (p = 1e-4), pooled +178 / −185 (p = 0.75). WLASL differences are not
+significant (p ≥ 0.07). Reading: the larger WLASL share gives the ranking gain (pooled top-1, what the
+app shows); the wider vocabulary adds a cleaner single-sign decode on top but no ranking gain. Both
+help; phrases05 stays the browser model.
+
+### phrases06: + ASL Citizen's train split (research only, 2026-11-12)
+
+Does more Deaf webcam data help beyond WLASL? phrases05 recipe + ASL Citizen official train split
+(3,809 clips, 35 signers, 208 signs; identical + variant glosses only — the 611 synonym clips, mapped
+by a non-signer, are left out) at 15 % of phrases: `--extra-data-dir {WLASL_ALL_DIR} /tmp/aslc
+--extra-frac 0.3 0.15 --extra-kinds identical variant` (LMDB built in the same notebook). Kaggle
+`islr-phrases06-aslcitizen-research` (commit c0cc105); checkpoint meta `research_only: true`
+(export refuses it); outputs `results/phrases/phrases06-aslcitizen-research/`. Val WER 0.292.
+
+| ASL Citizen **test split** (3,408 clips, 11 unseen signers) | phrases05 | phrases06 |
+|---|---|---|
+| Exact decode / pooled top-1 | 70.9 / 74.4 % | **86.7 / 89.6 %** |
+| Identical / variant / synonym glosses | 77.4 / 59.3 / 66.7 % | 89.2 / 86.9 / 64.6 % |
+| Two-hand clips | 63.6 % | 84.8 % |
+| Signer p10 / median / p90 | 65 / 71 / 77 % | 83 / 86 / 94 % |
+| Framing correction undone | 69.5 % | 86.2 % |
+| WLASL test half (not trained on) | 83.7 % | **86.9 %** |
+| ASL Signs held-out top-1 | 64.3 % | 64.3 % |
+
+Paired 05 → 06: ASL Citizen test exact +601 / −63 (p = 4e-111), pooled +568 / −51; WLASL +51 / −25
+(p = 0.004).
+
+Reading — two different effects:
+- **Dataset-specific: large.** Most of the ASL Citizen gain is learning ASL Citizen's forms of these
+  signs from other signers: numbered variants jump 59 → 87 % (the training clips show the variant
+  forms), while the synonym glosses, left out of training, do not improve (66.7 → 64.6 %). So 86.7 %
+  is not what a new data source of a *different* style would give.
+- **General: real but smaller.** WLASL, which phrases06 did not train on any more than phrases05, gains
+  3.2 points (significant), and ASL Signs is unchanged — more Deaf signers recorded on webcams make
+  the model better on other signers too.
+- For the product: data like this helps, but ASL Citizen cannot ship. PopSign ASL (CC BY 4.0, the same
+  250 signs) is the candidate for the shippable version — to check next.

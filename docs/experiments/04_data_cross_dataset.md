@@ -158,3 +158,8 @@ What it shows:
   sign form under the same English word, so the identical-name number (79 % for phrases05) is the
   fairer accuracy estimate. Synonym mappings (unreviewed) are in between.
 - Still isolated citation signs from a dataset, not live continuous use.
+
+**Follow-up (2026-11-12):** training on ASL Citizen's train split (phrases06, research only) raises
+its test split 70.9 → 86.7 %, mostly by learning its sign forms (variants 59 → 87 %; untrained synonym
+glosses unchanged), and WLASL 83.7 → 86.9 % (p = 0.004). Details in
+[03](03_phrases_and_browser.md#phrases06--asl-citizens-train-split-research-only-2026-11-12).
