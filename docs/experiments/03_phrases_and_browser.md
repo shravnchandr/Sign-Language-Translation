@@ -351,9 +351,31 @@ Best val WER 0.271 at epoch 40 (phrases05: 0.285), early stop at 55.
 | Val WER (synthetic phrases, held-out signers) | 0.285 | **0.271** |
 | ASL Signs held-out (fold 0, 14,076 clips) exact / pooled top-1 | 61.9 / 64.3 % | **63.2 / 65.6 %** |
 | WLASL test half exact / pooled top-1 | 83.7 / 84.1 % | 83.0 / 83.4 % |
+| ASL Citizen test split (3,408 clips, 11 signers) exact / pooled top-1 | 70.9 / 74.4 % | 70.6 / 74.3 % |
 | Reliability: share of clips kept at 90 % precision | 49.7 % | 51.3 % |
 
 Paired: ASL Signs held-out exact +1042 / −861 (p = 4e-5), pooled +960 / −781 (p = 2e-5); WLASL exact
-+33 / −39 (p = 0.56). Reading: longer training helps on the training dataset's own (unseen) signers
-but does not carry over to WLASL's different recording conditions. ASL Citizen score to follow (needs
-the shards re-extracted on the new account). Not a reason to replace the browser model yet.
++33 / −39 (p = 0.56); ASL Citizen test exact +202 / −212 (p = 0.66), pooled +173 / −176 (p = 0.91;
+scored in the phrases06-long notebook from the Kaggle Models checkpoint). Reading: longer training
+helps on the training dataset's own (unseen) signers but carries over to neither independent test
+(other cameras and signers). phrases05 stays the browser model.
+
+### phrases06-long: phrases06 with a 60-epoch schedule (research only, 2026-11-13)
+
+phrases06 recipe + `--epochs 60 --patience 15`; ASL Citizen re-extracted on the schandranyc account
+(8,557 clips, 0 errors, same aspect correction as before). Kaggle `islr-phrases06-long-research`
+(commit 4bf05ca), outputs `results/phrases/phrases06-long-research/`, private Kaggle Models
+`schandranyc/islr-research/pyTorch/phrases06-long` (meta `research_only: true`). Best val WER 0.270
+at epoch 49 (phrases06: 0.292).
+
+| | phrases06 | phrases06-long |
+|---|---|---|
+| ASL Citizen test exact / pooled top-1 | 86.7 / 89.6 % | 87.3 / **90.8 %** |
+| Identical / variant / synonym (exact) | 89.2 / 86.9 / 64.6 % | 89.8 / 87.3 / 66.7 % |
+| WLASL test half exact / pooled | 86.9 / 87.0 % | 87.5 / 87.9 % |
+| ASL Signs held-out exact / pooled | 61.9 / 64.3 % | **63.6 / 65.8 %** |
+
+Paired: ASL Citizen pooled +107 / −65 (p = 0.002), exact +118 / −97 (p = 0.17); ASL Signs held-out
+exact +1033 / −789 (p = 1e-8); WLASL +30 / −25 (p = 0.59). Reading: as for phrases05-long, the longer
+schedule helps on datasets the model trains on (here ASL Signs and ASL Citizen, both with unseen
+signers) and not on WLASL — it fits the training sources better rather than generalising further.
