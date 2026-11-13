@@ -1,4 +1,7 @@
-"""Score a checkpoint on another dataset's signers (WLASL LMDB from build_wlasl_lmdb.py).
+"""Score a checkpoint on another dataset's signers (WLASL or ASL Citizen LMDB).
+
+Inputs: the LMDB + train.csv of `build_wlasl_lmdb.py` or `build_aslcitizen_lmdb.py` (research
+use only; pass --lmdb-path, and --split to pick an official ASL Citizen split).
 
 Works for both model kinds:
   - phrase (CTC) checkpoints (phrases_meta.json next to the .pth): a clip is correct
@@ -12,7 +15,8 @@ evaluation; the phrase path trims to the hand span and caps at --max-frames.
 Reports overall accuracy (aspect-corrected as stored, and with the correction undone
 from `aspect_k` to show what framing costs), identical vs synonym glosses, clips with
 vs without both hands, one-hand mode (less active hand removed) on two-hand clips with
-an exact McNemar test, and per-signer spread. --out writes the numbers as JSON,
+an exact McNemar test, per-signer spread and, when train.csv has a `kind` column (ASL
+Citizen: identical / variant / synonym), accuracy per gloss kind. --out writes the numbers as JSON,
 --per-clip one row per clip (CSV) for paired comparisons between checkpoints.
 
 Usage:
@@ -94,6 +98,7 @@ def main() -> None:
     p.add_argument("--signers", choices=["all", "train", "test"], default="all",
                    help="WLASL signer half (build_wlasl_lmdb.signer_split); use test for a "
                         "model trained with --extra-data-dir")
+    p.add_argument("--split", help="keep rows whose `split` column equals this (ASL Citizen: train / val / test)")
     args = p.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -129,6 +134,8 @@ def main() -> None:
     df = pd.read_csv(args.data_dir / "train.csv")
     if args.signers != "all":
         df = df[df["participant_id"].isin(signer_split(df)[args.signers])]
+    if args.split:
+        df = df[df["split"] == args.split]
     lmdb_path = args.lmdb_path or args.data_dir / "wlasl.lmdb.mdb"
     env = lmdb.open(str(lmdb_path), subdir=False, readonly=True, lock=False,
                     map_size=os.path.getsize(lmdb_path) + (1 << 28))
@@ -143,7 +150,9 @@ def main() -> None:
             raw[:, 2::3] /= r.aspect_k
             pres = x[:, -2:] > 0
             rows.append(dict(path=r.path, sign=r.sign, signer=r.participant_id,
-                             synonym=bool(r.synonym), two_hands=r.both_hands > 0,
+                             synonym=bool(r.synonym),
+                             kind=getattr(r, "kind", "synonym" if r.synonym else "identical"),
+                             split=getattr(r, "split", None), two_hands=r.both_hands > 0,
                              n_frames=len(x), hand_frac=float(pres.any(1).mean()),
                              aspect_k=r.aspect_k, ratio_raw=r.ratio_raw, fps=r.fps,
                              source=r.source, **predict(x),
@@ -156,6 +165,7 @@ def main() -> None:
     summary = {
         "checkpoint": str(args.checkpoint),
         "wlasl_signers": args.signers,
+        "split": args.split,
         "kind": "phrase (single-sign exact decode)" if phrase else "isolated (top-1)",
         "clips": len(res), "signs": int(df["sign"].nunique()), "signers": int(res["signer"].nunique()),
         "accuracy": float(res["correct"].mean()),
@@ -166,6 +176,10 @@ def main() -> None:
         "decode_tokens": {int(k): int(v) for k, v in res["n_tokens"].value_counts().sort_index().items()} if phrase else None,
         "identical_gloss": float(res.loc[~res["synonym"], "correct"].mean()),
         "synonym_gloss": float(res.loc[res["synonym"], "correct"].mean()),
+        "by_kind": {k: {"n": len(g), "accuracy": float(g["correct"].mean()),
+                        "top5": float(g["top5"].mean()),
+                        "pooled_top1": float(g["pooled"].mean()) if phrase else None}
+                    for k, g in res.groupby("kind")},
         "two_hand_clips": {"n": len(two), "accuracy": float(two["correct"].mean())},
         "one_hand_clips": {"n": int((~res["two_hands"]).sum()),
                            "accuracy": float(res.loc[~res["two_hands"], "correct"].mean())},

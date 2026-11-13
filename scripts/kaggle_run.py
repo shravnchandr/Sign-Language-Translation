@@ -8,9 +8,10 @@ HEAD, which must be pushed), installs `lmdb`, finds the mounted datasets and run
 
 with placeholders filled in:
     {IS_LMDB_DIR}  folder of is.lmdb.mdb + train.csv + sign map (shravnchandr/asl-is-lmdb)
-    {CKPT_DIR}     root of shravnchandr/islr-checkpoints (fold0_graph/, phrases01/)
+    {CKPT_DIR}     root of shravnchandr/islr-checkpoints (fold0_graph/, phrases01/03/04/05/)
     {WLASL_DIR}    folder of wlasl.lmdb.mdb + train.csv (shravnchandr/wlasl-lmdb)
     {WLASL_ALL_DIR} folder of wlasl_all.lmdb.mdb (all 2,000 glosses; shravnchandr/wlasl-all-lmdb)
+    {INPUT}        /kaggle/input (e.g. outputs of notebooks mounted with --kernel)
     {OUT}          /kaggle/working/out — everything written here is the run's output
 The IS / WLASL / WLASL-all LMDB folders are copied to local disk first (/kaggle/input is slow for
 random reads); --no-copy reads them in place.
@@ -89,6 +90,7 @@ paths = {
     "CKPT_DIR": os.path.dirname(os.path.dirname(find("fold0_graph/best_phase1.pth") or "/x/x")),
     "WLASL_DIR": os.path.dirname(find("wlasl.lmdb.mdb") or ""),
     "WLASL_ALL_DIR": os.path.dirname(find("wlasl_all.lmdb.mdb") or ""),
+    "INPUT": "/kaggle/input",
     "OUT": "/kaggle/working/out",
 }
 os.makedirs(paths["OUT"], exist_ok=True)
@@ -154,7 +156,7 @@ def push(a: argparse.Namespace) -> None:
         meta = {"id": slug, "title": f"islr-{a.name}", "code_file": nb.name, "language": "python",
                 "kernel_type": "notebook", "is_private": True, "enable_gpu": a.gpu,
                 "enable_tpu": False, "enable_internet": True, "keywords": [],
-                "dataset_sources": DATASETS + a.dataset, "kernel_sources": [],
+                "dataset_sources": DATASETS + a.dataset, "kernel_sources": a.kernel,
                 "competition_sources": [], "model_sources": []}
         (Path(tmp) / "kernel-metadata.json").write_text(json.dumps(meta, indent=2))
         extra = ["--accelerator", a.accelerator] if a.gpu else []
@@ -172,6 +174,8 @@ def main() -> None:
     s.add_argument("--accelerator", default="NvidiaTeslaT4")
     s.add_argument("--ref", help="git commit/branch to clone (default: local HEAD, must be pushed)")
     s.add_argument("--dataset", action="append", default=[], help="extra dataset source")
+    s.add_argument("--kernel", action="append", default=[],
+                   help="mount another notebook's output (<user>/<slug>), e.g. extract-aslcitizen-s0")
     s.add_argument("--no-copy", action="store_true",
                    help="read the LMDBs from /kaggle/input instead of a local copy")
     for name in ("status", "output"):
