@@ -158,6 +158,7 @@ def main() -> None:
     p.add_argument("--only", type=int, nargs="*", help="shard numbers (default: all)")
     p.add_argument("--all", action="store_true", help="every ASL Citizen clip, not only mapped glosses")
     p.add_argument("--limit", type=int, default=0, help="first N videos per shard (smoke test)")
+    p.add_argument("--ref", help="commit to clone (default HEAD; must be pushed) — pin it for queued pushes")
     p.add_argument("--name", default="extract-aslcitizen", help="kernel name prefix")
     a = p.parse_args()
     shards = a.only if a.only else range(a.shards)
@@ -165,8 +166,8 @@ def main() -> None:
         for k in shards:
             print(k, kaggle("kernels", "status", f"{user()}/{a.name}-s{k}", check=False).strip())
         return
-    ref = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True,
-                         check=True).stdout.strip()
+    ref = subprocess.run(["git", "-C", str(ROOT), "rev-parse", a.ref or "HEAD"], capture_output=True,
+                         text=True, check=True).stdout.strip()
     if not subprocess.run(["git", "-C", str(ROOT), "branch", "-r", "--contains", ref],
                           capture_output=True, text=True).stdout.strip():
         sys.exit(f"HEAD {ref[:7]} is not pushed — the notebook clones from GitHub. Push first.")

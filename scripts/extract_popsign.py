@@ -92,6 +92,7 @@ def main() -> None:
     p.add_argument("--per-pair", type=int, default=4, help="clips per (participant, sign)")
     p.add_argument("--max-side", type=int, default=1280, help="downscale frames to this long side (0 = off)")
     p.add_argument("--limit", type=int, default=0, help="first N videos per shard (smoke test)")
+    p.add_argument("--ref", help="commit to clone (default HEAD; must be pushed) — pin it for queued pushes")
     p.add_argument("--name", default="extract-popsign", help="kernel name prefix")
     a = p.parse_args()
     shards = a.only if a.only else range(a.shards)
@@ -99,8 +100,8 @@ def main() -> None:
         for k in shards:
             print(k, kaggle("kernels", "status", f"{user()}/{a.name}-s{k}", check=False).strip())
         return
-    ref = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True,
-                         check=True).stdout.strip()
+    ref = subprocess.run(["git", "-C", str(ROOT), "rev-parse", a.ref or "HEAD"], capture_output=True,
+                         text=True, check=True).stdout.strip()
     if not subprocess.run(["git", "-C", str(ROOT), "branch", "-r", "--contains", ref],
                           capture_output=True, text=True).stdout.strip():
         sys.exit(f"HEAD {ref[:7]} is not pushed — the notebook clones from GitHub. Push first.")
