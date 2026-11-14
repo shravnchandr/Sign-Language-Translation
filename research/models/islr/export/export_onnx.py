@@ -111,6 +111,12 @@ def preprocess_spec(max_frames: int) -> dict:
         "frames_without_pose": "dropped before anything else",
         "origin": "per frame: pose 0 (nose), subtracted from x, y and z of every landmark",
         "image": "unmirrored camera frames; x, y normalised to [0, 1] (MediaPipe)",
+        "aspect": "training video is portrait 3:4 (x is a fraction of the width, y of the height): crop the "
+                  "camera to 3:4, or scale x and z by (width / height) / 0.75; check: (shoulder drop below "
+                  "the nose) / (shoulder width) ≈ 0.40",
+        "frame_rate": "one feature frame per camera frame at the rate the training video was recorded "
+                      "(ASL Signs / PopSign phone video, ASL Citizen webcam ≈ 30 fps, WLASL 25 fps); a much "
+                      "lower processing rate shortens every sign in frames — resample to ≈ 30 fps",
         "hand_slots": "left_hand = the signer's own left hand (nearest pose 15), "
                       "right_hand = nearest pose 16 — not a handedness label",
         "ghost_hands": {"rule": "both hands detected and their 2D boxes overlap by IoU >= ghost_iou: "

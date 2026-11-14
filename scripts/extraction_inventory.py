@@ -57,6 +57,19 @@ json.dump({"extractor": EXTRACTOR, "ref": REF, "cells_digest": DIGEST, "shards":
            "selected": len(inv), "per_shard": inv.groupby("shard").size().to_dict()},
           open("/kaggle/working/inventory.json", "w"), indent=1, default=str)
 print(f"{len(inv)} videos selected over {SHARDS} shards: {inv.groupby('shard').size().to_dict()}")
+
+# frame rate and size of a sample of the selected videos (the shards do not record fps)
+import cv2
+probe = []
+for src in inv["src"].sample(min(300, len(inv)), random_state=0):
+    cap = cv2.VideoCapture(src)
+    probe.append({"fps": cap.get(cv2.CAP_PROP_FPS), "frames": cap.get(cv2.CAP_PROP_FRAME_COUNT),
+                  "width": cap.get(cv2.CAP_PROP_FRAME_WIDTH), "height": cap.get(cv2.CAP_PROP_FRAME_HEIGHT)})
+    cap.release()
+probe = pd.DataFrame(probe)
+probe.to_csv("/kaggle/working/video_probe.csv", index=False)
+print("fps:", probe["fps"].round(2).value_counts().head(8).to_dict(), "| sizes:",
+      (probe["width"].astype(int).astype(str) + "x" + probe["height"].astype(int).astype(str)).value_counts().head(5).to_dict())
 """
 
 
