@@ -189,7 +189,7 @@ PopSign: same-recording test against all ASL Signs clips; inventories: coverage 
 | Raw structure | 0 read / structure errors, no frame gaps, every frame complete, T = shard n_frames, nothing mirrored | — |
 | Pose-less frames | 3,672 clips with 1, 17 with 2–3 (≤ 6 % of a clip) — the known first frame | dropped by the contract |
 | Hands | left 44 % / right 63 % of frames; ambiguous 27,204 frames; single hand in the farther slot 637 of 208,675 frames (348 clips, median 1 frame) | single hands are never moved |
-| Ghost rejections | a hand rejected in 23,005 frames of **2,242 clips (18.7 %)**; in 19 clips in every kept frame — all signers 10 / 11 at 288×192, all signs where the hands touch (pray ×2, help, aid, assist, thankful, grateful, sandwich, wait, …). Duplicate fits or real touching hands? The statistics cannot tell | **open**: visual review against the video (`ghost_review`), before the rule is left unchanged |
+| Ghost rejections | a hand rejected in 23,005 frames of **2,242 clips (18.7 %)**; in 19 clips in every kept frame — all signers 10 / 11 at 288×192, all signs where the hands touch (pray ×2, help, aid, assist, thankful, grateful, sandwich, wait, …). Duplicate fits or real touching hands? The statistics cannot tell | **finding, rule to change** — see below |
 | No-hand clips | 9, all signer 11 at 288×192 | reported by validate |
 | Exact raw duplicates | 1,883 clips in 849 groups; 823 groups carry different glosses — WLASL files one video under synonyms (gay / lesbian, attention / pay attention / concentrate, ill / sick); 4 groups under two signer ids (15 and 59, both in the test half) | builders already drop conflicting groups and keep one copy of a repeat (`excluded_clips.csv`) |
 | Near-duplicate recordings | same gloss, equal length only: 68 same-signer pairs, 1 pair under different ids (10 / 11, distance 0.084); 0 pairs across the frozen signer halves | no cross-half duplicate detected by these checks (trimmed or re-encoded copies under other glosses are not covered) |
@@ -198,6 +198,32 @@ PopSign: same-recording test against all ASL Signs clips; inventories: coverage 
 | Frame ranges | 2 instances carry a range, none longer than it | — |
 | Frame rate | JSON says 25 for every clip; probe of 300 files: 29.97 (45 %), 23.98 (16 %), 30 (13 %), 25 (7 %), ~30.2–30.4 (≈ 15 %), one 50 fps | spec text and builder docstring corrected (mostly 24–30); the column is metadata only (nothing trains on it) |
 | Aspect | 8 frame sizes (288×192 … 1920×1080); `ratio_raw / 0.40` vs the geometric (W/H)/0.75: median 1.05 (p10–p90 0.94–1.20). An approximation — the builder's `aspect_factor()` also accounts for shoulder tilt and falls back to 1 outside its bounds | **open**: the comparison (step 2) uses the actual `aspect_factor()` on the same clips |
+
+**Ghost rule on WLASL (`islr-ghost-wlasl`, `-wlasl2`: 66 clips drawn on the video, per-frame evidence for all 11,980).**
+In WLASL a "ghost" frame is almost always two *real* hands close together (pose wrists a median 0.36
+shoulder widths apart vs 0.86 in ordinary two-hand frames). Holistic then either fits one hand into
+both slots or fits two overlapping hands. The IoU rule cannot tell these apart, and fails both ways:
+
+| Case | Evidence (of 23,005 rejected frames) | Example (drawn) |
+|---|---|---|
+| One hand fitted into both slots, correct slot kept | slots' mean landmark distance < 0.3 hand sizes in 54 % | PRAY 44132, HELP 27215 (left palm under the right fist not detected at all) |
+| Copy kept in the **wrong slot** | kept slot's wrist clearly nearer the other side's pose wrist: 3,077 frames, 535 clips | BASEBALL 05171 (right fist stored as the left hand), WASH 62358 |
+| **Real hand rejected** | skeletons distinct (≥ 0.3) and each slot's wrist on its own side: 6,205 frames | SOUP 53428 (the signing right hand dropped), BEGINNING 05778, DIVE 16891 |
+| Ambiguous (IoU 0.2–0.5, both kept) | 94 % have each slot on its own side | AMERICA 02353 (interlocked fingers), ATTRACT 04073 — correct |
+
+The rule was derived from PopSign (100 of 128 two-hand frames were copies). Candidate rule: a ghost only
+when the two slots are copies (landmark distance below a threshold); the copy goes to the slot whose
+own pose wrist is clearly nearer, else the current tie-break; distinct overlapping hands are kept.
+Before changing the contract: the same evidence on PopSign (`islr-ghost-popsign`) and ASL Signs, so
+the threshold is set on all three. A contract change means v4, re-fixtures, and the browser's rule.
+
+**ASL Signs (`islr-audit-aslsigns`, 94,477 clips).** Raw structure clean (0 errors, all frames
+complete, no pose-less frames, no no-hand clip); 43 clips with frame-number gaps (median 22 missing
+frames); 4 clips mirrored (pose 11 x ≤ 12 x); 0 exact duplicates; ghost rule fires in 439 clips
+(1,667 frames). The near-duplicate test flags 25,619 cross-signer pairs (all ≥ 6 frames, 4,901 ≥ 15)
+— the upper-body pose track does not separate people in these short, static clips, so on ASL Signs
+it **proves nothing**; with 0 exact duplicates (one extraction pipeline) a true cross-id copy is
+unlikely, to be confirmed with a person-specific feature (face-mesh shape) on the flagged pairs.
 
 ### Review of ce3c929 (three more, fixed)
 
