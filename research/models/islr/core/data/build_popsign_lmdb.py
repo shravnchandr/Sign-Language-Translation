@@ -38,7 +38,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from ._cache_keys import lmdb_key, lmdb_length_key
-from .build_wlasl_lmdb import _process
+from .build_wlasl_lmdb import _process, finish_build, load_shards
 
 _SIGNER_OFFSET = 700_000  # apart from ASL Signs ids, ASL Citizen (800000 + n) and WLASL (900000 + n)
 
@@ -59,28 +59,14 @@ def main() -> None:
     p.add_argument("--lmdb-name", default="popsign.lmdb.mdb")
     p.add_argument("--workers", type=int, default=os.cpu_count() or 4)
     p.add_argument("--limit", type=int, default=0, help="first N clips (smoke test)")
+    p.add_argument("--expect-shards", type=int, help="require shards 0..N-1 of one extraction version")
+    p.add_argument("--allow-errors", type=int, default=0, help="clips that may fail before the build exits")
     args = p.parse_args()
 
     sign2idx = json.loads(args.sign_map.read_text())
     by_lower = {s.lower(): s for s in sign2idx}
 
-    shards = sorted(args.input_root.rglob("shard_*.csv"))
-    shards = [c for c in shards if (c.parent / "train_landmark_files").is_dir()
-              and "popsign" in str(c).lower()] or shards
-    if not shards:
-        raise SystemExit(f"no shard_*.csv under {args.input_root}")
-    parts = []
-    for csv in shards:
-        d = pd.read_csv(csv)
-        d["full_path"] = [str(csv.parent / p_) for p_ in d["path"]]
-        parts.append(d)
-        print(f"{csv}: {len(d)} clips")
-    df = pd.concat(parts, ignore_index=True)
-    dup = df[df.duplicated("path", keep=False)]
-    if len(dup):  # e.g. v1 and v2 extraction outputs mounted together: never keep one silently
-        roots = sorted({str(Path(f).parent.parent) for f in dup["full_path"]})
-        raise SystemExit(f"{dup['path'].nunique()} clip paths appear in more than one shard folder "
-                         f"({roots[:4]}{' …' if len(roots) > 4 else ''}): mount one extraction version only")
+    df, manifest = load_shards(args.input_root, "popsign", args.expect_shards)
 
     df["popsign_gloss"] = df["gloss"]
     df["sign"] = df["gloss"].map(lambda g: by_lower.get(str(g).lower()))
@@ -128,6 +114,7 @@ def main() -> None:
     cols += [c for c in ("width", "height") if c in df]  # frame size (some clips are 9:16, most 3:4)
     df[cols].to_csv(args.out_dir / "train.csv", index=False)
     (args.out_dir / "sign_to_prediction_index_map.json").write_text(json.dumps(sign2idx))
+    finish_build(lmdb_path, df["path"].tolist(), errors, args.allow_errors, manifest)
 
     print(f"wrote {len(df)} clips → {lmdb_path} ({lmdb_path.stat().st_size / 2**20:.0f} MiB); "
           f"{len(errors)} errors" + (f", e.g. {errors[0]}" if errors else ""))

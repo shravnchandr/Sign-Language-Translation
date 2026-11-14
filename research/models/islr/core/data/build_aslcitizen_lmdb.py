@@ -38,7 +38,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from ._cache_keys import lmdb_key, lmdb_length_key
-from .build_wlasl_lmdb import TARGET_RATIO, _process
+from .build_wlasl_lmdb import TARGET_RATIO, _process, finish_build, load_shards
 
 _GLOSS_MAP = Path(__file__).with_name("aslcitizen_gloss_map.json")
 _SIGNER_OFFSET = 800_000  # apart from ASL Signs participant ids and WLASL's 900000 + signer
@@ -60,27 +60,14 @@ def main() -> None:
     p.add_argument("--lmdb-name", default="aslcitizen.lmdb.mdb")
     p.add_argument("--workers", type=int, default=os.cpu_count() or 4)
     p.add_argument("--limit", type=int, default=0, help="first N clips (smoke test)")
+    p.add_argument("--expect-shards", type=int, help="require shards 0..N-1 of one extraction version")
+    p.add_argument("--allow-errors", type=int, default=0, help="clips that may fail before the build exits")
     args = p.parse_args()
 
     sign2idx = json.loads(args.sign_map.read_text())
     gmap = {k: v for k, v in json.loads(_GLOSS_MAP.read_text()).items() if not k.startswith("_")}
 
-    shards = sorted(args.input_root.rglob("shard_*.csv"))
-    shards = [c for c in shards if "aslcitizen" in str(c).lower()] or shards  # not PopSign's shards
-    if not shards:
-        raise SystemExit(f"no shard_*.csv under {args.input_root}")
-    parts = []
-    for csv in shards:
-        d = pd.read_csv(csv)
-        d["full_path"] = [str(csv.parent / p_) for p_ in d["path"]]
-        parts.append(d)
-        print(f"{csv}: {len(d)} clips")
-    df = pd.concat(parts, ignore_index=True)
-    dup = df[df.duplicated("path", keep=False)]
-    if len(dup):  # e.g. v1 and v2 extraction outputs mounted together: never keep one silently
-        roots = sorted({str(Path(f).parent.parent) for f in dup["full_path"]})
-        raise SystemExit(f"{dup['path'].nunique()} clip paths appear in more than one shard folder "
-                         f"({roots[:4]}{' …' if len(roots) > 4 else ''}): mount one extraction version only")
+    df, manifest = load_shards(args.input_root, "aslcitizen", args.expect_shards)
 
     df["aslc_gloss"] = df["gloss"]
     df["sign"] = [gmap[g]["sign"] if g in gmap else None for g in df["gloss"]]
@@ -118,6 +105,7 @@ def main() -> None:
             "source", "split", "aspect_k", "ratio_raw", "both_hands", "n_frames"]
     df[cols].to_csv(args.out_dir / "train.csv", index=False)
     (args.out_dir / "sign_to_prediction_index_map.json").write_text(json.dumps(sign2idx))
+    finish_build(lmdb_path, df["path"].tolist(), errors, args.allow_errors, manifest)
 
     print(f"wrote {len(df)} clips → {lmdb_path} ({lmdb_path.stat().st_size / 2**20:.0f} MiB); "
           f"{len(errors)} errors" + (f", e.g. {errors[0]}" if errors else ""))

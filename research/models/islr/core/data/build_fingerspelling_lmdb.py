@@ -107,7 +107,7 @@ def _process_parquet(args: tuple) -> list[tuple]:
     try:
         wide = pd.read_parquet(parquet_path)
     except Exception as e:
-        return [(sid, _FS_COLS, None, None, str(e)) for sid in pending]
+        return [(sid, None, None, str(e)) for sid in pending]
 
     data_cols = [c for c in wide.columns if c != "frame"]
     col_index = {c: i for i, c in enumerate(data_cols)}

@@ -37,6 +37,7 @@ import argparse
 import io
 import json
 import os
+import re
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -114,9 +115,15 @@ def _process(args: tuple) -> tuple:
     from islr.core.data.build_wlasl_lmdb import aspect_factor
     from islr.core.data.preprocessing import frame_stacked_data, hand_presence
 
+    from islr.core import config as C
+
     path, full_path, *opt = args
     try:
         coords = frame_stacked_data(full_path)
+        if coords.ndim != 2 or coords.shape[1] != C.COORD_FEAT or len(coords) == 0:
+            raise ValueError(f"coords shape {coords.shape}, expected (T > 0, {C.COORD_FEAT})")
+        if not np.isfinite(coords).all():
+            raise ValueError(f"{int((~np.isfinite(coords)).sum())} non-finite values")
         k, raw = aspect_factor(coords)
         if opt and not opt[0]:  # no aspect correction (portrait data such as PopSign); raw ratio kept
             k = 1.0
@@ -130,6 +137,70 @@ def _process(args: tuple) -> tuple:
         return path, buf.getvalue(), len(coords), k, raw, both, None
     except Exception as e:  # noqa: BLE001 — reported per clip
         return path, None, None, None, None, None, str(e)
+
+
+_SHARD_DIR = re.compile(r"^(?P<version>.+)-s(?P<k>\d+)$")
+
+
+def load_shards(root: Path, keyword: str, expect: int | None = None) -> tuple[pd.DataFrame, dict]:
+    """The shard_*.csv of ONE extraction version under root (path containing keyword) → clips.
+
+    Each shard must sit inside its notebook's folder `<version>-s<k>` (how Kaggle mounts a
+    kernel's output). Exits when shards of two versions are mounted together, a shard number
+    repeats, shards are missing (with --expect-shards), a clip path is in two shard folders, or a
+    listed parquet does not exist. Returns the clips (with full_path) and a manifest."""
+    import glob  # follows symlinked folders (Path.rglob does not); Kaggle mounts may be links
+
+    csvs = sorted(Path(c) for c in glob.glob(f"{root}/**/shard_*.csv", recursive=True) if keyword in c.lower())
+    if not csvs:
+        raise SystemExit(f"no {keyword} shard_*.csv under {root}")
+    found = {}
+    for c in csvs:
+        m = next((m for m in map(_SHARD_DIR.match, reversed(c.parts)) if m), None)
+        if m is None:
+            raise SystemExit(f"{c}: not inside an extraction notebook folder named <version>-s<k>")
+        found[c] = (m["version"], int(m["k"]))
+    versions = sorted({v for v, _ in found.values()})
+    if len(versions) > 1:
+        raise SystemExit(f"shards from more than one extraction version mounted: {versions} — mount one")
+    ks = sorted(k for _, k in found.values())
+    if len(set(ks)) != len(ks):
+        raise SystemExit(f"shard numbers repeat: {ks}")
+    if expect is not None and ks != list(range(expect)):
+        raise SystemExit(f"expected shards 0..{expect - 1} of {versions[0]}, found {ks}")
+    parts = []
+    for c in csvs:
+        d = pd.read_csv(c, dtype={"video": str})
+        d["full_path"] = [str(c.parent / p_) for p_ in d["path"]]
+        parts.append(d)
+        print(f"{c}: {len(d)} clips")
+    df = pd.concat(parts, ignore_index=True)
+    dup = df[df.duplicated("path", keep=False)]
+    if len(dup):
+        roots = sorted({str(Path(f).parent.parent) for f in dup["full_path"]})
+        raise SystemExit(f"{dup['path'].nunique()} clip paths appear in more than one shard folder "
+                         f"({roots[:4]}{' …' if len(roots) > 4 else ''}): mount one extraction version only")
+    missing = [f for f in df["full_path"] if not os.path.exists(f)]
+    if missing:
+        raise SystemExit(f"{len(missing)} listed parquets do not exist, e.g. {missing[0]}")
+    return df, {"version": versions[0], "shards": ks, "clips_listed": len(df), "csvs": [str(c) for c in csvs]}
+
+
+def finish_build(lmdb_path: Path, paths: list[str], errors: list, allow_errors: int, manifest: dict) -> None:
+    """Fail on clip errors beyond --allow-errors, check every written path has data + length keys,
+    and write build_manifest.json next to the LMDB."""
+    if len(errors) > allow_errors:
+        raise SystemExit(f"{len(errors)} clips failed (allowed {allow_errors}), e.g. {errors[:3]}")
+    env = lmdb.open(str(lmdb_path), subdir=False, readonly=True, lock=False)
+    with env.begin() as txn:
+        absent = [p_ for p_ in paths if txn.get(lmdb_key(p_)) is None or txn.get(lmdb_length_key(p_)) is None]
+    env.close()
+    if absent:
+        raise SystemExit(f"{len(absent)} train.csv paths without LMDB data/length keys, e.g. {absent[0]}")
+    manifest = {**manifest, "clips_written": len(paths), "errors": len(errors), "error_examples": errors[:20],
+                "lmdb": lmdb_path.name, "commit": os.environ.get("REPO_COMMIT")}
+    (lmdb_path.parent / "build_manifest.json").write_text(json.dumps(manifest, indent=1))
+    print(f"manifest: {manifest['version']} shards {manifest['shards']}, {len(paths)} clips, {len(errors)} errors")
 
 
 def main() -> None:
@@ -151,6 +222,8 @@ def main() -> None:
     p.add_argument("--lmdb-name", default="wlasl.lmdb.mdb")
     p.add_argument("--workers", type=int, default=os.cpu_count() or 4)
     p.add_argument("--limit", type=int, default=0, help="first N clips (smoke test)")
+    p.add_argument("--expect-shards", type=int, help="with --input-root: require shards 0..N-1")
+    p.add_argument("--allow-errors", type=int, default=0, help="clips that may fail before the build exits")
     args = p.parse_args()
 
     sign2idx = json.loads(args.sign_map.read_text())
@@ -160,23 +233,13 @@ def main() -> None:
     if args.wlasl_dir:
         df = pd.read_csv(args.wlasl_dir / "train.csv", dtype={"video_id": str})
         df["full_path"] = [str(args.wlasl_dir / p_) for p_ in df["path"]]
+        missing = [f for f in df["full_path"] if not os.path.exists(f)]
+        if len(missing) > args.allow_errors:
+            raise SystemExit(f"{len(missing)} listed parquets do not exist, e.g. {missing[0]}")
+        df = df[[f not in set(missing) for f in df["full_path"]]]
+        manifest = {"version": str(args.wlasl_dir), "shards": None, "clips_listed": len(df) + len(missing)}
     else:
-        shards = sorted(args.input_root.rglob("shard_*.csv"))
-        shards = [c for c in shards if "wlasl" in str(c).lower()] or shards
-        if not shards:
-            raise SystemExit(f"no shard_*.csv under {args.input_root}")
-        parts = []
-        for csv in shards:
-            d = pd.read_csv(csv, dtype={"video": str})
-            d["full_path"] = [str(csv.parent / p_) for p_ in d["path"]]
-            parts.append(d)
-            print(f"{csv}: {len(d)} clips")
-        df = pd.concat(parts, ignore_index=True)
-        dup = df[df.duplicated("path", keep=False)]
-        if len(dup):  # e.g. two extraction versions mounted together: never keep one silently
-            roots = sorted({str(Path(f).parent.parent) for f in dup["full_path"]})
-            raise SystemExit(f"{dup['path'].nunique()} clip paths appear in more than one shard folder "
-                             f"({roots[:4]}{' …' if len(roots) > 4 else ''}): mount one extraction version only")
+        df, manifest = load_shards(args.input_root, "wlasl", args.expect_shards)
         df = df.rename(columns={"gloss": "sign"})
         df["video_id"] = df["video"].map(lambda v: os.path.splitext(v)[0])
     df["wlasl_gloss"] = df["sign"]
@@ -191,12 +254,13 @@ def main() -> None:
         vocab.update({g: len(sign2idx) + i for i, g in enumerate(extra)})
         df["sign"] = df["sign"].fillna(df["wlasl_gloss"])
     df = df[df["sign"].notna()].copy()
-    df = df[[os.path.exists(f) for f in df["full_path"]]]
     if args.limit:
         df = df.head(args.limit)
 
     if args.input_root and not args.wlasl_json:  # e.g. the wlasl-processed dataset mounted next to the shards
-        hits = sorted(args.input_root.rglob("WLASL_v0.3.json"))
+        import glob
+
+        hits = sorted(Path(h) for h in glob.glob(f"{args.input_root}/**/WLASL_v0.3.json", recursive=True))
         args.wlasl_json = hits[0] if hits else None
         print(f"WLASL json: {args.wlasl_json}")
     meta = {}
@@ -204,10 +268,31 @@ def main() -> None:
         for entry in json.loads(args.wlasl_json.read_text()):
             for inst in entry["instances"]:
                 meta[str(inst["video_id"])] = inst
-    df["participant_id"] = [_SIGNER_OFFSET + int(meta[v]["signer_id"]) if v in meta else -1
-                            for v in df["video_id"]]
-    for col in ("fps", "source", "split"):
+    json_signer = pd.Series([meta[v]["signer_id"] if v in meta else None for v in df["video_id"]], index=df.index)
+    if "participant" in df:  # shards record the signer: trust it, check it against the json when given
+        shard_signer = pd.to_numeric(df["participant"], errors="coerce")
+        both = json_signer.notna() & shard_signer.notna()
+        bad = both & (json_signer[both].astype(int) != shard_signer[both].astype(int))
+        if bad.any():
+            raise SystemExit(f"{int(bad.sum())} clips: shard signer ≠ WLASL json signer_id, e.g. "
+                             f"{df.loc[bad, 'video_id'].iloc[0]}")
+        signer = shard_signer.fillna(json_signer)
+    else:
+        signer = json_signer
+    if signer.isna().any():  # an unknown signer would land in the train half (frozen split) — never guess
+        raise SystemExit(f"{int(signer.isna().sum())} clips without a WLASL signer id (no shard participant "
+                         f"and not in {args.wlasl_json}), e.g. {df.loc[signer.isna(), 'video_id'].iloc[0]}")
+    df["participant_id"] = _SIGNER_OFFSET + signer.astype(int)
+    for col in ("fps", "source"):
         df[col] = [meta.get(v, {}).get(col) for v in df["video_id"]]
+    json_split = pd.Series([meta.get(v, {}).get("split") for v in df["video_id"]], index=df.index)
+    if "split" in df:
+        bad = json_split.notna() & df["split"].notna() & (json_split != df["split"])
+        if bad.any():
+            raise SystemExit(f"{int(bad.sum())} clips: shard split ≠ WLASL json split, e.g. {df.loc[bad, 'video_id'].iloc[0]}")
+        df["split"] = df["split"].fillna(json_split)
+    else:
+        df["split"] = json_split
     df["sequence_id"] = df["video_id"]
     print(f"{len(df)} clips, {df['sign'].nunique()} signs ({int(df['synonym'].sum())} via synonym "
           f"glosses), {df['participant_id'].nunique()} signers")
@@ -242,6 +327,7 @@ def main() -> None:
               f"{df['wlasl_half'].value_counts().to_dict()} clips")
     df[cols].to_csv(args.out_dir / "train.csv", index=False)
     (args.out_dir / "sign_to_prediction_index_map.json").write_text(json.dumps(vocab))
+    finish_build(lmdb_path, df["path"].tolist(), errors, args.allow_errors, manifest)
 
     print(f"wrote {len(df)} clips → {lmdb_path} ({lmdb_path.stat().st_size / 2**20:.0f} MiB); "
           f"{len(errors)} errors" + (f", e.g. {errors[0]}" if errors else ""))
