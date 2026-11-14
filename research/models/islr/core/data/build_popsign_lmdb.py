@@ -18,7 +18,7 @@ ASL Signs held-out scores are not clean for a model trained on it (use ASL Citiz
 Writes to --out-dir: `popsign.lmdb.mdb` (same keys as `is.lmdb.mdb`), `train.csv` (path,
 participant_id = 700000 + the number after the last '.' of the PopSign user id, sequence_id,
 sign, popsign_gloss, popsign_user, synonym (False), fps, source, split, aspect_k (1), ratio_raw,
-both_hands, n_frames) and a copy of the ASL Signs sign map.
+both_hands, n_frames, width, height) and a copy of the ASL Signs sign map.
 
 Usage (inside `scripts/kaggle_run.py push ... --kernel <user>/extract-popsign-s0 ...`):
   PYTHONPATH=research/models python -m islr.core.data.build_popsign_lmdb \
@@ -120,6 +120,7 @@ def main() -> None:
         *(stats[p_] for p_ in df["path"]))
     cols = ["path", "participant_id", "sequence_id", "sign", "popsign_gloss", "popsign_user", "synonym",
             "fps", "source", "split", "aspect_k", "ratio_raw", "both_hands", "n_frames"]
+    cols += [c for c in ("width", "height") if c in df]  # frame size (some clips are 9:16, most 3:4)
     df[cols].to_csv(args.out_dir / "train.csv", index=False)
     (args.out_dir / "sign_to_prediction_index_map.json").write_text(json.dumps(sign2idx))
 

@@ -400,7 +400,7 @@ Signs 2 %). Recipe = phrases05 (30 epochs) + `--extra-data-dir {WLASL_ALL_DIR} /
 | ASL Citizen identical / variant / synonym (exact) | 77.4 / 59.3 / 66.7 % | 80.7 / 60.6 / 67.1 % | identical p = 7e-6 |
 | WLASL test half exact | 83.7 % | 84.2 % | +33 / −29, p = 0.7 |
 | ASL Signs held-out exact (fold 0) | 61.9 % | 68.0 %* | +1409 / −552 |
-| Reliability: clips kept at 90 % precision | 49.7 % | 62.7 %* | |
+| Reliability: clips kept at 90 % precision (offline; set 94.5 % ASL Signs) | 49.7 % | 62.7 %* | |
 
 \* ASL Signs scores may be inflated by shared signers (below); all three val signers improve
 (34503 53 → 62 %, 49445 63 → 68 %, 62590 77 → 79 % pooled).
@@ -411,12 +411,32 @@ halves: same person ≤ 0.32, different people ≥ 0.46 (AUC 1.0); PopSign halve
 1.0). No PopSign signer falls in the same-person range of an ASL Signs signer (0 of 31 flagged), but
 three are at 0.42–0.43 — closer than any two different ASL Signs signers — to ASL Signs 26734,
 28656 (both training signers) and 61333 (training). None of the fold-0 val signers is within 0.57.
-Reading: no evidence that the held-out val signers are in PopSign; a few training signers may be.
-Treat the ASL Signs gain with caution anyway — PopSign is the same game and phone set-up, i.e. the
-same recording conditions as the val signers.
+Reading: the screen found no match for the val signers, but it **cannot establish that they are
+absent** — its perfect AUC measures consistency within one dataset, while matching a person across
+datasets (other phone, session, framing) is harder and unvalidated; it also scored the 1,332 9:16
+PopSign clips as 3:4 (fixed afterwards: per-clip aspect from the frame size, needs a rerun). So the
+ASL Signs gain stays qualified: shared signers are possible, and PopSign is the same game and phone
+set-up as the val signers in any case.
+
+ASL Citizen per signer: 10 of 11 improve on exact decode (largest +9.0 points, one −1.6); resampling
+signers gives +0.9 to +4.2 points (95 % bootstrap). The reliability figure is an offline estimate on
+held-out clips (94.5 % ASL Signs, 5.5 % WLASL): it says nothing about live camera input, signs outside
+the vocabulary or ordinary background movement.
 
 Reading: the first shippable gain on the independent ASL Citizen test since phrases05 (+2.5 exact,
-mostly on identical glosses; variant forms barely move — PopSign signs the ASL Signs forms). WLASL
+mostly on identical glosses; variant forms barely move, 59.3 → 60.6 % — PopSign signs the ASL Signs
+forms, so that gap remains). With phrases05-long's null result, better training coverage — not more
+epochs — is the lever. WLASL
 does not move. Exported to `exports/phrases07/` (ONNX verified, Δlogit 3e-4; `sign_reliability.json`;
 fixtures; `ATTRIBUTION.md` — **PopSign CC BY 4.0 must be credited in the app**). Candidate to replace
-phrases05 as the browser model.
+phrases05 as the browser model — to be confirmed on the same recorded camera clips for both models
+(signers, distances, angles, out-of-vocabulary signs and no signing; first-attempt recognition,
+confidently wrong outputs, latency): offline accuracy and synthetic-phrase WER cannot show whether
+the product improves.
+
+**Extraction caveat (found 2026-11-13, review):** every extractor (WLASL notebook, ASL Citizen,
+PopSign) reused one MediaPipe Holistic per worker in video mode, so a clip's first frames could be
+tracked from the previous, unrelated clip. Fixed in the shared cell (fresh tracker per video,
+506a5ea); size of the effect on the extracted landmarks being measured (Kaggle
+`tracker-reset-check`) before deciding on re-extraction. The ASL Signs competition data is not
+affected (not extracted by us).

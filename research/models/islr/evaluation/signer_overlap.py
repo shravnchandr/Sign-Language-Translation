@@ -13,7 +13,9 @@ Calibration: each reference signer's clips are split in two random halves. Same-
 (half A of i vs half B of i) and different-person distances (A of i vs B of j) give the scale; the
 AUC says how well the fingerprint tells people apart. Each query signer's nearest reference signer
 is then reported with the share of different-person pairs that are closer (≈ 0 and inside the
-same-person range = likely the same person) — a screen, not proof.
+same-person range = likely the same person) — a screen, not proof. The calibration measures
+consistency *within* one dataset; matching a person across datasets (other phone, session,
+framing) is harder and unvalidated, so "not flagged" does not establish that a signer is absent.
 
 Usage:
   PYTHONPATH=research/models python -m islr.evaluation.signer_overlap \
@@ -78,12 +80,14 @@ def load_features(data_dir: Path, lmdb_path: Path, per_signer: int, aspect: floa
     df = pd.read_csv(data_dir / "train.csv")
     df = df.sample(frac=1, random_state=seed).groupby("participant_id").head(per_signer)
     env = lmdb.open(str(lmdb_path), subdir=False, readonly=True, lock=False)
+    # per-clip frame width / height when the CSV has the frame size (PopSign: 3:4 and 9:16 clips)
+    asp = (df["width"] / df["height"]).fillna(aspect) if {"width", "height"} <= set(df) else pd.Series(aspect, df.index)
     rows = []
     with env.begin(buffers=True) as txn:
-        for pid, path in zip(df["participant_id"], df["path"]):
+        for pid, path, k in zip(df["participant_id"], df["path"], asp):
             val = txn.get(lmdb_key(path))
             if val is not None:
-                rows.append([pid, *clip_features(torch.load(io.BytesIO(bytes(val)), weights_only=True), aspect)])
+                rows.append([pid, *clip_features(torch.load(io.BytesIO(bytes(val)), weights_only=True), k)])
     env.close()
     return pd.DataFrame(rows, columns=["signer", *FEATURES])
 
@@ -120,7 +124,8 @@ def main() -> None:
     p.add_argument("--query-data-dir", required=True, type=Path)
     p.add_argument("--query-lmdb-path", required=True, type=Path)
     p.add_argument("--per-signer", type=int, default=200, help="clips sampled per signer")
-    p.add_argument("--aspect", type=float, default=0.75, help="frame width / height (both portrait 3:4)")
+    p.add_argument("--aspect", type=float, default=0.75,
+                   help="frame width / height when train.csv has no width / height columns")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", type=Path)
     a = p.parse_args()

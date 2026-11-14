@@ -186,8 +186,10 @@ different people ≥ 0.46, AUC 1.0. Negative control WLASL vs ASL Signs: nearest
 
 PopSign vs ASL Signs: 0 of 31 in the same-person range; three at 0.42–0.43 (closer than any two
 different ASL Signs signers), all to ASL Signs *training* signers (26734, 28656, 61333); the fold-0
-val signers (34503, 49445, 62590) are ≥ 0.57 from every PopSign signer. A screen, not proof (another
-phone / session may move a same-person distance up). Practical rule: score PopSign-trained models
+val signers (34503, 49445, 62590) are ≥ 0.57 from every PopSign signer. A screen, not proof: the
+split-half AUC measures consistency within a dataset, and cross-dataset matching is unvalidated, so
+"not flagged" does not establish absence. This run also treated the 1,332 9:16 PopSign clips as 3:4;
+the PopSign train.csv now keeps width / height and the screen uses per-clip aspect (rerun pending). Practical rule: score PopSign-trained models
 on ASL Citizen and WLASL; read ASL Signs held-out gains with caution (same recording set-up).
 Output: `results/phrases/phrases07-popsign/popsign_vs_aslsigns_overlap.json`; model results in
 [03](03_phrases_and_browser.md) (phrases07).
