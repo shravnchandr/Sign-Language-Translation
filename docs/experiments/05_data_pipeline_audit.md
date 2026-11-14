@@ -236,7 +236,7 @@ wrong-slot assignments where the side can be judged, with counts and unclear cov
 balanced over distance bands, so rates are weighted by each band's prevalence before quoting a
 dataset rate. The policy is chosen on calibration recordings, frozen, then evaluated once on holdout
 (sets split by recording content). Keeping real hands breaks near-ties only. The visual labels are
-reference judgements, not ground truth. ASL Signs (no video) gets a statistical transfer check only —
+reference judgements, not ground truth. Sampling covers copy-distance bands up to an open tail (PopSign: 2,200 rejected frames, 11 %, lie above 0.8) and a control band just below the overlap gate (IoU 0.1–0.2): v4 decides copies only above the gate, since two skeletons of one hand must overlap; the controls test that. Each slot's projected hand size and box diagonal are logged, so a foreshortened denominator can be told from a loose fit. Rule candidates in order, on calibration only: distance alone; distance plus the recorded hand-to-pose-wrist distances; a handedness (thumb-side) feature only if those fail. PopSign's rejected frames differ from WLASL's (fewer exact copies: 14 % vs 37 % below 0.1; pose wrists further apart, 0.55 vs 0.36 shoulder widths), so one threshold is not assumed to fit both. ASL Signs (no video) gets a statistical transfer check only —
 changed decisions, fallbacks, distance distributions — and its correctness is stated as unverified.
 
 **Aspect: same clips, builder vs browser preparation (`islr-aspect-wlasl`, `aspect_compare`, 824
@@ -255,7 +255,7 @@ ratio sits a little higher (median 0.43 vs 0.40) and outside the reference in 7.
 in some frame sizes (320×240 23 %, 656×370 25 %, 854×480 27 %, 640×360 4 of 9; 1280×720 and 720×400 0 %)
 and signers (98, 93, 8) — possibly sources whose stored frame size is not their display shape
 (letterboxed / anamorphic), unverified. On these clips the browser preparation does not score worse: the
-neutral model does better with it, phrases05 the same. **No builder change is required by this result.**
+neutral model does better with it, phrases05 the same. **No builder change is required by this WLASL comparison** (it does not establish equivalence for other datasets or live cameras; the frame sizes are those of the decoded frames, so the source / display mismatch is a hypothesis to inspect).
 Open question for the rebuild (not decided): the builders could use the geometric factor too (W / H is
 now recorded per clip), which matches deployment and keeps natural body-proportion variation — but the
 per-clip factor is robust to a mis-stated frame size, the geometric one is not. ASL Citizen pending.
