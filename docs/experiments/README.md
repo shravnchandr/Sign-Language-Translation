@@ -25,6 +25,7 @@ open ideas in [ideas](ideas.md); Kaggle leaderboard context and the 1st-place re
 | [02_isolated_folds.md](02_isolated_folds.md) | Signer folds, review fixes, GraphConformer, bone aug, FS pre-training, VQ, AdaBN, ensembles, 1st-place anchor, error review |
 | [03_phrases_and_browser.md](03_phrases_and_browser.md) | phrases01–05, browser export, Kaggle GPU runner, live-test diagnoses, per-sign reliability |
 | [04_data_cross_dataset.md](04_data_cross_dataset.md) | Training-data limits and cross-dataset tests (WLASL, MS-ASL, ASL Citizen, PopSign + signer overlap) |
+| [05_data_pipeline_audit.md](05_data_pipeline_audit.md) | Data pipeline audit (2026-11-14): presence reconstruction, ghost hands, feature contract, label duplicates; the one-rebuild plan |
 | [ideas.md](ideas.md) | Pending ideas, by priority |
 | [kaggle_reference.md](kaggle_reference.md) | Leaderboard context, 1st-place recipe |
 
