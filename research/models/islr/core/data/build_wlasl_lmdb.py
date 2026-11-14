@@ -233,20 +233,24 @@ def load_shards(root: Path, keyword: str, expect: int) -> tuple[pd.DataFrame, di
 
 
 def finish_build(lmdb_path: Path, paths: list[str], errors: list, allow_errors: int, manifest: dict,
-                 stats: dict | None = None) -> None:
+                 stats: dict | None = None, dataset: str = "", aspect_correction: bool = True) -> None:
     """Fail on clip errors beyond --allow-errors, check every written path has data + length keys,
     and write build_manifest.json next to the LMDB."""
     if len(errors) > allow_errors:
         raise SystemExit(f"{len(errors)} clips failed (allowed {allow_errors}), e.g. {errors[:3]}")
+    from .contract import CONTRACT_VERSION, content_digest
+
     env = lmdb.open(str(lmdb_path), subdir=False, readonly=True, lock=False)
     with env.begin() as txn:
         absent = [p_ for p_ in paths if txn.get(lmdb_key(p_)) is None or txn.get(lmdb_length_key(p_)) is None]
-    env.close()
     if absent:
         raise SystemExit(f"{len(absent)} train.csv paths without LMDB data/length keys, e.g. {absent[0]}")
-    from .contract import CONTRACT_VERSION
+    digest = content_digest(env, paths)
+    env.close()
 
-    manifest = {**manifest, "clips_written": len(paths), "errors": len(errors), "error_examples": errors[:20],
+    manifest = {**manifest, "dataset": dataset, "aspect_correction": aspect_correction,
+                "allow_errors": allow_errors, "content_digest": digest,
+                "clips_written": len(paths), "errors": len(errors), "error_examples": errors[:20],
                 "lmdb": lmdb_path.name, "contract": CONTRACT_VERSION, "cache_version": CACHE_VERSION,
                 "contract_counts": contract_summary({p_: stats[p_] for p_ in paths}) if stats else None,
                 "commit": os.environ.get("REPO_COMMIT")}
@@ -372,7 +376,7 @@ def main() -> None:
               f"{df['wlasl_half'].value_counts().to_dict()} clips")
     df[cols].to_csv(args.out_dir / "train.csv", index=False)
     (args.out_dir / "sign_to_prediction_index_map.json").write_text(json.dumps(vocab))
-    finish_build(lmdb_path, df["path"].tolist(), errors, args.allow_errors, manifest, stats)
+    finish_build(lmdb_path, df["path"].tolist(), errors, args.allow_errors, manifest, stats, "wlasl", True)
 
     print(f"wrote {len(df)} clips → {lmdb_path} ({lmdb_path.stat().st_size / 2**20:.0f} MiB); "
           f"{len(errors)} errors" + (f", e.g. {errors[0]}" if errors else ""))

@@ -125,6 +125,9 @@ def prepare(df: pd.DataFrame, aspect: float = 0.75) -> dict:
     """Steps 1–5: raw rows → {"coords": (T, COORD_FEAT) float32, "presence": (T, 2) uint8,
     "status": (T, 2) int8, "frames": kept frame ids, "stats": counts}. T can be 0 (no pose)."""
     raw = raw_arrays(df)
+    inf = {part: int(np.isinf(raw[part]).sum()) for part, _ in _PARTS}
+    if any(inf.values()):  # NaN means "not detected"; an infinity is corrupt data, never a value
+        raise ValueError(f"infinite raw coordinates: { {k: v for k, v in inf.items() if v} }")
     posed = ~np.isnan(raw["pose"]).all((1, 2))
     stats = {"frames_raw": int(len(posed)), "frames_no_pose": int((~posed).sum())}
     raw = {k: v[posed] for k, v in raw.items()}
@@ -141,7 +144,7 @@ def prepare(df: pd.DataFrame, aspect: float = 0.75) -> dict:
         else:  # per landmark: MediaPipe pose / face are all-or-nothing per frame
             ok = ~np.isnan(a[:, 0, 0])
             a = _hold_fill(a, ok)
-        blocks.append(np.nan_to_num(a, nan=0.0).reshape(len(a), -1))
+        blocks.append(np.where(np.isnan(a), 0.0, a).reshape(len(a), -1))  # never-seen parts → 0
     coords = np.concatenate(blocks, 1).astype(np.float32) if len(origin) else np.zeros((0, sum(n for _, n in _PARTS) * COORDS_PER_LM), np.float32)
     return {"coords": coords, "presence": presence.astype(np.uint8), "status": status,
             "frames": raw["frame"], "stats": stats}
@@ -156,12 +159,34 @@ def dump_clip(clip: dict) -> bytes:
     return buf.getvalue()
 
 
-def load_clip(value: bytes) -> tuple[torch.Tensor, torch.Tensor]:
-    """Stored LMDB value → (coords (T, COORD_FEAT) float32, presence (T, 2) float32)."""
+def load_record(value: bytes) -> dict:
+    """Stored LMDB value → {"coords", "presence", "status"} tensors as stored."""
     d = torch.load(io.BytesIO(bytes(value)), weights_only=True)
     if not isinstance(d, dict):
-        raise ValueError("legacy LMDB value (coords only, presence would have to be guessed): rebuild "
-                         "the LMDB with the current builders")
+        raise ValueError("legacy LMDB value (coords only): rebuild the LMDB with the current builders")
+    return d
+
+
+def content_digest(env, paths) -> str:
+    """sha256 over (path, coords, presence, status) of every clip, in path order — what the clips
+    contain, independent of the LMDB file layout. env: an open lmdb environment."""
+    import hashlib
+
+    from ._cache_keys import lmdb_key
+
+    h = hashlib.sha256()
+    with env.begin(buffers=True) as txn:
+        for path in sorted(paths):
+            d = load_record(txn.get(lmdb_key(path)))
+            h.update(path.encode())
+            for k in ("coords", "presence", "status"):
+                h.update(d[k].numpy().tobytes())
+    return h.hexdigest()[:16]
+
+
+def load_clip(value: bytes) -> tuple[torch.Tensor, torch.Tensor]:
+    """Stored LMDB value → (coords (T, COORD_FEAT) float32, presence (T, 2) float32)."""
+    d = load_record(value)
     return d["coords"].float(), d["presence"].float()
 
 

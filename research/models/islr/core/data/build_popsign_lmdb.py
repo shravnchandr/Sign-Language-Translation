@@ -104,7 +104,7 @@ def main() -> None:
     cols += [c for c in ("width", "height") if c in df]  # frame size (some clips are 9:16, most 3:4)
     df[cols].to_csv(args.out_dir / "train.csv", index=False)
     (args.out_dir / "sign_to_prediction_index_map.json").write_text(json.dumps(sign2idx))
-    finish_build(lmdb_path, df["path"].tolist(), errors, args.allow_errors, manifest, stats)
+    finish_build(lmdb_path, df["path"].tolist(), errors, args.allow_errors, manifest, stats, "popsign", False)
 
     print(f"wrote {len(df)} clips → {lmdb_path} ({lmdb_path.stat().st_size / 2**20:.0f} MiB); "
           f"{len(errors)} errors" + (f", e.g. {errors[0]}" if errors else ""))

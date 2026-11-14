@@ -5,7 +5,9 @@
 
 Exits non-zero when any hard check fails; writes validation_report.json next to the LMDB.
 Hard checks:
-  - build_manifest.json present, built with this contract and cache version, 0 unallowed errors
+  - build_manifest.json present, built with this contract and cache version; build errors within
+    the allowance recorded at build time; dataset type = the train.csv schema; content digest
+    recomputed from the LMDB = the manifest's
   - every train.csv path has a data + length key; stored length = clip length = n_frames
   - every clip: finite, (T > 0, COORD_FEAT); presence binary and = status in {KEPT, AMBIGUOUS};
     status codes valid; a hand never present has an all-zero block
@@ -14,7 +16,7 @@ Hard checks:
     ASL Citizen: official train / val / test signers disjoint
   - no two clips with identical stored content
   - --raw-root: a random sample re-prepared from its raw parquet is byte-identical to the stored
-    value (the LMDB is what the contract produces today)
+    value — coords, presence and provenance status (the LMDB is what the contract produces today)
 Reported (not failed): two-hand clip rate, ghost / ambiguous / pose-less frame totals.
 """
 
@@ -57,7 +59,10 @@ def main() -> None:
     check(bool(man), f"build manifest {man_path}")
     check(man.get("contract") == K.CONTRACT_VERSION and man.get("cache_version") == CACHE_VERSION,
           f"contract {man.get('contract')} / cache {man.get('cache_version')} = {K.CONTRACT_VERSION} / {CACHE_VERSION}")
-    report["manifest"] = {k: man.get(k) for k in ("version", "shards", "clips_listed", "clips_written", "errors",
+    check(man.get("errors", 1) <= man.get("allow_errors", 0),
+          f"build errors {man.get('errors')} within the allowance it was built with ({man.get('allow_errors', 0)})")
+    report["manifest"] = {k: man.get(k) for k in ("version", "dataset", "aspect_correction", "shards", "clips_listed",
+                                                   "clips_written", "errors", "allow_errors", "content_digest",
                                                    "contract_counts", "commit")}
 
     df = pd.read_csv(a.data_dir / "train.csv")
@@ -65,7 +70,12 @@ def main() -> None:
     check(df["sign"].isin(sign_map).all(), f"labels in the sign map ({int((~df['sign'].isin(sign_map)).sum())} not)")
     pid = pd.to_numeric(df["participant_id"], errors="coerce")
     check(bool(pid.notna().all() and (pid >= 0).all()), f"participant ids resolved ({int((pid.isna() | (pid < 0)).sum())} not)")
-    source = str(df["source"].iloc[0]) if "source" in df else "aslsigns"
+    # dataset type from the manifest (WLASL's `source` column holds its web sources), else the schema
+    schema = ("wlasl" if "wlasl_gloss" in df else "aslcitizen" if "aslc_gloss" in df
+              else "popsign" if "popsign_gloss" in df else "aslsigns")
+    dataset = man.get("dataset") or schema
+    check(dataset == schema, f"manifest dataset {man.get('dataset')!r} matches the train.csv schema ({schema})")
+    correct = man.get("aspect_correction", dataset in ("wlasl", "aslcitizen"))
 
     if "wlasl_gloss" in df:  # WLASL: halves must equal the frozen split
         sp = signer_split(df)
@@ -74,7 +84,7 @@ def main() -> None:
         if "wlasl_half" in df:
             want = np.where(df["participant_id"].isin(frozen), "test", "train")
             check(bool((df["wlasl_half"].to_numpy() == want).all()), "wlasl_half = frozen split")
-    if source == "aslcitizen" and "split" in df:
+    if dataset == "aslcitizen" and "split" in df:
         s = {k: set(g["participant_id"]) for k, g in df.groupby("split")}
         check(all(not (s[x] & s[y]) for x in s for y in s if x < y), f"ASL Citizen splits signer-disjoint ({sorted(s)})")
 
@@ -115,9 +125,11 @@ def main() -> None:
     check(not bad, f"clips well-formed ({len(bad)} bad{', e.g. ' + str(bad[0]) if bad else ''})")
     dups = [v for v in contents.values() if len(v) > 1]
     check(not dups, f"no duplicate content ({len(dups)} groups{', e.g. ' + str(dups[0][:2]) if dups else ''})")
+    digest = K.content_digest(env, [p_ for p_ in df["path"] if p_ not in set(missing)])
+    check(digest == man.get("content_digest"), f"content digest {digest} = manifest {man.get('content_digest')}")
     report["two_hand_clip_rate"] = round(two_hand / max(len(df) - len(missing), 1), 4)
     report["clips"] = len(df)
-    print(f"info  {len(df)} clips, source {source}; clips with both hands in a frame {report['two_hand_clip_rate']:.1%}; "
+    print(f"info  {len(df)} clips, dataset {dataset} (aspect correction {correct}); clips with both hands in a frame {report['two_hand_clip_rate']:.1%}; "
           f"contract counts {man.get('contract_counts')}")
 
     if a.raw_root:  # the stored value is what the contract produces from the raw parquet today
@@ -136,10 +148,9 @@ def main() -> None:
                     unfound += 1
                     continue
                 aspect = (r.width / r.height) if hasattr(r, "width") and hasattr(r, "height") else float("nan")
-                correct = source in ("wlasl", "aslcitizen")  # PopSign / ASL Signs: portrait, uncorrected
                 _, value, _, err = _process((r.path, full, correct, aspect))
-                stored = K.load_clip(txn.get(lmdb_key(r.path)))
-                if err or not all(torch.equal(x, y) for x, y in zip(K.load_clip(value), stored)):
+                stored = K.load_record(txn.get(lmdb_key(r.path)))
+                if err or not all(torch.equal(K.load_record(value)[k], stored[k]) for k in ("coords", "presence", "status")):
                     mism.append(r.path)
         check(unfound == 0, f"raw parquets found for the re-prepare sample ({unfound} not)")
         check(not mism, f"re-prepared from raw = stored ({len(mism)} of {len(sample) - unfound} differ)")

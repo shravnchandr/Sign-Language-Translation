@@ -206,33 +206,61 @@ def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()[:16]
 
 
-def _dataset_fingerprint(data_dir: str) -> dict:
-    d = Path(data_dir)
-    man = d / "build_manifest.json"
+def _content(sources) -> str:
+    """Content digest (contract.content_digest) of the clips these ASLDataset-like sources read,
+    from the LMDB each actually opens."""
+    from ..core.data.contract import content_digest
+    from ..core.data.dataset import _open_lmdb_env  # the datasets' own handle (an env opens once per process)
+
+    by_lmdb: dict = {}
+    for src in sources:
+        if src.lmdb_path is None:
+            raise SystemExit("experiment spec: every dataset must be read from an LMDB (content digest)")
+        by_lmdb.setdefault(src.lmdb_path, set()).update(src.df["path"])
+    parts = []
+    for path, clips in sorted(by_lmdb.items(), key=lambda kv: str(kv[0])):
+        parts.append(content_digest(_open_lmdb_env(path), clips))
+    return "+".join(parts)
+
+
+def _manifest(data_dir: str) -> dict | None:
+    man = Path(data_dir) / "build_manifest.json"
     m = json.loads(man.read_text()) if man.exists() else None
-    return {"train_csv": _sha((d / "train.csv").read_bytes()),
-            "manifest": {k: m.get(k) for k in ("version", "shards", "clips_written", "contract", "cache_version")}
-            if m else None}
+    return {k: m.get(k) for k in ("version", "dataset", "content_digest", "contract", "cache_version")} if m else None
 
 
-# Fields two runs must share to be compared (05 vs 07: only the extra training data may differ).
-SHARED_SPEC = ("contract", "cache_version", "data", "vocab", "init", "val_set", "val_fold", "seed")
+# Recipe arguments two compared runs may differ in (the extra training data is the comparison;
+# paths are free because the data is compared by content). Anything else needs --allow-diff.
+ALLOWED_DIFF = {"extra_data_dir", "extra_frac", "extra_lmdb_path", "extra_kinds", "out_dir", "num_workers",
+                "frozen_spec", "allow_diff", "data_dir", "lmdb_path", "init", "vocab"}
 
 
-def experiment_spec(args, sign2idx: dict, val_ds) -> dict:
-    """Everything a run depends on besides its recipe: contract / cache version, dataset
-    fingerprints, vocabulary, initial checkpoint, the exact validation phrases."""
+def experiment_spec(args, sign2idx: dict, train_source, val_ds) -> dict:
+    """Everything a run depends on: contract / cache version, the content of every dataset it reads,
+    vocabulary, initial checkpoint, the exact validation phrases, and the full effective recipe."""
     from ..core.data._cache_keys import CACHE_VERSION
     from ..core.data.contract import CONTRACT_VERSION
 
+    sources = list(getattr(train_source, "sources", [train_source]))
     paths = val_ds.source.df["path"].tolist()
     val_set = [(s[0], s[1], [paths[c] for c in s[3]], s[4]) for s in val_ds.specs]
+    recipe = {k: (str(v) if isinstance(v, Path) else v) for k, v in sorted(vars(args).items())}
     return {"contract": CONTRACT_VERSION, "cache_version": CACHE_VERSION,
-            "data": _dataset_fingerprint(args.data_dir),
-            "extra_data": [{"dir": d, **_dataset_fingerprint(d)} for d in args.extra_data_dir],
+            "data": {"content": _content([sources[0], val_ds.source]), "manifest": _manifest(args.data_dir)},
+            "extra_data": [{"dir": d, "content": _content([s]), "manifest": _manifest(d)}
+                           for d, s in zip(args.extra_data_dir, sources[1:])],
             "vocab": _sha(json.dumps(sign2idx, sort_keys=True).encode()),
             "init": _sha(Path(args.init).read_bytes()) if args.init else None,
-            "val_set": _sha(json.dumps(val_set).encode()), "val_fold": args.val_fold, "seed": args.seed}
+            "val_set": _sha(json.dumps(val_set).encode()), "recipe": recipe}
+
+
+def spec_differences(ref: dict, spec: dict, allowed: set) -> dict:
+    """{field: (reference, this run)} for every difference not in `allowed` (recipe keys)."""
+    diff = {k: (ref.get(k), spec.get(k)) for k in spec if k not in ("extra_data", "recipe") and ref.get(k) != spec.get(k)}
+    r0, r1 = ref.get("recipe", {}), spec["recipe"]
+    diff.update({f"recipe.{k}": (r0.get(k), r1.get(k)) for k in sorted(set(r0) | set(r1))
+                 if k not in allowed and r0.get(k) != r1.get(k)})
+    return diff
 
 
 def train(args):
@@ -289,15 +317,15 @@ def train(args):
           f"val {len(val_ds):,} fixed phrases from {sorted({s[0] for s in val_ds.specs})} "
           f"(kinds {kinds}; 1-sign phrases count as seen)")
 
-    spec = experiment_spec(args, sign2idx, val_ds)
-    (out_dir / "experiment_spec.json").write_text(json.dumps(spec, indent=1))
-    if args.frozen_spec:  # a comparison run must share every dependency but its training data
-        ref = json.loads(Path(args.frozen_spec).read_text())
-        diff = [k for k in SHARED_SPEC if ref.get(k) != spec.get(k)]
+    ref = json.loads(Path(args.frozen_spec).read_text()) if args.frozen_spec else None  # read before writing
+    spec = experiment_spec(args, sign2idx, train_source, val_ds)
+    if ref is not None:  # a comparison run must share every dependency but its training data
+        diff = spec_differences(ref, spec, ALLOWED_DIFF | set(args.allow_diff))
         if diff:
-            raise SystemExit(f"--frozen-spec {args.frozen_spec}: {diff} differ "
-                             f"({ {k: (ref.get(k), spec.get(k)) for k in diff} })")
-        print(f"Spec matches {args.frozen_spec} on {', '.join(SHARED_SPEC)}")
+            raise SystemExit(f"--frozen-spec {args.frozen_spec}: differs in {sorted(diff)}: {diff}")
+        print(f"Spec matches {args.frozen_spec} (allowed to differ: extra data, "
+              f"{', '.join(sorted(ALLOWED_DIFF | set(args.allow_diff)))})")
+    (out_dir / "experiment_spec.json").write_text(json.dumps(spec, indent=1))
 
     worker_kw = dict(num_workers=args.num_workers, collate_fn=collate_ctc,
                      multiprocessing_context=worker_context(args.num_workers),
@@ -468,8 +496,11 @@ def main():
     p.add_argument("--extra-lmdb-path", nargs="+", default=[],
                    help="one per --extra-data-dir (default <dir>/wlasl.lmdb.mdb or aslcitizen.lmdb.mdb)")
     p.add_argument("--frozen-spec", type=Path,
-                   help="experiment_spec.json of the run to compare with: exit unless contract, data, "
-                        "vocab, init checkpoint, validation phrases, fold and seed are identical")
+                   help="experiment_spec.json of the run to compare with: exit unless contract, dataset "
+                        "content, vocab, init checkpoint, validation phrases and the recipe are identical "
+                        "(the extra training data, paths and worker count may differ)")
+    p.add_argument("--allow-diff", nargs="*", default=[],
+                   help="recipe arguments this comparison run may change on purpose (e.g. epochs)")
     p.add_argument("--vocab", default="",
                    help="wider label map (first 250 = ASL Signs map), e.g. the all-gloss WLASL map")
     p.add_argument("--extra-frac", type=float, nargs="+", default=[0.15],

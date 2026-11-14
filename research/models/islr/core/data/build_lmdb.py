@@ -148,7 +148,16 @@ def build_lmdb(
     from .build_wlasl_lmdb import contract_summary
     from .contract import CONTRACT_VERSION
 
-    manifest = {"version": "asl-signs-competition", "shards": None, "clips_listed": n, "clips_written": written + skipped,
+    from .contract import content_digest
+
+    env = lmdb.open(str(lmdb_path), readonly=True, lock=False)
+    with env.begin() as txn:  # every clip actually stored (written now or by an earlier run)
+        stored = [p_ for p_ in paths if txn.get(_lmdb_key(p_)) is not None]
+    digest = content_digest(env, stored)
+    env.close()
+    manifest = {"version": "asl-signs-competition", "dataset": "aslsigns", "aspect_correction": False,
+                "allow_errors": errors if allow_errors else 0, "content_digest": digest,
+                "shards": None, "clips_listed": n, "clips_written": written + skipped,
                 "errors": errors, "lmdb": lmdb_path.name, "contract": CONTRACT_VERSION, "cache_version": CACHE_VERSION,
                 "contract_counts": contract_summary(stats) if stats else None, "resumed_clips": skipped}
     (lmdb_path.parent / "build_manifest.json").write_text(json.dumps(manifest, indent=1))
