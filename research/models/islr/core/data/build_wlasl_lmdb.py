@@ -17,9 +17,8 @@ that ratio (ASL Signs p10–p90 0.34–0.45) — the video dimensions are not re
 
 --all-glosses keeps every WLASL gloss (pre-training data): unshared glosses become extra
 labels numbered after the 250 ASL Signs signs in the written sign map (the first 250
-entries are unchanged), and `wlasl_half` records each signer's half of `signer_split`,
-computed on the shared-sign clips only, so it equals the split of the 206-sign LMDB
-(signers without shared-sign clips → train).
+entries are unchanged), and `wlasl_half` records each signer's half of `signer_split` (frozen in
+`wlasl_signer_split.json`, so it equals the split of the 206-sign LMDB; signers not in it → train).
 
 Writes to --out-dir: `wlasl.lmdb.mdb` (or --lmdb-name; same key scheme as `is.lmdb.mdb`, so
 `ASLDataset` reads it), `train.csv` (path, participant_id = 900000 + WLASL signer,
@@ -79,14 +78,26 @@ def aspect_factor(coords: np.ndarray) -> tuple[float, float]:
     return (k if _K_RANGE[0] <= k <= _K_RANGE[1] else 1.0), raw
 
 
-def signer_split(df: pd.DataFrame) -> dict:
-    """Fixed WLASL signer split {"train": [...], "test": [...]} with balanced clip counts.
+_SPLIT_FILE = Path(__file__).with_name("wlasl_signer_split.json")
 
-    Signers sorted by (clips desc, id) are dealt snake-wise (train, test, test, train, ...),
-    so the two halves get about the same number of clips and of signers. "train" signers
-    may be mixed into training (train_phrases --extra-data-dir); "test" signers stay a
-    cross-dataset test (cross_dataset_eval --signers test).
+
+def signer_split(df: pd.DataFrame) -> dict:
+    """Fixed WLASL signer split {"train": [...], "test": [...]} for the signers in df.
+
+    The halves are frozen in `wlasl_signer_split.json` (dealt once from the v1 extraction by
+    `_dealt_split`): recomputing them from clip counts would let a re-extraction that gains or
+    loses a clip move signers between halves — test signers could then have been trained on.
+    "train" signers may be mixed into training (phrases.train --extra-data-dir); "test" signers
+    stay a cross-dataset test (cross_dataset --signers test). Signers not in the file → train.
     """
+    test = set(json.loads(_SPLIT_FILE.read_text())["test"])
+    ids = sorted(int(s) for s in df["participant_id"].unique())
+    return {"train": [s for s in ids if s not in test], "test": [s for s in ids if s in test]}
+
+
+def _dealt_split(df: pd.DataFrame) -> dict:
+    """How the frozen split was made: signers sorted by (clips desc, id) are dealt snake-wise
+    (train, test, test, train, ...), so both halves get about the same clips and signers."""
     counts = df.groupby("participant_id").size()
     order = sorted(counts.index, key=lambda s: (-counts[s], s))
     split = {"train": [], "test": []}
@@ -223,7 +234,7 @@ def main() -> None:
     cols = ["path", "participant_id", "sequence_id", "sign", "wlasl_gloss", "synonym", "fps",
             "source", "split", "aspect_k", "ratio_raw", "both_hands", "n_frames"]
     if args.all_glosses:
-        test = set(signer_split(df[df["sign"].isin(sign2idx)])["test"])
+        test = set(signer_split(df)["test"])
         df["wlasl_half"] = np.where(df["participant_id"].isin(test), "test", "train")
         cols.append("wlasl_half")
         print(f"{len(vocab)} labels ({len(vocab) - len(sign2idx)} extra glosses); halves "
