@@ -459,4 +459,8 @@ started (CPU only; v1 outputs kept): `extract-popsign-v2-s0..11`, `extract-aslci
 parquet sets, per-clip comparison, scripts): `results/evaluation/tracker_reset/`. Rebuild from v2 notebooks
 only — the builders now exit if a clip path appears in more than one shard folder (d108184).
 Then: rebuild, re-score phrases05 / phrases07 on ASL Citizen v2 and retrain phrases07 on PopSign v2.
-WLASL (training + test half) would need its own re-extraction from the videos — not started.
+WLASL (training + test half): re-extraction started too — `scripts/extract_wlasl.py` (shared cell: fresh
+tracker, MediaPipe 0.10.14 pinned — the old notebook was unpinned; full-size frames; same file names, so
+LMDB keys are unchanged), 4 shards `extract-wlasl-v2-s0..3`, built with `build_wlasl_lmdb --input-root`
+(byte-identical to `--wlasl-dir` on the same parquets). Check after the build that the signer halves
+(`signer_split`) are unchanged.
