@@ -192,3 +192,19 @@ PopSign: same-recording test against all ASL Signs clips; inventories: coverage 
 Every release must therefore be validated with the current code after it is built; the audit
 notebooks report example signer ids per dataset before any build, so an unexpected id format shows
 up there first.
+
+### Order of work (agreed 2026-11-14)
+
+1. All four full-data audit reports reviewed, every finding resolved (CPU only; times provisional
+   until the jobs start).
+2. Aspect correction: a gap between the per-clip shoulder factor (builders) and the geometric
+   (W / H) / 0.75 (browser) is **not by itself a bug** — they normalise different things (body
+   proportion vs frame shape). Before any builder change: prepare the same WLASL / ASL Citizen clips
+   both ways and compare the resulting geometry (shoulder drop / width, hand size relative to the
+   shoulders, joint-angle features) and a frozen checkpoint's predictions on each; change the
+   builders only if the browser-style preparation lands outside what training covers.
+3. Build every release, validate under policy 2 (`--raw-root`).
+4. Freeze the code revision and the shared dependencies (init checkpoint, vocabulary, validation
+   phrases, releases) in the reference spec.
+5. Only then the GPU runs (re-score, then phrases05 / phrases07 under one `--frozen-spec`) — even
+   if that moves them past tomorrow morning.
