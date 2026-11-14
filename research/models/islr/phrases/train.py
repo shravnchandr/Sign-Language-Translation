@@ -200,6 +200,41 @@ def extra_source(args, is_train, sign2idx):
     return ConcatSource(*sources), weights
 
 
+def _sha(data: bytes) -> str:
+    import hashlib
+
+    return hashlib.sha256(data).hexdigest()[:16]
+
+
+def _dataset_fingerprint(data_dir: str) -> dict:
+    d = Path(data_dir)
+    man = d / "build_manifest.json"
+    m = json.loads(man.read_text()) if man.exists() else None
+    return {"train_csv": _sha((d / "train.csv").read_bytes()),
+            "manifest": {k: m.get(k) for k in ("version", "shards", "clips_written", "contract", "cache_version")}
+            if m else None}
+
+
+# Fields two runs must share to be compared (05 vs 07: only the extra training data may differ).
+SHARED_SPEC = ("contract", "cache_version", "data", "vocab", "init", "val_set", "val_fold", "seed")
+
+
+def experiment_spec(args, sign2idx: dict, val_ds) -> dict:
+    """Everything a run depends on besides its recipe: contract / cache version, dataset
+    fingerprints, vocabulary, initial checkpoint, the exact validation phrases."""
+    from ..core.data._cache_keys import CACHE_VERSION
+    from ..core.data.contract import CONTRACT_VERSION
+
+    paths = val_ds.source.df["path"].tolist()
+    val_set = [(s[0], s[1], [paths[c] for c in s[3]], s[4]) for s in val_ds.specs]
+    return {"contract": CONTRACT_VERSION, "cache_version": CACHE_VERSION,
+            "data": _dataset_fingerprint(args.data_dir),
+            "extra_data": [{"dir": d, **_dataset_fingerprint(d)} for d in args.extra_data_dir],
+            "vocab": _sha(json.dumps(sign2idx, sort_keys=True).encode()),
+            "init": _sha(Path(args.init).read_bytes()) if args.init else None,
+            "val_set": _sha(json.dumps(val_set).encode()), "val_fold": args.val_fold, "seed": args.seed}
+
+
 def train(args):
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -253,6 +288,16 @@ def train(args):
     print(f"Phrases: {len(train_ds):,}/epoch from {len(train_ds.signers)} training signers | "
           f"val {len(val_ds):,} fixed phrases from {sorted({s[0] for s in val_ds.specs})} "
           f"(kinds {kinds}; 1-sign phrases count as seen)")
+
+    spec = experiment_spec(args, sign2idx, val_ds)
+    (out_dir / "experiment_spec.json").write_text(json.dumps(spec, indent=1))
+    if args.frozen_spec:  # a comparison run must share every dependency but its training data
+        ref = json.loads(Path(args.frozen_spec).read_text())
+        diff = [k for k in SHARED_SPEC if ref.get(k) != spec.get(k)]
+        if diff:
+            raise SystemExit(f"--frozen-spec {args.frozen_spec}: {diff} differ "
+                             f"({ {k: (ref.get(k), spec.get(k)) for k in diff} })")
+        print(f"Spec matches {args.frozen_spec} on {', '.join(SHARED_SPEC)}")
 
     worker_kw = dict(num_workers=args.num_workers, collate_fn=collate_ctc,
                      multiprocessing_context=worker_context(args.num_workers),
@@ -350,7 +395,8 @@ def train(args):
                     "val_wer": r["wer"], "val_exact": r["exact"], "init": args.init,
                     "extra_data": [{"dir": d, "frac": f} for d, f in
                                    zip(args.extra_data_dir, args.extra_frac)],
-                    "extra_kinds": args.extra_kinds, "research_only": research_only}
+                    "extra_kinds": args.extra_kinds, "research_only": research_only,
+                    "contract": spec["contract"], "spec": spec}
             if args.arch == "graph":
                 meta.update(graph_hidden=args.graph_hidden, graph_layers=args.graph_layers)
             (out_dir / "phrases_meta.json").write_text(json.dumps(meta, indent=2))
@@ -421,6 +467,9 @@ def main():
                         "and/or ASL Citizen (official train split; research use only)")
     p.add_argument("--extra-lmdb-path", nargs="+", default=[],
                    help="one per --extra-data-dir (default <dir>/wlasl.lmdb.mdb or aslcitizen.lmdb.mdb)")
+    p.add_argument("--frozen-spec", type=Path,
+                   help="experiment_spec.json of the run to compare with: exit unless contract, data, "
+                        "vocab, init checkpoint, validation phrases, fold and seed are identical")
     p.add_argument("--vocab", default="",
                    help="wider label map (first 250 = ASL Signs map), e.g. the all-gloss WLASL map")
     p.add_argument("--extra-frac", type=float, nargs="+", default=[0.15],

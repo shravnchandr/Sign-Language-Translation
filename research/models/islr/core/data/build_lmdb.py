@@ -53,7 +53,7 @@ def _process_sample(args: tuple) -> tuple:
             raise ValueError(f"coords shape {c.shape}, expected (T > 0, {C.COORD_FEAT})")
         if not np.isfinite(c).all():
             raise ValueError("non-finite values")
-        return path, dump_clip(clip), len(c), None
+        return path, dump_clip(clip), {"n": len(c), **clip["stats"]}, None
     except Exception as e:  # noqa: BLE001 — reported per sample
         return path, None, None, str(e)
 
@@ -83,6 +83,7 @@ def build_lmdb(
     env = lmdb.open(str(lmdb_path), map_size=map_size)
 
     written = skipped = errors = 0
+    stats: dict = {}
 
     # Pre-scan: find which paths still need processing, and backfill any
     # missing length keys left by older builds (sequential, rare).
@@ -121,14 +122,15 @@ def build_lmdb(
         pbar.set_postfix(written=written, skipped=skipped, errors=errors)
 
         with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            for path, data, length, error in executor.map(
+            for path, data, info, error in executor.map(
                 _process_sample, pending_args, chunksize=8
             ):
                 if error:
                     errors += 1
                     tqdm.write(f"  ERROR: skipping {path}: {error}", file=sys.stderr)
                 else:
-                    write_buf.append((path, data, length))
+                    write_buf.append((path, data, info["n"]))
+                    stats[path] = info
                     written += 1
                     if len(write_buf) >= _WRITE_BATCH:
                         _flush(write_buf)
@@ -140,6 +142,16 @@ def build_lmdb(
             _flush(write_buf)
 
     env.close()
+    import json
+
+    from ._cache_keys import CACHE_VERSION
+    from .build_wlasl_lmdb import contract_summary
+    from .contract import CONTRACT_VERSION
+
+    manifest = {"version": "asl-signs-competition", "shards": None, "clips_listed": n, "clips_written": written + skipped,
+                "errors": errors, "lmdb": lmdb_path.name, "contract": CONTRACT_VERSION, "cache_version": CACHE_VERSION,
+                "contract_counts": contract_summary(stats) if stats else None, "resumed_clips": skipped}
+    (lmdb_path.parent / "build_manifest.json").write_text(json.dumps(manifest, indent=1))
     print(
         f"\nDone. LMDB at {lmdb_path}\n"
         f"  written={written}  skipped={skipped}  errors={errors}"
