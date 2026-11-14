@@ -240,6 +240,8 @@ def main() -> None:
                    help="frame evidence for every clip in the shards (ghost_review.csv), not only --ids")
     p.add_argument("--sample", type=int, default=0,
                    help="labelling set: this many frames per distance bin and per set (needs --evidence-all)")
+    p.add_argument("--frames", default="", help="label exactly these frames instead of a sample: video:frame,... "
+                   "(frame as in ghost_review.csv); pass their videos as --ids")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", required=True, type=Path)
     a = p.parse_args()
@@ -284,8 +286,9 @@ def main() -> None:
           f"within 0.3 shoulder widths of a hand in {int(both.sum())} of them "
           f"({out.loc[both, 'video'].nunique()} clips)")
     print(f"{len(list(a.out.glob('*.png')))} contact sheets → {a.out}")
-    if a.sample:
-        label_sheets(out, clips, videos_by_stem(a.video_root, None), a.sample, a.seed, a.out)
+    if a.sample or a.frames:
+        label_sheets(out, clips, videos_by_stem(a.video_root, None), a.sample, a.seed, a.out,
+                     chosen_frames(out, a.frames) if a.frames else None)
 
 
 def videos_by_stem(root: Path, ids) -> dict:
@@ -293,14 +296,30 @@ def videos_by_stem(root: Path, ids) -> dict:
             for v in glob.glob(f"{root}/**/*.{ext}", recursive=True) if ids is None or Path(v).stem in ids}
 
 
-def label_sheets(ev: pd.DataFrame, clips: pd.DataFrame, videos: dict, per_bin: int, seed: int, out: Path) -> None:
-    """sample_frames → per set, shuffled tiles numbered #n with nothing else shown,
+def chosen_frames(ev: pd.DataFrame, spec: str) -> pd.DataFrame:
+    """`video:frame,...` (frame = index after pose-less frames are dropped, as in ghost_review.csv) →
+    those evidence rows, band -2, sets by recording content as in sample_frames. Exits if one is absent."""
+    import zlib
+
+    want = [tuple(x.split(":")) for x in spec.split(",") if x.strip()]
+    key = ev.assign(_k=ev["video"].astype(str) + ":" + ev["frame"].astype(str))
+    pick = key[key["_k"].isin([f"{v}:{f}" for v, f in want])].drop(columns="_k")
+    if len(pick) != len(want):
+        raise SystemExit(f"{len(want) - len(pick)} of {len(want)} --frames not found among two-hand frames")
+    pick = pick.assign(bin=-2, set=["holdout" if zlib.crc32(str(v).encode()) % 2 else "calibration"
+                                    for v in pick["content"]])
+    return pick.reset_index(drop=True)
+
+
+def label_sheets(ev: pd.DataFrame, clips: pd.DataFrame, videos: dict, per_bin: int, seed: int, out: Path,
+                 pick: pd.DataFrame | None = None) -> None:
+    """sample_frames (or the given pick) → per set, shuffled tiles numbered #n with nothing else shown,
     6 per sheet (`label_<set>_<page>.png`) + `labels_<set>.csv` (n, empty label) to fill in, and `label_key.csv`
     (n → recording, frame, distance, bin, evidence) — kept apart so the score being calibrated is not
     seen while labelling. Exits unless every selected frame is rendered and every sheet written."""
     import cv2
 
-    pick = sample_frames(ev, per_bin, seed).sample(frac=1, random_state=seed + 1)  # shuffled
+    pick = (sample_frames(ev, per_bin, seed) if pick is None else pick).sample(frac=1, random_state=seed + 1)  # shuffled
     pick.insert(0, "n", range(1, len(pick) + 1))
     clip = clips.set_index("stem")
     tiles: dict = {}
