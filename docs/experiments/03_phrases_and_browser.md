@@ -379,3 +379,44 @@ Paired: ASL Citizen pooled +107 / −65 (p = 0.002), exact +118 / −97 (p = 0.1
 exact +1033 / −789 (p = 1e-8); WLASL +30 / −25 (p = 0.59). Reading: as for phrases05-long, the longer
 schedule helps on datasets the model trains on (here ASL Signs and ASL Citizen, both with unseen
 signers) and not on WLASL — it fits the training sources better rather than generalising further.
+
+### phrases07: + PopSign ASL (CC BY 4.0, shippable) (2026-11-13)
+
+The shippable counterpart of phrases06. PopSign ASL v1.0 game train videos (the same 250 signs, Deaf
+signers, portrait phone video like ASL Signs): 4 clips per signer × sign, evenly spaced over each
+pair's recordings → 26,278 clips from 31 signers, landmarks extracted on Kaggle CPU in 12 shards
+(`scripts/extract_popsign.py`, downscaled to 1280 px; 24,946 clips at 1944×2592, 1,332 at
+1080×1920; 1 clip mirrored), LMDB built in the training notebook without aspect correction (raw
+shoulder ratio 0.41 vs ASL Signs 0.40), 0 errors. Both hands in some frame in 14 % of clips (ASL
+Signs 2 %). Recipe = phrases05 (30 epochs) + `--extra-data-dir {WLASL_ALL_DIR} /tmp/popsign
+--extra-frac 0.3 0.2`. Kaggle `islr-phrases07-popsign` (commit 393a255), outputs
+`results/phrases/phrases07-popsign/`, Kaggle Models `schandranyc/islr/pyTorch/phrases07`. Val WER
+**0.234** (phrases05 0.285).
+
+| vs phrases05 | phrases05 | phrases07 | paired |
+|---|---|---|---|
+| ASL Citizen test (3,408 clips, 11 unseen signers) exact | 70.9 % | **73.4 %** | +227 / −144, p = 2e-5 |
+| ASL Citizen test pooled top-1 | 74.4 % | **75.8 %** | +180 / −131, p = 0.006 |
+| ASL Citizen identical / variant / synonym (exact) | 77.4 / 59.3 / 66.7 % | 80.7 / 60.6 / 67.1 % | identical p = 7e-6 |
+| WLASL test half exact | 83.7 % | 84.2 % | +33 / −29, p = 0.7 |
+| ASL Signs held-out exact (fold 0) | 61.9 % | 68.0 %* | +1409 / −552 |
+| Reliability: clips kept at 90 % precision | 49.7 % | 62.7 %* | |
+
+\* ASL Signs scores may be inflated by shared signers (below); all three val signers improve
+(34503 53 → 62 %, 49445 63 → 68 %, 62590 77 → 79 % pooled).
+
+**Signer overlap** (`islr.evaluation.signer_overlap`, in the same notebook): reliability-weighted
+face / body / hand-proportion fingerprints, 400 clips per signer. Calibration — ASL Signs split
+halves: same person ≤ 0.32, different people ≥ 0.46 (AUC 1.0); PopSign halves: same ≤ 0.35 (AUC
+1.0). No PopSign signer falls in the same-person range of an ASL Signs signer (0 of 31 flagged), but
+three are at 0.42–0.43 — closer than any two different ASL Signs signers — to ASL Signs 26734,
+28656 (both training signers) and 61333 (training). None of the fold-0 val signers is within 0.57.
+Reading: no evidence that the held-out val signers are in PopSign; a few training signers may be.
+Treat the ASL Signs gain with caution anyway — PopSign is the same game and phone set-up, i.e. the
+same recording conditions as the val signers.
+
+Reading: the first shippable gain on the independent ASL Citizen test since phrases05 (+2.5 exact,
+mostly on identical glosses; variant forms barely move — PopSign signs the ASL Signs forms). WLASL
+does not move. Exported to `exports/phrases07/` (ONNX verified, Δlogit 3e-4; `sign_reliability.json`;
+fixtures; `ATTRIBUTION.md` — **PopSign CC BY 4.0 must be credited in the app**). Candidate to replace
+phrases05 as the browser model.
