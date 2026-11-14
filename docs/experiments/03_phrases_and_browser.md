@@ -455,6 +455,8 @@ So the shared tracker did not lose detections but shifted landmarks through the 
 at the start), enough to change one prediction in seven for a model that had not seen the data, with
 no clear accuracy direction on 160 clips. The fresh tracker is the correct reference (each clip
 independent, as in the browser where tracking starts from the person's own frames). Re-extraction
-started (CPU only; v1 outputs kept): `extract-popsign-v2-s0..11`, `extract-aslcitizen-v2-s0..2`.
+started (CPU only; v1 outputs kept): `extract-popsign-v2-s0..11`, `extract-aslcitizen-v2-s0..2`. Raw outputs (both
+parquet sets, per-clip comparison, scripts): `results/evaluation/tracker_reset/`. Rebuild from v2 notebooks
+only — the builders now exit if a clip path appears in more than one shard folder (d108184).
 Then: rebuild, re-score phrases05 / phrases07 on ASL Citizen v2 and retrain phrases07 on PopSign v2.
 WLASL (training + test half) would need its own re-extraction from the videos — not started.
