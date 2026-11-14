@@ -115,7 +115,7 @@ def preprocess_spec(max_frames: int) -> dict:
                   "camera to 3:4, or scale x and z by (width / height) / 0.75; check: (shoulder drop below "
                   "the nose) / (shoulder width) ≈ 0.40",
         "frame_rate": "one feature frame per camera frame at the rate the training video was recorded "
-                      "(ASL Signs / PopSign phone video, ASL Citizen webcam ≈ 30 fps, WLASL 25 fps); a much "
+                      "(ASL Signs / PopSign phone video, ASL Citizen webcam ≈ 30 fps, WLASL mostly 29.97, 24–30); a much "
                       "lower processing rate shortens every sign in frames — resample to ≈ 30 fps",
         "hand_slots": "left_hand = the signer's own left hand (nearest pose 15), "
                       "right_hand = nearest pose 16 — not a handedness label",

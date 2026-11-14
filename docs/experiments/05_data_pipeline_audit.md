@@ -138,7 +138,7 @@ Kaggle CPU notebooks (`islr.core.data.audit_raw` per dataset, `scripts/extractio
 | Finding | Evidence | Fix |
 |---|---|---|
 | **Signer folds were recomputed, not frozen** — a rebuild that drops clips (exclusions, errors) or another sklearn version could move signers between ASL Signs folds, putting a signer the fold0_graph init trained on into the validation fold | Dropping 3,000 clips of 34503: `GroupKFold(7)` fold 0 becomes 27610 / 49445 / 62590 (27610 = a fold0_graph training signer) | `asl_signs_folds.json` (= GroupKFold(7) on the full 94,477-clip csv; fold 0 = 34503 / 49445 / 62590, as fold0_graph's log); `dataset.signer_fold_split` used by every loader and `sign_reliability`; unknown signers exit |
-| Browser contract silent on frame shape and frame rate | `preprocess.json` had no aspect or fps field (only CLAUDE.md did); WLASL 25 fps, PopSign 30 fps (paper), browser processing often slower | `aspect` and `frame_rate` fields in the preprocess spec; fps of every dataset measured by the inventory notebooks (300 videos each). This documents the requirement — the app's compliance (crop / rescale, processing rate) still has to be verified in the ASL-App repo |
+| Browser contract silent on frame shape and frame rate | `preprocess.json` had no aspect or fps field (only CLAUDE.md did); WLASL 25 fps per its JSON (measured: mostly 29.97, see the WLASL audit), PopSign 30 fps (paper), browser processing often slower | `aspect` and `frame_rate` fields in the preprocess spec; fps of every dataset measured by the inventory notebooks (300 videos each). This documents the requirement — the app's compliance (crop / rescale, processing rate) still has to be verified in the ASL-App repo |
 
 ### Checked and sound (no change needed)
 
@@ -180,6 +180,23 @@ wrong-slot single hands, ghosts, mirroring, extraction version, exact and near-d
 (different signer ids / across splits), labels and signers, split disjointness, aspect correction
 (per-clip ratio k vs the geometric (W/H)/0.75 the app applies), WLASL instance frame ranges;
 PopSign: same-recording test against all ASL Signs clips; inventories: coverage + fps probe.
+
+**WLASL (`islr-audit-wlasl` + `inventory-wlasl`, extraction eb9fea3, 4 shards) — no blocking finding.**
+
+| Check | Result | Action |
+|---|---|---|
+| Coverage | inventory 11,980 selected = 11,980 extracted, none missing or extra | — |
+| Raw structure | 0 read / structure errors, no frame gaps, every frame complete, T = shard n_frames, nothing mirrored | — |
+| Pose-less frames | 3,672 clips with 1, 17 with 2–3 (≤ 6 % of a clip) — the known first frame | dropped by the contract |
+| Hands | left 44 % / right 63 % of frames; ghosts 23,005 frames (2,242 clips), ambiguous 27,204; single hand in the farther slot 637 of 208,675 frames (348 clips, median 1 frame) | contract unchanged (single hands are never moved) |
+| No-hand clips | 9, all signer 11 at 288×192 | reported by validate |
+| Exact raw duplicates | 1,883 clips in 849 groups; 823 groups carry different glosses — WLASL files one video under synonyms (gay / lesbian, attention / pay attention / concentrate, ill / sick); 4 groups under two signer ids (15 and 59, both in the test half) | builders already drop conflicting groups and keep one copy of a repeat (`excluded_clips.csv`) |
+| Near-duplicate recordings | 68 same-signer pairs, 1 pair under different ids (10 / 11, distance 0.084); **0 pairs across the frozen signer halves** | no leak |
+| Signers | 78 ids; 11 (72 clips) not in `wlasl_signer_split.json` → train; none has a shared-sign gloss, so the 206-sign test half is unchanged | — |
+| Official splits | 75 signers in two splits (WLASL's splits are not signer-disjoint) | we use the frozen signer halves only |
+| Frame ranges | 2 instances carry a range, none longer than it | — |
+| Frame rate | JSON says 25 for every clip; files: 29.97 (45 %), 23.98 (16 %), 30 (13 %), 25 (7 %) | spec text and builder docstring corrected; the column is metadata only (nothing trains on it) |
+| Aspect | 8 frame sizes (288×192 … 1920×1080); per-clip k / geometric k median 1.05 (p10–p90 0.94–1.20) | input to the aspect comparison (step 2) |
 
 ### Review of ce3c929 (three more, fixed)
 

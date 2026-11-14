@@ -23,7 +23,8 @@ entries are unchanged), and `wlasl_half` records each signer's half of `signer_s
 Writes to --out-dir: `wlasl.lmdb.mdb` (or --lmdb-name; same key scheme as `is.lmdb.mdb`, so
 `ASLDataset` reads it), `train.csv` (path, participant_id = 900000 + WLASL signer,
 sequence_id, sign, wlasl_gloss, synonym, fps, source, split, aspect_k, ratio_raw,
-both_hands, n_frames) and a copy of the ASL Signs sign map.
+both_hands, n_frames) and a copy of the ASL Signs sign map. `fps` is the JSON's nominal value (25
+for every clip); the video files are mostly 29.97 fps, 24–30 (inventory probe, 300 videos).
 
 Usage:
   PYTHONPATH=research/models python -m islr.core.data.build_wlasl_lmdb \
