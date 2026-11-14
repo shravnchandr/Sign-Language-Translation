@@ -26,6 +26,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from ..core.data.contract import model_input, subsample_index
 from ..core.data.dataset import get_data_loaders
 from .dataset import phrase_datasets
 from ..isolated.error_review import load_model
@@ -133,8 +134,7 @@ def main() -> None:
             spans.append((t, t + L))
             t += L + (trans[k] if k < len(trans) else 0)
         downsampled = t > args.max_frames
-        keep = (torch.linspace(0, t - 1, args.max_frames).long() if downsampled
-                else torch.arange(t))
+        keep = subsample_index(t, args.max_frames)  # the dataset's own subsample (data contract)
 
         with torch.no_grad():
             best = ctc(x[None], torch.ones(1, x.shape[0], dtype=torch.bool))[0].argmax(-1)
@@ -157,10 +157,9 @@ def main() -> None:
         if iso is not None and len(ids) == 1:
             xi = x
             if x.shape[0] > args.iso_max_frames:  # the classifier's own cap; Δ1 follows it
-                xi = x[torch.linspace(0, x.shape[0] - 1, args.iso_max_frames).long()].clone()
-                n = (xi.shape[-1] - 2) // 2
-                xi[0, n : 2 * n] = 0
-                xi[1:, n : 2 * n] = xi[1:, :n] - xi[:-1, :n]
+                k = subsample_index(x.shape[0], args.iso_max_frames)
+                n = (x.shape[-1] - 2) // 2
+                xi = model_input(x[k, :n], x[k, -2:])
             with torch.no_grad():
                 pred = iso(xi[None], torch.ones(1, xi.shape[0], dtype=torch.bool)).argmax(-1).item()
             iso_ok, ctc_ok = pred == ids[0], hyp == list(ids)

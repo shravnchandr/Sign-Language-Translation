@@ -21,7 +21,6 @@ Usage:
 """
 
 import argparse
-import io
 import json
 import os
 from pathlib import Path
@@ -32,10 +31,10 @@ import pandas as pd
 import torch
 from sklearn.model_selection import GroupKFold
 
-from .cross_dataset import _subsample, _trim
 from ..core.data._cache_keys import lmdb_key
 from ..core.data.build_wlasl_lmdb import signer_split
-from ..export.export_onnx import clip_features, load_ctc_model
+from ..core.data.contract import clip_input, load_clip
+from ..export.export_onnx import load_ctc_model
 
 
 def _env(path: Path):
@@ -49,9 +48,8 @@ def score_clips(model, df: pd.DataFrame, lmdb_path: Path, sign2idx: dict, max_fr
     rows = []
     with _env(lmdb_path).begin() as txn, torch.no_grad():
         for r in df.itertuples():
-            coords = torch.load(io.BytesIO(txn.get(lmdb_key(r.path))), weights_only=True)
-            x = _subsample(_trim(clip_features(coords).numpy()), max_frames)
-            out = model(torch.from_numpy(x[None]).float(), torch.ones(1, len(x), dtype=torch.bool))[0]
+            x = clip_input(*load_clip(txn.get(lmdb_key(r.path))), max_frames, trim=True)
+            out = model(x[None].float(), torch.ones(1, len(x), dtype=torch.bool))[0]
             hyp, prev = [], None
             for c in out.argmax(-1).tolist():
                 if c != prev and c != blank:

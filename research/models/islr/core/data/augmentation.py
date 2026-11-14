@@ -49,7 +49,7 @@ def hand_dropout(
     encodes a real gap: positions frozen at the last detection before the span
     (the first one after it, for a span at the start) and presence set to 0.
 
-    Must run on hand_presence() output, before noise / velocity, so a dropped
+    Must run on the stored clip (coords + presence), before noise / velocity, so a dropped
     span is indistinguishable from a real one. Uses torch's RNG (seeded per
     DataLoader worker).
 
@@ -92,7 +92,7 @@ def bone_scale(
     Bone directions are kept, so joint angles (and the geometry stream's
     joint-angle cosines) are unchanged; the wrist location is untouched.
 
-    Run on hand_presence() output, before noise / velocity, so Δ1 matches.
+    Run on the stored clip (coords + presence), before noise / velocity, so Δ1 matches.
     Held (gap-filled) frames stay exact copies of their neighbours and a
     never-detected (all-zero) hand stays zero. Uses torch's RNG.
 

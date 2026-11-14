@@ -6,18 +6,19 @@ them: the segment, the (T, IN_FEAT) model input and the ONNX logits / greedy
 decode. A browser implementation passes when, fed `frames`, it reproduces
 `segment`, `subsample`, `features` and `decoded`.
 
-Contract (built from the raw frames by these rules, so a fixture can never
-contradict its own `frames`):
-  1. drop frames without a pose; segment = first..last remaining frame with a hand
-  2. per frame, subtract pose landmark 0 (nose) from x, y, z of every landmark
-  3. presence = the hand was detected in that frame (never re-inferred)
-  4. a missing landmark holds its nose-relative value from the previous frame where
-     it was detected (the next one before the first detection); never detected → 0
-  5. more than --max-frames frames → keep positions (i * (T - 1)) // (M - 1), i < M
-  6. Δ1 = frame difference of the positions after 5; 0 for the first frame
-This equals the training pipeline (frame_stacked_data + hand_presence) except
-where hand_presence cannot tell which frame a lone detection came from; the
-script reports such presence differences as a cross-check, not an error.
+Contract: `islr/core/data/contract.py` (also written to preprocess.json) — the same functions
+the LMDB builders, the training datasets and the evaluators use, so a fixture is exactly what
+training and evaluation see:
+  1. drop frames without a pose (`kept_frames` = indices into `frames` that remain)
+  2. ghost hands: one physical hand fitted into both slots is resolved (`hand_status` per kept
+     frame and slot: 0 not detected, 1 kept, 2 ghost — rejected, 3 ambiguous — kept)
+  3. per frame, subtract pose landmark 0 (nose) from x, y, z of every landmark
+  4. presence = hand_status 1 or 3 (never re-inferred)
+  5. a missing landmark holds its nose-relative value from the previous frame where it was
+     present (the next one before the first); never present → 0
+  6. segment = first..last kept frame with a hand present (`segment`, indices into kept frames)
+  7. more than --max-frames frames → keep positions (i * (T - 1)) // (M - 1), i < M (`subsample`)
+  8. Δ1 = frame difference of the positions after 7; 0 for the first frame
 
 Input: competition-format parquets (frame, type, landmark_index, x, y, z; NaN when
 a part is not detected). --concat also writes all inputs back to back as one
@@ -32,7 +33,6 @@ Usage:
 
 import argparse
 import json
-import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -40,17 +40,10 @@ import pandas as pd
 import torch
 
 from ..core import config as C
-from ..core.data.preprocessing import frame_stacked_data
-from .export_onnx import clip_features
+from ..core.data import contract
 
 _PARTS = {"pose": 33, "left_hand": 21, "right_hand": 21, "face": 468}
 _MIN_FRAMES = 8
-_LANDMARKS = (
-    [("left_hand", i) for i in range(C.N_LH)]
-    + [("pose", i) for i in range(C.N_POSE)]
-    + [("right_hand", i) for i in range(C.N_RH)]
-    + [("face", i) for i in C.SELECTED_FACE_INDICES]
-)
 
 
 def raw_frames(df: pd.DataFrame) -> list:
@@ -66,76 +59,35 @@ def raw_frames(df: pd.DataFrame) -> list:
     return out
 
 
-def segment(frames: list) -> list:
-    """Rule 1: indices of frames with a pose, first..last such frame with a hand."""
-    posed = [i for i, f in enumerate(frames) if f["pose"] is not None]
-    hands = [i for i in posed if frames[i]["left_hand"] or frames[i]["right_hand"]]
-    return [i for i in posed if hands and hands[0] <= i <= hands[-1]]
-
-
-def contract_features(frames: list, max_frames: int) -> tuple[np.ndarray, list | None]:
-    """Rules 2–6 on the segment's frames → ((T, IN_FEAT) float32, subsample positions)."""
-    T, n = len(frames), len(_LANDMARKS)
-    pos = np.full((T, n, 3), np.nan)
-    pres = np.zeros((T, 2), dtype=np.float32)
-    for t, f in enumerate(frames):
-        origin = np.asarray(f["pose"][0])
-        for k, (part, i) in enumerate(_LANDMARKS):
-            if f[part] is not None:
-                pos[t, k] = np.asarray(f[part][i]) - origin
-        pres[t] = [f["left_hand"] is not None, f["right_hand"] is not None]
-    for k in range(n):
-        seen = ~np.isnan(pos[:, k, 0])
-        if not seen.any():
-            pos[:, k] = 0.0
-            continue
-        src = np.maximum.accumulate(np.where(seen, np.arange(T), -1))
-        src[src < 0] = int(np.argmax(seen))
-        pos[:, k] = pos[src, k]
-    pos = pos.reshape(T, -1).astype(np.float32)
-    keep = None
-    if T > max_frames:
-        keep = [(i * (T - 1)) // (max_frames - 1) for i in range(max_frames)]
-        pos, pres = pos[keep], pres[keep]
-    vel = np.zeros_like(pos)
-    vel[1:] = pos[1:] - pos[:-1]
-    return np.concatenate([pos, vel, pres], axis=1), keep
-
-
-def pipeline_check(df: pd.DataFrame, seg_frames: list, feats: np.ndarray) -> str:
-    """Training pipeline on the same frames (only when no frame was dropped or subsampled)."""
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "seg.parquet"
-        df[df["frame"].isin(seg_frames)].to_parquet(path)
-        ref = clip_features(torch.tensor(frame_stacked_data(str(path)), dtype=torch.float32)).numpy()
-    coord = float(np.abs(ref[:, : C.PRESENCE_START] - feats[:, : C.PRESENCE_START]).max())
-    flags = int((ref[:, C.PRESENCE_START :] != feats[:, C.PRESENCE_START :]).sum())
-    return f"training pipeline: max |Δcoord| {coord:.1e}, presence differences {flags}"
-
-
 def fixture(name: str, df: pd.DataFrame, label: str, sess, labels: list,
             max_frames: int) -> dict | None:
     frames = raw_frames(df)
-    seg = segment(frames)
-    if not seg:
+    clip = contract.prepare(df)
+    all_frames = list(np.sort(df["frame"].unique()))
+    kept = [all_frames.index(f) for f in clip["frames"]]
+    coords, presence = torch.from_numpy(clip["coords"]), torch.from_numpy(clip["presence"]).float()
+    seg = contract.segment(presence)
+    if not len(kept) or not bool(presence.any()):
         print(f"skip {name}: no frame with both a pose and a hand")
         return None
-    feats, keep = contract_features([frames[i] for i in seg], max_frames)
-    all_frames = sorted(df["frame"].unique())
-    check = (pipeline_check(df, [all_frames[i] for i in seg], feats)
-             if keep is None and seg == list(range(seg[0], seg[-1] + 1)) else "training pipeline: n/a")
+    T = seg.stop - seg.start
+    keep = contract.subsample_index(T, max_frames)
+    feats = contract.clip_input(coords, presence, max_frames, trim=True).numpy()
     fx = {
         "name": name,
         "label": label,
+        "contract_version": contract.CONTRACT_VERSION,
         "frames": frames,
-        "segment": seg,  # indices into `frames` (rule 1)
-        "subsample": keep,  # positions into `segment` (rule 5), null if not subsampled
+        "kept_frames": kept,  # indices into `frames` (rule 1)
+        "hand_status": clip["status"].tolist(),  # per kept frame: [left_hand, right_hand] (rule 2)
+        "segment": list(range(seg.start, seg.stop)),  # indices into kept frames (rule 6)
+        "subsample": keep.tolist() if T > max_frames else None,  # positions into `segment` (rule 7)
         "features": np.round(feats.astype(np.float64), 7).tolist(),
         "logits": None,
         "decoded": None,
     }
     if feats.shape[0] >= _MIN_FRAMES:
-        logits = sess.run(None, {"features": feats[None]})[0][0]
+        logits = sess.run(None, {"features": feats[None].astype(np.float32)})[0][0]
         best, prev, decoded = logits.argmax(-1).tolist(), None, []
         for c in best:
             if c != prev and c != len(labels):
@@ -143,8 +95,8 @@ def fixture(name: str, df: pd.DataFrame, label: str, sess, labels: list,
             prev = c
         fx["logits"] = np.round(logits.astype(np.float64), 5).tolist()
         fx["decoded"] = decoded
-    print(f"{name}: {len(frames)} frames, segment {seg[0]}..{seg[-1]} ({len(seg)}), "
-          f"T {feats.shape[0]}, label {label!r}, decoded {fx['decoded']} | {check}")
+    print(f"{name}: {len(frames)} frames, {len(kept)} kept, segment {seg.start}..{seg.stop - 1}, T {feats.shape[0]}, "
+          f"ghost frames {clip['stats']['ghost_frames']}, label {label!r}, decoded {fx['decoded']}")
     return fx
 
 

@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader, Dataset, Sampler
 from typing import Dict, List, Optional, Tuple
 from sklearn.model_selection import GroupKFold, GroupShuffleSplit, train_test_split
 from .augmentation import augment_sample, bone_scale, hand_dropout
-from .preprocessing import frame_stacked_data, hand_presence
+from .contract import dump_clip, load_clip, model_input, prepare, subsample_index
 from ..config import COORDS_PER_LM, LH_START, N_LH, RH_START
 from ._cache_keys import (
     CACHE_VERSION,
@@ -187,8 +187,8 @@ class ASLDataset(Dataset):
         except Exception:
             return self.max_frames
 
-    def _load_coords(self, idx: int) -> torch.Tensor:
-        """Return raw position coordinates (T, D_pos) as a float32 tensor."""
+    def _load_clip(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Stored clip (data contract): coords (T, D_pos) float32, presence (T, 2) float32."""
         # Tier 1: LMDB — single file, one open() per training run on network storage
         env = self._get_lmdb_env()
         if env is not None:
@@ -196,20 +196,20 @@ class ASLDataset(Dataset):
             with env.begin(buffers=True) as txn:
                 val = txn.get(key)
                 if val is not None:
-                    return torch.load(io.BytesIO(bytes(val)), weights_only=True)
+                    return load_clip(val)
 
-        # Tier 2: per-sample .pt cache
+        # Tier 2: per-sample cache (same bytes as an LMDB value)
         cp = self._cache_path(idx)
         if cp is not None and cp.exists():
-            return torch.load(cp, weights_only=True)
+            return load_clip(cp.read_bytes())
 
-        # Tier 3: parse parquet and populate .pt cache for future runs
+        # Tier 3: parse the parquet through the contract and populate the cache
         full_path = str(self.base_path / self.df.iloc[idx]["path"])
-        coords = torch.tensor(frame_stacked_data(full_path), dtype=torch.float32)
+        value = dump_clip(prepare(pd.read_parquet(full_path)))
         if cp is not None:
             cp.parent.mkdir(parents=True, exist_ok=True)
-            torch.save(coords, cp)
-        return coords
+            cp.write_bytes(value)
+        return load_clip(value)
 
     def _length_from_lmdb(self, idx: int) -> Optional[int]:
         env = self._get_lmdb_env()
@@ -221,11 +221,10 @@ class ASLDataset(Dataset):
             if length_val is not None:
                 return min(int(bytes(length_val).decode()), self.max_frames)
 
-            # Backward-compatible fallback for LMDBs built before length metadata.
+            # Fallback for LMDBs built without length metadata.
             tensor_val = txn.get(_lmdb_key(path))
             if tensor_val is not None:
-                coords = torch.load(io.BytesIO(bytes(tensor_val)), weights_only=True)
-                return min(len(coords), self.max_frames)
+                return min(len(load_clip(tensor_val)[0]), self.max_frames)
         return None
 
     def _load_or_compute_lengths(self) -> List[int]:
@@ -262,8 +261,7 @@ class ASLDataset(Dataset):
 
             cp = self._cache_path(i)
             if cp is not None and cp.exists():
-                t = torch.load(cp, weights_only=True)
-                lengths.append(min(len(t), self.max_frames))
+                lengths.append(min(len(load_clip(cp.read_bytes())[0]), self.max_frames))
             else:
                 lengths.append(self._fast_length_from_parquet(i))
 
@@ -274,12 +272,8 @@ class ASLDataset(Dataset):
         return lengths
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int, int]:
-        coords = self._load_coords(idx)  # (T, D_pos)
+        coords, presence = self._load_clip(idx)  # (T, D_pos), stored detection flags (T, 2)
         label = int(self.df.iloc[idx]["sign"])
-
-        # Presence must be read before augmentation noise breaks the exact
-        # repeats that mark filled frames.
-        coords, presence = hand_presence(coords)  # presence: (T, 2)
 
         if self.augment:
             if self.hand_drop and self.hand_drop[0] > 0:
@@ -294,20 +288,15 @@ class ASLDataset(Dataset):
                 if not presence[:, h].any():
                     coords[:, hs : hs + N_LH * COORDS_PER_LM] = 0.0
 
-        if coords.shape[0] > self.max_frames:
-            idxs = torch.linspace(0, coords.shape[0] - 1, self.max_frames).long()
-            coords = coords[idxs]
-            presence = presence[idxs]
-
-        vel = torch.zeros_like(coords)
-        vel[1:] = coords[1:] - coords[:-1]
+        keep = subsample_index(coords.shape[0], self.max_frames)
+        coords, presence = coords[keep], presence[keep]
 
         signer_id = -1
         if self.signer_to_id and "participant_id" in self.df.columns:
             pid = str(self.df.iloc[idx]["participant_id"])
             signer_id = self.signer_to_id.get(pid, -1)
 
-        return torch.cat([coords, vel, presence], dim=-1), label, signer_id  # (T, IN_FEAT)
+        return model_input(coords, presence), label, signer_id  # (T, IN_FEAT)
 
 
 def collate_batch(batch):

@@ -118,7 +118,7 @@ N_FACE = len(SELECTED_FACE_INDICES)
 
 # Model input layout: [pos (COORD_FEAT) | Δ1 vel (COORD_FEAT) | presence (2)].
 # Presence = per-frame (lh, rh) detection flags derived in the datasets by
-# hand_presence(); they let the model tell a missing hand from one at the nose.
+# stored detection flags (data/contract.py); they let the model tell a missing hand from one at the nose.
 N_PRESENCE = 2
 PRESENCE_START = 2 * COORD_FEAT
 IN_FEAT = PRESENCE_START + N_PRESENCE

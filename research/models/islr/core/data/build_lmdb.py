@@ -20,7 +20,6 @@ reuses stale tensors.
 """
 
 import argparse
-import io
 import os
 import sys
 from concurrent.futures import ProcessPoolExecutor
@@ -28,32 +27,34 @@ from pathlib import Path
 
 import lmdb
 import pandas as pd
-import torch
 from tqdm import tqdm
 
 from ._cache_keys import lmdb_key as _lmdb_key, lmdb_length_key as _lmdb_length_key
+from .contract import load_clip
 
 # Commit to LMDB every this many successful writes to cap dirty-page memory.
 _WRITE_BATCH = 2_000
 
 
 def _process_sample(args: tuple) -> tuple:
-    """Worker: parse one parquet file and return serialised tensor bytes.
+    """Worker: one competition parquet → stored clip bytes (data contract: pose-less frames dropped,
+    ghost hands resolved, explicit presence). Self-contained imports (spawn / forkserver safe)."""
+    import numpy as np
+    import pandas as pd
 
-    Self-contained imports make this safe under spawn/forkserver (Python 3.14
-    default on macOS/Linux). PYTHONPATH is inherited from the parent process.
-    """
-    import io
-    import torch
-    from islr.core.data.preprocessing import frame_stacked_data
+    from islr.core import config as C
+    from islr.core.data.contract import dump_clip, prepare
 
     path, full_path = args
     try:
-        coords = torch.tensor(frame_stacked_data(full_path), dtype=torch.float32)
-        buf = io.BytesIO()
-        torch.save(coords, buf)
-        return path, buf.getvalue(), len(coords), None
-    except Exception as e:
+        clip = prepare(pd.read_parquet(full_path))  # ASL Signs: portrait phone video (aspect 3:4)
+        c = clip["coords"]
+        if c.ndim != 2 or c.shape[1] != C.COORD_FEAT or len(c) == 0:
+            raise ValueError(f"coords shape {c.shape}, expected (T > 0, {C.COORD_FEAT})")
+        if not np.isfinite(c).all():
+            raise ValueError("non-finite values")
+        return path, dump_clip(clip), len(c), None
+    except Exception as e:  # noqa: BLE001 — reported per sample
         return path, None, None, str(e)
 
 
@@ -101,8 +102,7 @@ def build_lmdb(
         with env.begin(write=True) as txn:
             for path in backfill:
                 raw = txn.get(_lmdb_key(path))
-                coords = torch.load(io.BytesIO(bytes(raw)), weights_only=True)
-                txn.put(_lmdb_length_key(path), str(len(coords)).encode())
+                txn.put(_lmdb_length_key(path), str(len(load_clip(raw)[0])).encode())
 
     # Parallel parse → single-threaded write.
     # Workers parse parquets concurrently; the main thread collects results and

@@ -19,7 +19,6 @@ Usage:
 """
 
 import argparse
-import io
 import json
 import os
 from pathlib import Path
@@ -30,7 +29,7 @@ import torch.nn as nn
 
 from ..core import config as C
 from ..core.data._cache_keys import lmdb_key
-from ..core.data.preprocessing import hand_presence
+from ..core.data import contract
 from ..core.model import GraphConformer, LandmarkConformer
 
 
@@ -72,14 +71,6 @@ def load_ctc_model(checkpoint: Path, meta: dict, n_classes: int) -> nn.Module:
     return model.eval()
 
 
-def clip_features(coords: torch.Tensor) -> torch.Tensor:
-    """Stored LMDB coords (T, COORD_FEAT) → model input (T, IN_FEAT), as at eval."""
-    coords, presence = hand_presence(coords)
-    vel = torch.zeros_like(coords)
-    vel[1:] = coords[1:] - coords[:-1]
-    return torch.cat([coords, vel, presence], dim=-1)
-
-
 def verification_inputs(lmdb_path: str, csv_path: str, n: int, seed: int, max_frames: int) -> list:
     """n single clips + n stitched 2–5-clip inputs from the IS LMDB."""
     import lmdb
@@ -93,13 +84,14 @@ def verification_inputs(lmdb_path: str, csv_path: str, n: int, seed: int, max_fr
         for p in paths:
             v = txn.get(lmdb_key(p))
             if v is not None:
-                clips.append(torch.load(io.BytesIO(v), weights_only=True))
+                clips.append(contract.load_clip(v))
     rng = np.random.default_rng(seed)
-    inputs = [clip_features(c) for c in clips[:n]]
+    inputs = [contract.clip_input(c, p_, max_frames, trim=True) for c, p_ in clips[:n]]
     for _ in range(n):
         k = int(rng.integers(2, 6))
         picks = [clips[int(i)] for i in rng.choice(len(clips), k, replace=False)]
-        inputs.append(clip_features(torch.cat(picks))[:max_frames])
+        inputs.append(contract.clip_input(torch.cat([c for c, _ in picks]), torch.cat([p_ for _, p_ in picks]),
+                                          max_frames, trim=True))
     return inputs
 
 
@@ -115,15 +107,26 @@ def preprocess_spec(max_frames: int) -> dict:
         "coords_per_landmark": C.COORDS_PER_LM,
         "landmarks": landmarks,  # order of the position block; x, y, z each
         "layout": "[positions (n_landmarks*3) | delta1 (n_landmarks*3) | presence (left_hand, right_hand)]",
-        "origin": "per frame: pose 0 (nose) → mean(pose 11, 12) → mean(pose 23, 24) → 0; "
-                  "subtracted from x, y and z of every landmark",
+        "contract_version": contract.CONTRACT_VERSION,  # islr/core/data/contract.py is the reference
+        "frames_without_pose": "dropped before anything else",
+        "origin": "per frame: pose 0 (nose), subtracted from x, y and z of every landmark",
         "image": "unmirrored camera frames; x, y normalised to [0, 1] (MediaPipe)",
         "hand_slots": "left_hand = the signer's own left hand (nearest pose 15), "
                       "right_hand = nearest pose 16 — not a handedness label",
+        "ghost_hands": {"rule": "both hands detected and their 2D boxes overlap by IoU >= ghost_iou: "
+                                "one physical hand in both slots; keep the slot that holds this hand alone "
+                                "more often in the segment (tie: wrist nearer its own-side pose wrist), the "
+                                "other slot is not detected. IoU in [ambiguous_iou, ghost_iou) counts as a "
+                                "ghost only within window frames of a ghost frame, else both are kept",
+                        "ghost_iou": contract.GHOST_IOU, "ambiguous_iou": contract.AMBIGUOUS_IOU,
+                        "window": contract.GHOST_WINDOW},
+        "presence": "1 where the hand was detected and kept (after the ghost rule) — never re-inferred",
         "missing_hand": "presence 0; coordinates hold the nearest detection "
                         "(previous one, or the next for leading frames); 0 if never detected",
-        "missing_pose_or_face": "hold the previous frame (next for leading frames); 0 if never seen",
-        "delta1": "frame t minus frame t-1 of the position block (after origin and hold-fill); 0 at t = 0",
+        "missing_face": "hold the previous frame (next for leading frames); 0 if never seen",
+        "segment": "first..last frame with a hand present",
+        "subsample": "more than max_frames frames: keep positions (i * (T - 1)) // (max_frames - 1), i < max_frames",
+        "delta1": "frame t minus frame t-1 of the position block, after the subsample; 0 at t = 0",
         "max_frames": max_frames,
         "max_positional_frames": 512,
     }

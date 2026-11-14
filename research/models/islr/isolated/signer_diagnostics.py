@@ -4,7 +4,7 @@ Per-signer data diagnostics: what distinguishes signers the model gets wrong?
 Signer-fold validation showed accuracy spreads of ~25 pts between signers in the
 same fold (e.g. 0.49 vs 0.74). This script measures, per signer, properties of
 the stored landmark data that could explain it — computed with the training
-code's own LMDB keys and hand_presence(), on the raw stored coordinates (before
+code's own LMDB keys and the stored hand presence (data contract), on the stored coordinates (before
 any augmentation), i.e. what the model actually sees:
 
   frames          clip length (frames)
@@ -33,7 +33,6 @@ Run from the repo root (CPU only; ~1–3 min at the default sample size):
 
 import argparse
 import glob
-import io
 import json
 import re
 from pathlib import Path
@@ -45,23 +44,23 @@ from tqdm import tqdm
 from ..core.config import COORDS_PER_LM, FACE_START, LH_START, POSE_START, RH_START
 from ..core.data._cache_keys import lmdb_key
 from ..core.data.dataset import _open_lmdb_env
-from ..core.data.preprocessing import hand_presence
+from ..core.data.contract import load_clip
 
 _C = COORDS_PER_LM
 
 
 def _block_detected(block: torch.Tensor) -> torch.Tensor:
-    """Per-frame detection for a landmark block, using the same rule as
-    hand_presence(): stored data is ffill'd/zero-filled, so a missing frame is
-    all-zero or a bit-exact repeat of the previous frame."""
+    """Per-frame detection for a non-hand landmark block (face / pose): stored data hold-fills
+    gaps, so a missing frame is all-zero or a bit-exact repeat of the previous frame. Hands use
+    the stored presence instead."""
     det = block.abs().sum(-1) > 0
     det[1:] &= ~(block[1:] == block[:-1]).all(-1)
     return det
 
 
-def clip_stats(coords: torch.Tensor) -> dict:
-    """Statistics for one stored clip (T, COORD_FEAT)."""
-    filled, presence = hand_presence(coords)
+def clip_stats(coords: torch.Tensor, presence: torch.Tensor) -> dict:
+    """Statistics for one stored clip: coords (T, COORD_FEAT), stored hand presence (T, 2)."""
+    filled = coords
     T = coords.shape[0]
     any_hand = (presence.sum(1) > 0).nonzero().flatten()
     if len(any_hand):
@@ -153,8 +152,7 @@ def main():
             if val is None:
                 missing += 1
                 continue
-            coords = torch.load(io.BytesIO(bytes(val)), weights_only=True)
-            rows.append({"participant_id": pid, **clip_stats(coords)})
+            rows.append({"participant_id": pid, **clip_stats(*load_clip(val))})
     if missing:
         print(f"WARNING: {missing} clips not found in the LMDB (key/version mismatch?)")
     if not rows:

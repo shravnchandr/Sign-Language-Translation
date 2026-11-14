@@ -26,7 +26,6 @@ Usage:
 """
 
 import argparse
-import io
 import json
 import os
 from math import comb
@@ -41,39 +40,23 @@ from ..core import config as C
 from ..core.data._cache_keys import lmdb_key
 from ..core.data.build_wlasl_lmdb import signer_split
 from ..isolated.error_review import load_model
-from ..export.export_onnx import clip_features, load_ctc_model
+from ..core.data.contract import clip_input, load_clip
+from ..export.export_onnx import load_ctc_model
 
 F = C.COORD_FEAT
 
 
-def _with_velocity(pos: np.ndarray, pres: np.ndarray) -> np.ndarray:
-    vel = np.zeros_like(pos)
-    vel[1:] = pos[1:] - pos[:-1]
-    return np.concatenate([pos, vel, pres], axis=1)
-
-
-def _subsample(x: np.ndarray, max_frames: int) -> np.ndarray:
-    if len(x) <= max_frames:
-        return x
-    keep = torch.linspace(0, len(x) - 1, max_frames).long().numpy()
-    return _with_velocity(x[keep, :F], x[keep, -2:])
-
-
-def _trim(x: np.ndarray) -> np.ndarray:
-    nz = np.nonzero(x[:, -2:].sum(1) > 0)[0]
-    return x[nz[0] : nz[-1] + 1] if len(nz) else x
-
-
-def one_hand(x: np.ndarray) -> np.ndarray:
+def one_hand(coords: torch.Tensor, presence: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Drop the hand with less wrist motion (xy, frames where detected): never detected."""
-    x = x.copy()
-    energy = [(((x[1:, F + hs : F + hs + 2] ** 2).sum(1)) * (x[1:, -2 + h] > 0)).sum()
+    coords, presence = coords.clone(), presence.clone()
+    vel = coords[1:] - coords[:-1]
+    energy = [float(((vel[:, hs : hs + 2] ** 2).sum(1) * (presence[1:, h] > 0)).sum())
               for h, hs in enumerate((C.LH_START, C.RH_START))]
     drop = 0 if energy[0] < energy[1] else 1
     hs = (C.LH_START, C.RH_START)[drop]
-    x[:, hs : hs + C.N_LH * C.COORDS_PER_LM] = 0.0
-    x[:, -2 + drop] = 0.0
-    return _with_velocity(x[:, :F], x[:, -2:])
+    coords[:, hs : hs + C.N_LH * C.COORDS_PER_LM] = 0.0
+    presence[:, drop] = 0.0
+    return coords, presence
 
 
 def mcnemar(a: pd.Series, b: pd.Series) -> dict:
@@ -113,10 +96,11 @@ def main() -> None:
     blank = len(sign2idx)
 
     @torch.no_grad()
-    def predict(x: np.ndarray) -> dict:
-        """Scores for the clip's label y (closure var): correct, top5 [, pooled, decode]."""
-        x = _subsample(_trim(x), args.max_frames) if phrase else _subsample(x, args.iso_max_frames)
-        t = torch.from_numpy(x[None]).float().to(device)
+    def predict(coords: torch.Tensor, presence: torch.Tensor) -> dict:
+        """Scores for the clip's label y (closure var): correct, top5 [, pooled, decode]. Features by
+        the data contract: phrase models segment to the hand span, isolated models do not."""
+        x = clip_input(coords, presence, args.max_frames if phrase else args.iso_max_frames, trim=phrase)
+        t = x[None].float().to(device)
         out = model(t, torch.ones(1, len(x), dtype=torch.bool, device=device))[0]
         if not phrase:
             return {"correct": out.argmax().item() == y, "top5": y in out.topk(5).indices.tolist(),
@@ -142,22 +126,21 @@ def main() -> None:
     rows = []
     with env.begin() as txn:
         for r in df.itertuples():
-            coords = torch.load(io.BytesIO(txn.get(lmdb_key(r.path))), weights_only=True)
+            coords, presence = load_clip(txn.get(lmdb_key(r.path)))
             y = sign2idx[r.sign]
-            x = clip_features(coords).numpy()
             raw = coords.clone()
             raw[:, 0::3] /= r.aspect_k
             raw[:, 2::3] /= r.aspect_k
-            pres = x[:, -2:] > 0
+            pres = presence.numpy() > 0
             rows.append(dict(path=r.path, sign=r.sign, signer=r.participant_id,
                              synonym=bool(r.synonym),
                              kind=getattr(r, "kind", "synonym" if r.synonym else "identical"),
                              split=getattr(r, "split", None), two_hands=r.both_hands > 0,
-                             n_frames=len(x), hand_frac=float(pres.any(1).mean()),
+                             n_frames=len(coords), hand_frac=float(pres.any(1).mean()),
                              aspect_k=r.aspect_k, ratio_raw=r.ratio_raw, fps=r.fps,
-                             source=r.source, **predict(x),
-                             uncorrected=predict(clip_features(raw).numpy())["correct"],
-                             one_hand=predict(one_hand(x))["correct"]))
+                             source=r.source, **predict(coords, presence),
+                             uncorrected=predict(raw, presence)["correct"],
+                             one_hand=predict(*one_hand(coords, presence))["correct"]))
     res = pd.DataFrame(rows)
 
     two = res[res["two_hands"]]

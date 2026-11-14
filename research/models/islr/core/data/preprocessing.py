@@ -43,6 +43,8 @@ def normalize_values(dataframe: pd.DataFrame) -> pd.DataFrame:
 
 
 def frame_stacked_data(file_path: str) -> np.ndarray:
+    """LEGACY (pre-contract LMDBs and reference checks only): gaps are ffill/bfill'd before
+    anyone records which frames were detected. Sign LMDBs are built by contract.prepare."""
     df = pd.read_parquet(file_path)
     axes = ["x", "y", "z"] if INCLUDE_DEPTH else ["x", "y"]
 
@@ -73,7 +75,9 @@ def frame_stacked_data(file_path: str) -> np.ndarray:
 
 
 def hand_presence(coords: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """Recover per-frame hand detection flags from stored LMDB coordinates.
+    """Recover per-frame hand detection flags from stored coordinates — FINGERSPELLING LMDB ONLY,
+    where every missing frame is written as 0 (unambiguous). Sign LMDBs store the real flags
+    (contract.py); guessing them from ffill'd values was wrong in ~22 % of ASL Signs clips.
 
     Neither LMDB stores NaNs, so a missing hand is hidden in the values:
       - ASL Signs (frame_stacked_data): gaps are ffill/bfill'd, so a missing

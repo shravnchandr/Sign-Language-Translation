@@ -41,7 +41,6 @@ import torch
 
 from ..core.config import COORDS_PER_LM
 from ..core.data.dataset import collate_batch, get_data_loaders
-from ..core.data.preprocessing import hand_presence
 from ..core.model.graph_conformer import GraphConformer
 from ..core.model.landmark_conformer import LandmarkConformer
 
@@ -96,8 +95,7 @@ def predict(model, dataset, batch_size=64):
 
 def clip_payload(dataset, idx):
     """Stored landmarks of one clip → compact display record (xy, uint16, presence bits)."""
-    coords = dataset._load_coords(idx)
-    filled, presence = hand_presence(coords)  # presence: (T, 2) lh, rh
+    filled, presence = dataset._load_clip(idx)  # stored detection flags: (T, 2) lh, rh
     presence = presence.numpy() > 0
     ever = presence.max(0)  # hand detected at least once — over all frames, before display sampling
     T = filled.shape[0]
@@ -204,7 +202,7 @@ def main():
 
     def tracking(j):
         """(fraction, count) of a training clip's frames with at least one hand detected."""
-        _, pr = hand_presence(train_ds._load_coords(j))
+        _, pr = train_ds._load_clip(j)
         hand = pr.sum(1) > 0
         return float(hand.float().mean()), int(hand.sum())
 
@@ -233,8 +231,7 @@ def main():
         t, p = int(y[i]), int(pred[i])
         true_is_a = rng.random() < 0.5
         top = np.argsort(-probs[i])[:3]
-        pres = val_ds._load_coords(i)
-        _, presence = hand_presence(pres)
+        _, presence = val_ds._load_clip(i)
         items.append({
             "id": n + 1,
             "query": add_clip(f"v{i}", val_ds, i),

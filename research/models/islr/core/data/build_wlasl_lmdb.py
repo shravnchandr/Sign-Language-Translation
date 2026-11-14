@@ -8,7 +8,7 @@ worker's videos; `train.csv` with path / sign / video_id / n_frames); optionally
 `wlasl_gloss_map.json` (233 glosses → 206 signs; 32 are synonyms such as
 father → dad — `--strict` keeps identical names only).
 
-Each clip goes through the same `frame_stacked_data` as the ASL Signs LMDB, then a
+Each clip goes through the same data contract (`contract.prepare`) as the ASL Signs LMDB, then a
 per-clip **aspect correction**: WLASL is mostly landscape video, ASL Signs portrait
 ≈ 3:4, and normalised x is a fraction of the frame width, y of its height. x and z
 (z is in x's units) are scaled so that (shoulder drop below the nose) / (shoulder
@@ -47,7 +47,7 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 
-from ._cache_keys import lmdb_key, lmdb_length_key
+from ._cache_keys import CACHE_VERSION, lmdb_key, lmdb_length_key
 
 _GLOSS_MAP = Path(__file__).with_name("wlasl_gloss_map.json")
 TARGET_RATIO = 0.40  # ASL Signs median shoulder drop / shoulder width
@@ -108,35 +108,63 @@ def _dealt_split(df: pd.DataFrame) -> dict:
 
 
 def _process(args: tuple) -> tuple:
-    """Worker: (path, full path[, correct=True]) → corrected coords bytes + stats (self-contained imports)."""
-    import numpy as np
-    import torch
+    """Worker: (path, full path[, correct=True[, aspect=0.75]]) → (path, stored value, info, error).
 
-    from islr.core.data.build_wlasl_lmdb import aspect_factor
-    from islr.core.data.preprocessing import frame_stacked_data, hand_presence
+    The parquet goes through the data contract (contract.prepare: pose-less frames dropped, ghost
+    hands resolved, explicit presence), then optionally the aspect correction. aspect = frame
+    width / height (only used to break ghost-hand ties). Self-contained imports (spawn-safe)."""
+    import numpy as np
+    import pandas as pd
 
     from islr.core import config as C
+    from islr.core.data.build_wlasl_lmdb import aspect_factor
+    from islr.core.data.contract import dump_clip, prepare
 
     path, full_path, *opt = args
+    correct = opt[0] if opt else True
+    aspect = opt[1] if len(opt) > 1 and opt[1] == opt[1] else 0.75  # NaN → default
     try:
-        coords = frame_stacked_data(full_path)
+        clip = prepare(pd.read_parquet(full_path), aspect)
+        coords = clip["coords"]
         if coords.ndim != 2 or coords.shape[1] != C.COORD_FEAT or len(coords) == 0:
             raise ValueError(f"coords shape {coords.shape}, expected (T > 0, {C.COORD_FEAT})")
         if not np.isfinite(coords).all():
             raise ValueError(f"{int((~np.isfinite(coords)).sum())} non-finite values")
         k, raw = aspect_factor(coords)
-        if opt and not opt[0]:  # no aspect correction (portrait data such as PopSign); raw ratio kept
+        if not correct:  # no aspect correction (portrait data such as PopSign); raw ratio kept
             k = 1.0
         coords[:, 0::3] *= k  # x
         coords[:, 2::3] *= k  # z
-        t = torch.from_numpy(coords)
-        _, pres = hand_presence(t)
-        both = float(((pres[:, 0] > 0) & (pres[:, 1] > 0)).float().mean())
-        buf = io.BytesIO()
-        torch.save(t.clone(), buf)
-        return path, buf.getvalue(), len(coords), k, raw, both, None
+        pres = clip["presence"].astype(bool)
+        info = {"n": len(coords), "k": k, "raw": raw, "both": float((pres[:, 0] & pres[:, 1]).mean()),
+                **clip["stats"]}
+        return path, dump_clip(clip), info, None
     except Exception as e:  # noqa: BLE001 — reported per clip
-        return path, None, None, None, None, None, str(e)
+        return path, None, None, str(e)
+
+
+def write_clips(env, jobs: list, workers: int) -> tuple[dict, list]:
+    """Run _process over jobs, write data + length keys → ({path: info}, [(path, error)])."""
+    stats, errors = {}, []
+    with ProcessPoolExecutor(workers) as pool, env.begin(write=True) as txn:
+        for path, data, info, err in tqdm(pool.map(_process, jobs, chunksize=8), total=len(jobs)):
+            if err:
+                errors.append((path, err))
+                continue
+            txn.put(lmdb_key(path), data)
+            txn.put(lmdb_length_key(path), str(info["n"]).encode())
+            stats[path] = info
+    return stats, errors
+
+
+def contract_summary(stats: dict) -> dict:
+    """Totals of the contract's per-clip counts (pose-less frames dropped, ghost / ambiguous frames)."""
+    keys = ("frames_raw", "frames_no_pose", "two_hand_frames", "ghost_frames", "ambiguous_frames")
+    tot = {k: int(sum(i[k] for i in stats.values())) for k in keys}
+    tot["clips_with_ghosts"] = int(sum(i["ghost_frames"] > 0 for i in stats.values()))
+    tot["clips_with_no_pose_frames"] = int(sum(i["frames_no_pose"] > 0 for i in stats.values()))
+    print(f"contract: {tot}")
+    return tot
 
 
 _SHARD_DIR = re.compile(r"^(?P<version>.+)-s(?P<k>\d+)$")
@@ -186,7 +214,8 @@ def load_shards(root: Path, keyword: str, expect: int) -> tuple[pd.DataFrame, di
     return df, {"version": versions[0], "shards": ks, "clips_listed": len(df), "csvs": [str(c) for c in csvs]}
 
 
-def finish_build(lmdb_path: Path, paths: list[str], errors: list, allow_errors: int, manifest: dict) -> None:
+def finish_build(lmdb_path: Path, paths: list[str], errors: list, allow_errors: int, manifest: dict,
+                 stats: dict | None = None) -> None:
     """Fail on clip errors beyond --allow-errors, check every written path has data + length keys,
     and write build_manifest.json next to the LMDB."""
     if len(errors) > allow_errors:
@@ -197,8 +226,12 @@ def finish_build(lmdb_path: Path, paths: list[str], errors: list, allow_errors: 
     env.close()
     if absent:
         raise SystemExit(f"{len(absent)} train.csv paths without LMDB data/length keys, e.g. {absent[0]}")
+    from .contract import CONTRACT_VERSION
+
     manifest = {**manifest, "clips_written": len(paths), "errors": len(errors), "error_examples": errors[:20],
-                "lmdb": lmdb_path.name, "commit": os.environ.get("REPO_COMMIT")}
+                "lmdb": lmdb_path.name, "contract": CONTRACT_VERSION, "cache_version": CACHE_VERSION,
+                "contract_counts": contract_summary({p_: stats[p_] for p_ in paths}) if stats else None,
+                "commit": os.environ.get("REPO_COMMIT")}
     (lmdb_path.parent / "build_manifest.json").write_text(json.dumps(manifest, indent=1))
     print(f"manifest: {manifest['version']} shards {manifest['shards']}, {len(paths)} clips, {len(errors)} errors")
 
@@ -302,22 +335,13 @@ def main() -> None:
     args.out_dir.mkdir(parents=True, exist_ok=True)
     lmdb_path = args.out_dir / args.lmdb_name
     env = lmdb.open(str(lmdb_path), subdir=False, map_size=1 << 36)
-    stats, errors = {}, []
-    jobs = list(zip(df["path"], df["full_path"]))
-    with ProcessPoolExecutor(args.workers) as pool, env.begin(write=True) as txn:
-        for path, data, n, k, raw, both, err in tqdm(pool.map(_process, jobs, chunksize=8),
-                                                    total=len(jobs)):
-            if err:
-                errors.append((path, err))
-                continue
-            txn.put(lmdb_key(path), data)
-            txn.put(lmdb_length_key(path), str(n).encode())
-            stats[path] = (k, raw, both, n)
+    aspect = (df["width"] / df["height"]) if {"width", "height"} <= set(df) else pd.Series(float("nan"), df.index)
+    stats, errors = write_clips(env, list(zip(df["path"], df["full_path"], [True] * len(df), aspect)), args.workers)
     env.close()
 
     df = df[df["path"].isin(stats)].copy()
     df["aspect_k"], df["ratio_raw"], df["both_hands"], df["n_frames"] = zip(
-        *(stats[p_] for p_ in df["path"]))
+        *((stats[p_]["k"], stats[p_]["raw"], stats[p_]["both"], stats[p_]["n"]) for p_ in df["path"]))
     cols = ["path", "participant_id", "sequence_id", "sign", "wlasl_gloss", "synonym", "fps",
             "source", "split", "aspect_k", "ratio_raw", "both_hands", "n_frames"]
     if args.all_glosses:
@@ -329,7 +353,7 @@ def main() -> None:
               f"{df['wlasl_half'].value_counts().to_dict()} clips")
     df[cols].to_csv(args.out_dir / "train.csv", index=False)
     (args.out_dir / "sign_to_prediction_index_map.json").write_text(json.dumps(vocab))
-    finish_build(lmdb_path, df["path"].tolist(), errors, args.allow_errors, manifest)
+    finish_build(lmdb_path, df["path"].tolist(), errors, args.allow_errors, manifest, stats)
 
     print(f"wrote {len(df)} clips → {lmdb_path} ({lmdb_path.stat().st_size / 2**20:.0f} MiB); "
           f"{len(errors)} errors" + (f", e.g. {errors[0]}" if errors else ""))

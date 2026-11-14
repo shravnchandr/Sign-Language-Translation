@@ -9,7 +9,7 @@ each shard folder holds `shard_<k>.csv` (path, participant, split, gloss, video,
 `train_landmark_files/*.parquet` in the competition format. --input-root is searched
 recursively for `shard_*.csv`, so mounting all shards under /kaggle/input is enough.
 
-Each clip goes through the same worker as `build_wlasl_lmdb` — `frame_stacked_data`, then the
+Each clip goes through the same worker as `build_wlasl_lmdb` — the data contract (`contract.prepare`), then the
 per-clip aspect correction (ASL Citizen is landscape webcam video; x and z scaled so shoulder
 drop / width = 0.40). Glosses map onto ASL Signs labels with `aslcitizen_gloss_map.json`; its
 `kind` (identical / variant / synonym) is kept so results can be scored per kind.
@@ -30,15 +30,12 @@ import argparse
 import json
 import os
 import re
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import lmdb
 import pandas as pd
-from tqdm import tqdm
 
-from ._cache_keys import lmdb_key, lmdb_length_key
-from .build_wlasl_lmdb import TARGET_RATIO, _process, finish_build, load_shards
+from .build_wlasl_lmdb import TARGET_RATIO, finish_build, load_shards, write_clips
 
 _GLOSS_MAP = Path(__file__).with_name("aslcitizen_gloss_map.json")
 _SIGNER_OFFSET = 800_000  # apart from ASL Signs participant ids and WLASL's 900000 + signer
@@ -85,27 +82,18 @@ def main() -> None:
     args.out_dir.mkdir(parents=True, exist_ok=True)
     lmdb_path = args.out_dir / args.lmdb_name
     env = lmdb.open(str(lmdb_path), subdir=False, map_size=1 << 36)
-    stats, errors = {}, []
-    jobs = list(zip(df["path"], df["full_path"]))
-    with ProcessPoolExecutor(args.workers) as pool, env.begin(write=True) as txn:
-        for path, data, n, k, raw, both, err in tqdm(pool.map(_process, jobs, chunksize=8),
-                                                    total=len(jobs)):
-            if err:
-                errors.append((path, err))
-                continue
-            txn.put(lmdb_key(path), data)
-            txn.put(lmdb_length_key(path), str(n).encode())
-            stats[path] = (k, raw, both, n)
+    aspect = (df["width"] / df["height"]) if {"width", "height"} <= set(df) else pd.Series(float("nan"), df.index)
+    stats, errors = write_clips(env, list(zip(df["path"], df["full_path"], [True] * len(df), aspect)), args.workers)
     env.close()
 
     df = df[df["path"].isin(stats)].copy()
     df["aspect_k"], df["ratio_raw"], df["both_hands"], df["n_frames"] = zip(
-        *(stats[p_] for p_ in df["path"]))
+        *((stats[p_]["k"], stats[p_]["raw"], stats[p_]["both"], stats[p_]["n"]) for p_ in df["path"]))
     cols = ["path", "participant_id", "sequence_id", "sign", "aslc_gloss", "kind", "synonym", "fps",
             "source", "split", "aspect_k", "ratio_raw", "both_hands", "n_frames"]
     df[cols].to_csv(args.out_dir / "train.csv", index=False)
     (args.out_dir / "sign_to_prediction_index_map.json").write_text(json.dumps(sign2idx))
-    finish_build(lmdb_path, df["path"].tolist(), errors, args.allow_errors, manifest)
+    finish_build(lmdb_path, df["path"].tolist(), errors, args.allow_errors, manifest, stats)
 
     print(f"wrote {len(df)} clips → {lmdb_path} ({lmdb_path.stat().st_size / 2**20:.0f} MiB); "
           f"{len(errors)} errors" + (f", e.g. {errors[0]}" if errors else ""))

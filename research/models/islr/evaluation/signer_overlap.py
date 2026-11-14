@@ -24,7 +24,6 @@ Usage:
 """
 
 import argparse
-import io
 import json
 from pathlib import Path
 
@@ -35,7 +34,7 @@ import torch
 
 from ..core import config as C
 from ..core.data._cache_keys import lmdb_key
-from ..core.data.preprocessing import hand_presence
+from ..core.data.contract import load_clip
 
 _L = C.COORD_FEAT // 3
 _POSE, _RH, _FACE = C.POSE_START // 3, C.RH_START // 3, C.FACE_START // 3
@@ -49,9 +48,9 @@ _BODY = {  # name: (a, b) landmark pairs, length / shoulder width
 FEATURES = [f"bone_{p}_{c}" for p, c in _BONES] + list(_BODY) + ["shoulder_drop"]
 
 
-def clip_features(coords: torch.Tensor, aspect: float) -> np.ndarray:
-    """(T, COORD_FEAT) stored coords → per-clip fingerprint (NaN where nothing was detected)."""
-    filled, pres = hand_presence(coords)
+def clip_features(filled: torch.Tensor, pres: torch.Tensor, aspect: float) -> np.ndarray:
+    """Stored clip (coords (T, COORD_FEAT), presence (T, 2)) → per-clip fingerprint (NaN where nothing
+    was detected)."""
     x = filled.numpy().reshape(len(filled), _L, 3).copy()
     x[..., 1] /= aspect  # y is a fraction of height, x of width: put both in width units
     out = np.full(len(FEATURES), np.nan)
@@ -87,7 +86,7 @@ def load_features(data_dir: Path, lmdb_path: Path, per_signer: int, aspect: floa
         for pid, path, k in zip(df["participant_id"], df["path"], asp):
             val = txn.get(lmdb_key(path))
             if val is not None:
-                rows.append([pid, *clip_features(torch.load(io.BytesIO(bytes(val)), weights_only=True), k)])
+                rows.append([pid, *clip_features(*load_clip(val), k)])
     env.close()
     return pd.DataFrame(rows, columns=["signer", *FEATURES])
 

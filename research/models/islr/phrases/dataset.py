@@ -9,8 +9,8 @@ new phrases. Only the phrase *specs* (glosses, clip ids, transition lengths)
 are drawn up front, per epoch, so batches can be bucketed by length.
 
 Stitching, per phrase:
-  1. Each clip: hand_presence() (detection flags + hold-fill), then trimmed to
-     its first..last frame with any hand detected. Clips with fewer than
+  1. Each clip: stored coords + detection flags (data contract), trimmed to its
+     first..last frame with any hand detected (contract.segment). Clips with fewer than
      min_detected detected frames are swapped for another clip of the same
      sign and signer when one exists.
   2. Training only: each clip resampled by its own tempo factor (signs vary
@@ -44,7 +44,7 @@ from torch.utils.data import Dataset
 from ..core.config import COORDS_PER_LM, LH_START, N_LH, RH_START
 from ..core.data.augmentation import augment_sample, bone_scale
 from .grammar import PhraseGrammar
-from ..core.data.preprocessing import hand_presence
+from ..core.data.contract import model_input, segment, subsample_index
 
 _HAND_SLICES = [slice(hs, hs + N_LH * COORDS_PER_LM) for hs in (LH_START, RH_START)]
 
@@ -53,7 +53,7 @@ class SyntheticPhraseDataset(Dataset):
     """
     Args:
         source:      ASLDataset whose df has 'sign' (int) and 'participant_id';
-                     only _load_coords() and lengths are used. Build it with a
+                     only _load_clip() and lengths are used. Build it with a
                      large max_frames so lengths are uncapped.
         idx2sign:    class index → sign name (inverse of the sign map).
         n_phrases:   phrases per epoch.
@@ -172,14 +172,13 @@ class SyntheticPhraseDataset(Dataset):
         """Trimmed (coords, presence) of one clip, swapped if poorly tracked."""
         pool = self.clips[(signer, sign)]
         for attempt in range(4):
-            coords, pres = hand_presence(self.source._load_coords(j))
+            coords, pres = self.source._load_clip(j)
             det = pres.sum(1) > 0
             if int(det.sum()) >= self.min_detected or attempt == 3 or len(pool) == 1:
                 break
             j = int(rng.choice(pool))
-        if det.any():
-            nz = torch.nonzero(det).flatten()
-            coords, pres = coords[nz[0] : nz[-1] + 1], pres[nz[0] : nz[-1] + 1]
+        s = segment(pres)
+        coords, pres = coords[s], pres[s]
         if self.augment and coords.shape[0] >= 2:
             f = rng.uniform(*self.tempo)
             n = max(2, int(round(coords.shape[0] * f)))
@@ -249,13 +248,8 @@ class SyntheticPhraseDataset(Dataset):
                 if not pres[:, h].any():  # never detected in the phrase → stays exactly zero
                     coords[:, sl] = 0.0
 
-        if coords.shape[0] > self.max_frames:
-            keep = torch.linspace(0, coords.shape[0] - 1, self.max_frames).long()
-            coords, pres = coords[keep], pres[keep]
-
-        vel = torch.zeros_like(coords)
-        vel[1:] = coords[1:] - coords[:-1]
-        x = torch.cat([coords, vel, pres], dim=-1)
+        keep = subsample_index(coords.shape[0], self.max_frames)
+        x = model_input(coords[keep], pres[keep])
         return x, torch.ones(x.shape[0], dtype=torch.bool), list(ids)
 
     def describe(self, idx: int) -> Dict:
@@ -265,7 +259,7 @@ class SyntheticPhraseDataset(Dataset):
 
 
 class ConcatSource:
-    """Several clip sources (ASLDataset-like: df, lengths, _load_coords) seen as one, e.g.
+    """Several clip sources (ASLDataset-like: df, lengths, _load_clip) seen as one, e.g.
     ASL Signs training signers + WLASL training signers. Signer ids must not collide
     (WLASL ids are offset by 900000)."""
 
@@ -275,9 +269,9 @@ class ConcatSource:
         self.lengths = np.concatenate([np.asarray(s.lengths) for s in sources])
         self._starts = np.cumsum([0] + [len(s.df) for s in sources])
 
-    def _load_coords(self, j: int) -> torch.Tensor:
+    def _load_clip(self, j: int) -> Tuple[torch.Tensor, torch.Tensor]:
         k = int(np.searchsorted(self._starts, j, side="right")) - 1
-        return self.sources[k]._load_coords(j - int(self._starts[k]))
+        return self.sources[k]._load_clip(j - int(self._starts[k]))
 
 
 def _hold_fill(block: torch.Tensor, present: torch.Tensor) -> torch.Tensor:
