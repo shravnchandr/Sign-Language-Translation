@@ -138,15 +138,25 @@ Kaggle CPU notebooks (`islr.core.data.audit_raw` per dataset, `scripts/extractio
 | Finding | Evidence | Fix |
 |---|---|---|
 | **Signer folds were recomputed, not frozen** — a rebuild that drops clips (exclusions, errors) or another sklearn version could move signers between ASL Signs folds, putting a signer the fold0_graph init trained on into the validation fold | Dropping 3,000 clips of 34503: `GroupKFold(7)` fold 0 becomes 27610 / 49445 / 62590 (27610 = a fold0_graph training signer) | `asl_signs_folds.json` (= GroupKFold(7) on the full 94,477-clip csv; fold 0 = 34503 / 49445 / 62590, as fold0_graph's log); `dataset.signer_fold_split` used by every loader and `sign_reliability`; unknown signers exit |
-| Browser contract silent on frame shape and frame rate | `preprocess.json` had no aspect or fps field (only CLAUDE.md did); WLASL 25 fps, others ≈ 30, browser processing often slower | `aspect` and `frame_rate` fields in the preprocess spec; fps of every dataset measured by the inventory notebooks (300 videos each) |
+| Browser contract silent on frame shape and frame rate | `preprocess.json` had no aspect or fps field (only CLAUDE.md did); WLASL 25 fps, PopSign 30 fps (paper), browser processing often slower | `aspect` and `frame_rate` fields in the preprocess spec; fps of every dataset measured by the inventory notebooks (300 videos each). This documents the requirement — the app's compliance (crop / rescale, processing rate) still has to be verified in the ASL-App repo |
 
 ### Checked and sound (no change needed)
 
-- **PopSign ↔ ASL Signs, same recordings?** (both from the PopSign game) Positive control: 160
-  PopSign videos extracted twice differ by ≤ 0.095 frame-wise (upper-body pose, shoulder widths).
-  The closest ASL Signs clip of the same sign and exact frame count: ≥ 0.123 (median 0.197) → none
-  of those 160 is an ASL Signs recording. Only 3 PopSign signers: the full 26k-clip test runs in
-  `audit-popsign`.
+- **PopSign ↔ ASL Signs, same recordings?** No matching recording detected in the 160-clip sample
+  (3 PopSign signers): two extractions of one video differ by ≤ 0.095 frame-wise (upper-body pose,
+  shoulder widths); the closest ASL Signs clip of the same sign and the *same frame count* is ≥ 0.123.
+  This only tests untrimmed copies: matching equal-length clips cannot exclude a recording that was
+  trimmed or had frames dropped. A trim / frame-drop tolerant version (offset and resampling
+  alignment) was calibrated on the same 160 videos and does **not** separate: centred on posture,
+  same-video pairs reach 0.83 motion disagreement vs ≥ 0.61 for different recordings — the tracker
+  difference between two extractions is as large as the arm motion itself, so pose trajectories
+  cannot prove absence. The PopSign paper (NeurIPS 2023 D&B) shares authors with Google / Kaggle,
+  thanks the Kaggle team for dataset advice, and records on the same phones (Pixel 4A, 1944×2592,
+  30 fps) over the same 250 signs: shared signers are likely and shared recordings possible.
+  **Policy:** for any model trained on PopSign, the ASL Signs held-out score and the synthetic
+  validation WER (also the checkpoint-selection metric) are not independent; comparisons and
+  decisions use ASL Citizen, WLASL and recorded camera clips only. The exact-length test still runs
+  on all PopSign clips in `audit-popsign` (it detects untrimmed copies).
 - fold0_graph (the `--init` of every phrase run) held out exactly fold 0's signers.
 - Phrase generator: held-out gloss sequences never drawn in training for any source; validation
   phrases only from fold-0 signers; tempo resampling keeps presence aligned; never-detected hands
