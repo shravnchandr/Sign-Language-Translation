@@ -1,0 +1,28 @@
+{
+ "_doc": "ASL Signs signer \u2192 validation fold (GroupKFold(7), unshuffled, over the full competition train.csv, 94,477 clips; frozen 2026-11-14 so a rebuild that drops clips, or another sklearn version, cannot move signers between folds \u2014 fold0_graph and every phrase run validate on fold 0 = 34503, 49445, 62590)",
+ "n_folds": 7,
+ "clips": 94477,
+ "folds": {
+  "34503": 0,
+  "49445": 0,
+  "62590": 0,
+  "27610": 1,
+  "37055": 1,
+  "61333": 1,
+  "25571": 2,
+  "36257": 2,
+  "53618": 2,
+  "16069": 3,
+  "22343": 3,
+  "28656": 3,
+  "18796": 4,
+  "26734": 4,
+  "29302": 4,
+  "4718": 5,
+  "32319": 5,
+  "55372": 5,
+  "2044": 6,
+  "30680": 6,
+  "37779": 6
+ }
+}

@@ -28,12 +28,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-from sklearn.model_selection import GroupKFold
 
 from ..core.data._cache_keys import lmdb_key
 from ..core.data.build_wlasl_lmdb import signer_split
 from ..core.data.contract import clip_input, load_clip
-from ..core.data.dataset import _open_lmdb_env
+from ..core.data.dataset import _open_lmdb_env, signer_fold_split
 from ..core.data.validate import require_accepted
 from ..export.export_onnx import load_ctc_model
 
@@ -121,7 +120,7 @@ def main() -> None:
     if args.wlasl_dir:
         releases["wlasl"] = require_accepted(args.wlasl_dir, args.wlasl_dir / "wlasl.lmdb.mdb")
     df = pd.read_csv(args.data_dir / "train.csv")
-    _, va = list(GroupKFold(args.n_folds).split(df, groups=df["participant_id"]))[args.val_fold]
+    _, va = signer_fold_split(df, args.val_fold, args.n_folds)
     parts = [score_clips(model, df.iloc[va], args.lmdb_path, sign2idx, args.max_frames,
                          f"asl_signs_fold{args.val_fold}")]
     if args.wlasl_dir:

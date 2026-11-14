@@ -355,6 +355,25 @@ class BucketBatchSampler(Sampler):
         return sum(min(self.pool, n - p) // self.batch_size for p in range(0, n, self.pool))
 
 
+_FOLDS = Path(__file__).with_name("asl_signs_folds.json")
+
+
+def signer_fold_split(df: pd.DataFrame, val_fold: int, n_folds: int = 7) -> tuple[np.ndarray, np.ndarray]:
+    """(train, val) row positions for signer fold val_fold. ASL Signs with 7 folds uses the frozen
+    asl_signs_folds.json (a GroupKFold recomputed after clips are dropped, or by another sklearn
+    version, can move signers between folds — the init checkpoint's held-out signers would then be
+    trained on); every signer must be in it. Other data / fold counts: unshuffled GroupKFold."""
+    frozen = json.loads(_FOLDS.read_text())
+    ids = df["participant_id"].astype(str)
+    if n_folds == frozen["n_folds"] and ids.isin(frozen["folds"]).any():
+        unknown = sorted(set(ids) - set(frozen["folds"]))
+        if unknown:
+            raise SystemExit(f"signers not in {_FOLDS.name}: {unknown[:5]} — the frozen folds cover ASL Signs only")
+        fold = ids.map(frozen["folds"]).to_numpy()
+        return np.nonzero(fold != val_fold)[0], np.nonzero(fold == val_fold)[0]
+    return list(GroupKFold(n_splits=n_folds).split(df, groups=df["participant_id"]))[val_fold]
+
+
 def get_data_loaders(
     data_dir: str,
     cache_dir: Optional[str] = None,
@@ -412,10 +431,7 @@ def get_data_loaders(
         else:
             if not 0 <= val_fold < n_folds:
                 raise ValueError(f"val_fold must be in [0, {n_folds}), got {val_fold}")
-            # Unshuffled GroupKFold is deterministic: signers are assigned to
-            # folds greedily by sample count, so fold k is the same every run.
-            gkf = GroupKFold(n_splits=n_folds)
-            train_idx, test_idx = list(gkf.split(df, groups=df["participant_id"]))[val_fold]
+            train_idx, test_idx = signer_fold_split(df, val_fold, n_folds)
         train_df = df.iloc[train_idx]
         test_df = df.iloc[test_idx]
         # Build a stable int mapping from training signers only.
