@@ -130,6 +130,9 @@ def _process(args: tuple) -> tuple:
             raise ValueError(f"coords shape {coords.shape}, expected (T > 0, {C.COORD_FEAT})")
         if not np.isfinite(coords).all():
             raise ValueError(f"{int((~np.isfinite(coords)).sum())} non-finite values")
+        import hashlib
+
+        content = hashlib.sha1(coords.tobytes() + clip["presence"].tobytes()).hexdigest()  # before scaling
         k, raw = aspect_factor(coords)
         if not correct:  # no aspect correction (portrait data such as PopSign); raw ratio kept
             k = 1.0
@@ -137,7 +140,7 @@ def _process(args: tuple) -> tuple:
         coords[:, 2::3] *= k  # z
         pres = clip["presence"].astype(bool)
         info = {"n": len(coords), "k": k, "raw": raw, "both": float((pres[:, 0] & pres[:, 1]).mean()),
-                **clip["stats"]}
+                "content": content, **clip["stats"]}
         return path, dump_clip(clip), info, None
     except Exception as e:  # noqa: BLE001 — reported per clip
         return path, None, None, str(e)
@@ -155,6 +158,21 @@ def write_clips(env, jobs: list, workers: int) -> tuple[dict, list]:
             txn.put(lmdb_length_key(path), str(info["n"]).encode())
             stats[path] = info
     return stats, errors
+
+
+def exclude_duplicates(df: pd.DataFrame, stats: dict, out_dir: Path, label: str = "sign") -> pd.DataFrame:
+    """Clips with bit-identical stored content (same video under several ids): all of them are
+    dropped when their FINAL labels differ (one clip, two answers), all but the first when they
+    agree. Writes excluded_clips.csv (path, label, content, reason) and returns the kept rows."""
+    content = df["path"].map(lambda p_: stats[p_]["content"])
+    groups = df.assign(content=content).groupby("content")
+    conflict = groups[label].transform("nunique") > 1
+    repeat = ~conflict & df.assign(content=content).duplicated("content")
+    excl = df.assign(content=content, reason=np.where(conflict, "same content, different labels", "repeat of a kept clip"))[conflict | repeat]
+    excl[["path", label, "content", "reason"]].to_csv(out_dir / "excluded_clips.csv", index=False)
+    print(f"duplicates: {int(conflict.sum())} clips in {excl.loc[conflict[conflict].index, 'content'].nunique()} "
+          f"conflicting-label groups and {int(repeat.sum())} repeats excluded (excluded_clips.csv)")
+    return df[~(conflict | repeat)].copy()
 
 
 def contract_summary(stats: dict) -> dict:
@@ -340,6 +358,7 @@ def main() -> None:
     env.close()
 
     df = df[df["path"].isin(stats)].copy()
+    df = exclude_duplicates(df, stats, args.out_dir)
     df["aspect_k"], df["ratio_raw"], df["both_hands"], df["n_frames"] = zip(
         *((stats[p_]["k"], stats[p_]["raw"], stats[p_]["both"], stats[p_]["n"]) for p_ in df["path"]))
     cols = ["path", "participant_id", "sequence_id", "sign", "wlasl_gloss", "synonym", "fps",

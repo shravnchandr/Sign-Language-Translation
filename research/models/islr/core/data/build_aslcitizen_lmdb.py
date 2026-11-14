@@ -35,7 +35,7 @@ from pathlib import Path
 import lmdb
 import pandas as pd
 
-from .build_wlasl_lmdb import TARGET_RATIO, finish_build, load_shards, write_clips
+from .build_wlasl_lmdb import TARGET_RATIO, exclude_duplicates, finish_build, load_shards, write_clips
 
 _GLOSS_MAP = Path(__file__).with_name("aslcitizen_gloss_map.json")
 _SIGNER_OFFSET = 800_000  # apart from ASL Signs participant ids and WLASL's 900000 + signer
@@ -87,6 +87,7 @@ def main() -> None:
     env.close()
 
     df = df[df["path"].isin(stats)].copy()
+    df = exclude_duplicates(df, stats, args.out_dir)
     df["aspect_k"], df["ratio_raw"], df["both_hands"], df["n_frames"] = zip(
         *((stats[p_]["k"], stats[p_]["raw"], stats[p_]["both"], stats[p_]["n"]) for p_ in df["path"]))
     cols = ["path", "participant_id", "sequence_id", "sign", "aslc_gloss", "kind", "synonym", "fps",
