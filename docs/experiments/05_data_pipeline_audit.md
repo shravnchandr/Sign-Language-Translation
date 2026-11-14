@@ -126,3 +126,47 @@ only when built / run; label linguistics and detector physical correctness are o
 Release procedure, per dataset: (inventory for pre-fix shards) → build + `validate --raw-root` in one
 CPU notebook → the notebook's output is the release, mounted with `--kernel` in `--bare` runs. The v2
 raw parquets are kept; no re-extraction is needed.
+
+## Full audit before the rebuild (2026-11-14, round 3)
+
+Goal: find every remaining issue *before* any LMDB is built or GPU run started. Every stage, raw
+video → model input → evaluation, checked against data where data exists; full-data checks run as
+Kaggle CPU notebooks (`islr.core.data.audit_raw` per dataset, `scripts/extraction_inventory.py`).
+
+### Found and fixed so far
+
+| Finding | Evidence | Fix |
+|---|---|---|
+| **Signer folds were recomputed, not frozen** — a rebuild that drops clips (exclusions, errors) or another sklearn version could move signers between ASL Signs folds, putting a signer the fold0_graph init trained on into the validation fold | Dropping 3,000 clips of 34503: `GroupKFold(7)` fold 0 becomes 27610 / 49445 / 62590 (27610 = a fold0_graph training signer) | `asl_signs_folds.json` (= GroupKFold(7) on the full 94,477-clip csv; fold 0 = 34503 / 49445 / 62590, as fold0_graph's log); `dataset.signer_fold_split` used by every loader and `sign_reliability`; unknown signers exit |
+| Browser contract silent on frame shape and frame rate | `preprocess.json` had no aspect or fps field (only CLAUDE.md did); WLASL 25 fps, others ≈ 30, browser processing often slower | `aspect` and `frame_rate` fields in the preprocess spec; fps of every dataset measured by the inventory notebooks (300 videos each) |
+
+### Checked and sound (no change needed)
+
+- **PopSign ↔ ASL Signs, same recordings?** (both from the PopSign game) Positive control: 160
+  PopSign videos extracted twice differ by ≤ 0.095 frame-wise (upper-body pose, shoulder widths).
+  The closest ASL Signs clip of the same sign and exact frame count: ≥ 0.123 (median 0.197) → none
+  of those 160 is an ASL Signs recording. Only 3 PopSign signers: the full 26k-clip test runs in
+  `audit-popsign`.
+- fold0_graph (the `--init` of every phrase run) held out exactly fold 0's signers.
+- Phrase generator: held-out gloss sequences never drawn in training for any source; validation
+  phrases only from fold-0 signers; tempo resampling keeps presence aligned; never-detected hands
+  stay zero through augmentation.
+- Evaluation splits: WLASL test half from the frozen file for both the extra training (train half)
+  and scoring; ASL Citizen extra data = official train split, scoring = test split; PopSign used
+  for training only.
+
+### Known selection effects (documented, not leaks)
+
+- Checkpoints are selected on fold-0 synthetic-phrase WER, and "ASL Signs held-out" scores use the
+  same signers → mildly optimistic for that metric; WLASL / ASL Citizen are not selection-biased
+  (except phrases04's augmentation, chosen on the WLASL test half).
+- `sign_reliability` thresholds are fit and reported on the same clips → optimistic keep rates.
+
+### Full-data audits (Kaggle CPU, queued behind the extraction)
+
+Per dataset (WLASL v2, ASL Citizen v2, PopSign v2, ASL Signs competition): raw structure, frame
+gaps, rows per frame, partial parts, off-frame values, pose-less frames, detection rates,
+wrong-slot single hands, ghosts, mirroring, extraction version, exact and near-duplicate recordings
+(different signer ids / across splits), labels and signers, split disjointness, aspect correction
+(per-clip ratio k vs the geometric (W/H)/0.75 the app applies), WLASL instance frame ranges;
+PopSign: same-recording test against all ASL Signs clips; inventories: coverage + fps probe.
