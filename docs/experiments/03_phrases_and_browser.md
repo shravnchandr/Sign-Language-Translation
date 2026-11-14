@@ -464,3 +464,26 @@ tracker, MediaPipe 0.10.14 pinned — the old notebook was unpinned; full-size f
 LMDB keys are unchanged), 4 shards `extract-wlasl-v2-s0..3`, built with `build_wlasl_lmdb --input-root`
 (byte-identical to `--wlasl-dir` on the same parquets). Check after the build that the signer halves
 (`signer_split`) are unchanged.
+
+### phrases07-long: phrases07 with a 60-epoch schedule (2026-11-14)
+
+phrases07 recipe + `--epochs 60 --patience 15`, the same v1 PopSign / ASL Citizen extractions (shared
+tracker, pre-contract pipeline — a **legacy-pipeline reference**, like every score above). Kaggle
+`islr-phrases07-long-popsign`, outputs `results/phrases/phrases07-long-popsign/`. Best val WER
+**0.204** at epoch 54 (phrases07: 0.234).
+
+| vs phrases07 (paired, same clips) | phrases07 | phrases07-long | paired |
+|---|---|---|---|
+| ASL Citizen test exact | 73.4 % | 73.9 % | +151 / −132, p = 0.28 |
+| ASL Citizen test pooled top-1 | 75.8 % | 75.9 % | +125 / −121, p = 0.85 |
+| ASL Citizen identical / variant / synonym (exact) | 80.7 / 60.6 / 67.1 % | 81.0 / 60.9 / 70.7 % | |
+| WLASL test half exact | 84.2 % | 85.7 % | +41 / −29, p = 0.19 |
+| ASL Signs held-out exact (fold 0) | 68.0 %* | 70.6 %* | +984 / −616, p = 3e-20 |
+| Reliability: clips kept at 90 % precision (offline) | 62.7 %* | 66.3 %* | |
+
+\* ASL Signs-dominated, possibly inflated by PopSign / ASL Signs shared signers (phrases07 entry).
+ASL Citizen per signer: 6 of 11 up, 5 down.
+
+Reading: the same pattern as phrases05-long and phrases06-long — the longer schedule fits the
+training sources (ASL Signs and PopSign, the same game set-up) and does not carry over to either
+independent test. phrases07 (30 epochs) stays the candidate; not exported.
