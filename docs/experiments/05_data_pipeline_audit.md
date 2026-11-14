@@ -221,6 +221,45 @@ clips from WLASL, PopSign and ASL Signs, erring towards keeping real hands.
 Before changing the contract: the same evidence on PopSign (`islr-ghost-popsign`) and ASL Signs, so
 the threshold is set on all three. A contract change means v4, re-fixtures, and the browser's rule.
 
+**Ghost rule v4 — agreed design (2026-11-14), threshold still to be set.**
+Two separate decisions per two-hand frame. (1) *Copy or distinct* — from joint evidence only: the two
+slots' corresponding joints compared in aspect-corrected image coordinates, unaligned. (2) *Which slot
+keeps a copy* — from wrist evidence only: the slot whose pose wrist is confidently nearer; otherwise a
+deterministic tie-break (the current one) and a separate `assignment_uncertain` flag (not AMBIGUOUS,
+which keeps both slots present and would retain the duplicate). Confident wrist evidence does not make
+a frame a copy. A hand MediaPipe never detected stays absent. Reported per dataset: fallback frequency
+among copy decisions and over all frames, and clips affected.
+Threshold: per candidate threshold, on visually labelled frames (`ghost_review --sample`; labels copy /
+two / unclear, "copy" = both skeletons track the same physical hand however many hands are visible):
+real-hand deletions (labelled two, one lost), duplicate retentions (labelled copy, both kept),
+wrong-slot assignments where the side can be judged, with counts and unclear coverage; sampling is
+balanced over distance bands, so rates are weighted by each band's prevalence before quoting a
+dataset rate. The policy is chosen on calibration recordings, frozen, then evaluated once on holdout
+(sets split by recording content). Keeping real hands breaks near-ties only. The visual labels are
+reference judgements, not ground truth. ASL Signs (no video) gets a statistical transfer check only —
+changed decisions, fallbacks, distance distributions — and its correctness is stated as unverified.
+
+**Aspect: same clips, builder vs browser preparation (`islr-aspect-wlasl`, `aspect_compare`, 824
+held-out-signer WLASL clips, 0 errors).** k builder / browser median 1.08 (p10–p90 0.99–1.23).
+
+| | ASL Signs (reference) | builder (per clip) | browser ((W/H)/0.75) |
+|---|---|---|---|
+| shoulder drop / width, p1–p50–p99 | 0.27–0.40–0.50 | 0.40 (fixed by construction) | 0.35–0.43–0.54 |
+| clips outside ASL Signs p1–p99: ratio / hand size | 2 % / 2 % | 0 % / 8.7 % | 7.5 % / 7.6 % |
+| joint-angle values outside ASL Signs p1–p99 | 2 % | 1.5 % | 1.2 % (change vs builder: median 0.006, spread between ASL Signs clips 0.19) |
+| phrases01 single-sign exact (trained on ASL Signs only) | | 43.3 % | **46.0 %** (+40 / −18, p = 0.005) |
+| phrases05 (trained on builder-corrected WLASL) | | 83.0 % | 83.0 % (+4 / −4) |
+
+The browser preparation stays inside what training covers for hand size and joint angles; its shoulder
+ratio sits a little higher (median 0.43 vs 0.40) and outside the reference in 7.5 % of clips, concentrated
+in some frame sizes (320×240 23 %, 656×370 25 %, 854×480 27 %, 640×360 4 of 9; 1280×720 and 720×400 0 %)
+and signers (98, 93, 8) — possibly sources whose stored frame size is not their display shape
+(letterboxed / anamorphic), unverified. On these clips the browser preparation does not score worse: the
+neutral model does better with it, phrases05 the same. **No builder change is required by this result.**
+Open question for the rebuild (not decided): the builders could use the geometric factor too (W / H is
+now recorded per clip), which matches deployment and keeps natural body-proportion variation — but the
+per-clip factor is robust to a mis-stated frame size, the geometric one is not. ASL Citizen pending.
+
 **ASL Signs (`islr-audit-aslsigns`, 94,477 clips).** Raw structure clean (0 errors, all frames
 complete, no pose-less frames, no no-hand clip); 43 clips with frame-number gaps (the audit's counter counted
 positions shifted after a gap, not missing frames — fixed to `frame_gaps` + `missing_frames`; the
