@@ -283,6 +283,29 @@ pose wrist), so wrist side alone cannot separate stacked real pairs from copies.
 A further feature (e.g. whether the *other* pose wrist is also at the hands) would need a fresh
 calibration set and a fresh holdout, from recordings not used here.
 
+**Ghost rule v4 — decision round 2 (planned 2026-11-14; criteria fixed before sampling).**
+One bounded round; the frozen rule above is the baseline (B0). Fresh recordings only: every recording
+content already seen (main samples, low-IoU frames, contact sheets — `ghost_labels/used_content.csv`,
+262 WLASL / 199 PopSign) is excluded; new calibration and holdout sets split by content. Sampling:
+frames with both slots and IoU ≥ 0.1, 18 per wrist stratum per set per dataset — `both_own` (B0 says
+two), `stacked` (not both own, both pose wrists ≤ 0.3 from a hand: stacked / crossed real pairs *and*
+PRAY / HELP-style copies), `one_far` (a pose wrist away from the hands). Labels: copy / two / unclear and,
+for a copy, the side of the physical hand (left / right / unclear, judged from the arm in the video, not
+the pose-wrist dots). The other pose wrist being near is supporting evidence, not proof of two hands: a
+candidate must improve the measured trade-off, not just keep both in the `stacked` stratum.
+
+Procedure: candidates and the slot-assignment rule are chosen on the new calibration only, committed,
+then evaluated once on the new holdout. Rates are weighted by each stratum's share of the dataset's
+IoU ≥ 0.1 frames. Reported separately per dataset: real-hand deletions, copy retentions, wrong-side
+assignments (copies with a side label), assignment-uncertain share, unclear share.
+
+Adoption criteria (holdout): a candidate C replaces B0 iff (1) its weighted errors (deletions +
+retentions) summed over WLASL and PopSign are lower than B0's, and (2) on neither dataset is its weighted
+deletion rate or retention rate worse than B0's by more than 0.02. Otherwise B0 stays. The assignment
+rule is adopted iff confident assignments are on the wrong side in ≤ 5 % of side-labelled copies on
+holdout; otherwise every copy is assigned by the fixed tie-break and flagged `assignment_uncertain`.
+Whatever passes is v4; remaining errors are documented, with no further holdout-driven revision.
+
 **Aspect: same clips, builder vs browser preparation (`islr-aspect-wlasl`, `aspect_compare`, 824
 held-out-signer WLASL clips, 0 errors).** k builder / browser median 1.08 (p10–p90 0.99–1.23).
 

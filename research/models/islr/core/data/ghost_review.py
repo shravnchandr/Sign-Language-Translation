@@ -136,7 +136,38 @@ boxed). Judge the middle frame.
            elsewhere in the crop
   two      the skeletons track two different physical hands
   unclear  cannot tell from the tile (blur, occlusion, resolution) — never guess
+For a copy, also the side of the physical hand both skeletons track: left / right (the signer's own;
+the video is unmirrored, so the signer's left hand is on the image right) / unclear. Judge the side
+from the video — which arm the hand belongs to (raw crops, neighbouring frames, full frame) — not from
+the pose-wrist dots, which are the evidence being evaluated.
 """
+
+WRIST_MARGIN, NEAR = 0.1, 0.3  # shoulder widths: own-side margin (v4 baseline), pose wrist "at the hands"
+
+
+def wrist_stratum(ev: pd.DataFrame) -> pd.Series:
+    """both_own: each slot's wrist nearer its own pose wrist by > WRIST_MARGIN (v4 baseline: two hands);
+    otherwise stacked (both pose wrists within NEAR of a hand wrist — stacked / crossed real hands and
+    PRAY / HELP-style copies) or one_far (a pose wrist away from the hands)."""
+    own = ((ev["lh_to_pose15"] + WRIST_MARGIN < ev["lh_to_pose16"])
+           & (ev["rh_to_pose16"] + WRIST_MARGIN < ev["rh_to_pose15"]))
+    near = (ev["pose15_to_hand"] < NEAR) & (ev["pose16_to_hand"] < NEAR)
+    return pd.Series(np.where(own, "both_own", np.where(near, "stacked", "one_far")), index=ev.index)
+
+
+def sample_strata(ev: pd.DataFrame, per_stratum: int, seed: int, exclude: set) -> pd.DataFrame:
+    """One frame per recording, per_stratum per wrist stratum and per set, among frames with both slots
+    detected and IoU >= LOW_IOU (the v4 rule's scope), from recordings whose content is not in
+    `exclude` (recordings already seen). Sets by recording content, as in sample_frames."""
+    import zlib
+
+    c = ev[(ev["iou"] >= LOW_IOU) & ~ev["content"].isin(exclude)].copy()
+    c["stratum"] = wrist_stratum(c)
+    c["bin"] = pd.cut(c["slot_landmark_dist"], BINS, right=False, labels=False)
+    c["set"] = ["holdout" if zlib.crc32(str(v).encode()) % 2 else "calibration" for v in c["content"]]
+    c = c.sample(frac=1, random_state=seed).drop_duplicates(["content", "stratum"])
+    return pd.concat([g.drop_duplicates("content").head(per_stratum)
+                      for _, g in c.groupby(["set", "stratum"])], ignore_index=True).drop_duplicates("content")
 
 
 def sample_frames(ev: pd.DataFrame, per_bin: int, seed: int) -> pd.DataFrame:
@@ -242,6 +273,10 @@ def main() -> None:
                    help="labelling set: this many frames per distance bin and per set (needs --evidence-all)")
     p.add_argument("--frames", default="", help="label exactly these frames instead of a sample: video:frame,... "
                    "(frame as in ghost_review.csv); pass their videos as --ids")
+    p.add_argument("--strata", type=int, default=0,
+                   help="labelling set by wrist stratum (both_own / stacked / one_far): this many frames per "
+                        "stratum and set, IoU >= LOW_IOU, excluding --exclude-content (needs --evidence-all)")
+    p.add_argument("--exclude-content", type=Path, help="CSV with a `content` column: recordings already seen")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", required=True, type=Path)
     a = p.parse_args()
@@ -286,7 +321,13 @@ def main() -> None:
           f"within 0.3 shoulder widths of a hand in {int(both.sum())} of them "
           f"({out.loc[both, 'video'].nunique()} clips)")
     print(f"{len(list(a.out.glob('*.png')))} contact sheets → {a.out}")
-    if a.sample or a.frames:
+    if a.strata:
+        excl = set(pd.read_csv(a.exclude_content)["content"]) if a.exclude_content else set()
+        pick = sample_strata(out, a.strata, a.seed, excl)
+        print(f"strata (frames available after exclusion): "
+              f"{wrist_stratum(out[(out['iou'] >= LOW_IOU) & ~out['content'].isin(excl)]).value_counts().to_dict()}")
+        label_sheets(out, clips, videos_by_stem(a.video_root, None), 0, a.seed, a.out, pick)
+    elif a.sample or a.frames:
         label_sheets(out, clips, videos_by_stem(a.video_root, None), a.sample, a.seed, a.out,
                      chosen_frames(out, a.frames) if a.frames else None)
 
@@ -342,7 +383,7 @@ def label_sheets(ev: pd.DataFrame, clips: pd.DataFrame, videos: dict, per_bin: i
     (out / "label_instructions.txt").write_text(LABELS)
     for st, g in pick.groupby("set"):
         ns = g["n"].sort_values().tolist()
-        g[["n"]].sort_values("n").assign(label="").to_csv(out / f"labels_{st}.csv", index=False)
+        g[["n"]].sort_values("n").assign(label="", side="").to_csv(out / f"labels_{st}.csv", index=False)
         for page in range(0, len(ns), 6):
             ts = [tiles[n] for n in ns[page:page + 6]]
             w = max(t.shape[1] for t in ts)
