@@ -283,6 +283,19 @@ pose wrist), so wrist side alone cannot separate stacked real pairs from copies.
 A further feature (e.g. whether the *other* pose wrist is also at the hands) would need a fresh
 calibration set and a fresh holdout, from recordings not used here.
 
+**ASL Citizen (`islr-audit-aslcitizen` + `inventory-aslcitizen`, extraction 07f23b7, 3 shards; research use
+only, data stays on Kaggle).** Coverage complete (8,557 selected = 8,557 extracted); 0 structure errors,
+no frame gaps, nothing mirrored, 0 exact duplicates; 135 clips with pose-less frames, 7 no-hand clips;
+frame sizes 640×480 (8,225), 960×540 (330), 480×640 (2); ~30 fps (probe). Upper-body pose values far
+outside the frame in 6.2 % (WLASL 0.05 %): webcam framing cuts the arms — pose wrists are then
+extrapolated, which weakens wrist evidence (ghost rule) on this dataset; to quantify with round 2's
+features. Signers: 51, official splits disjoint (35 / 5 / 11). The 280 `seed…` clips are all P52
+(the reference signer, one per gloss, train). Near-duplicate test: 8 same-gloss pairs ≤ 0.095, 5 under
+different ids — val–train (P39 / P52-seed BOY, P26 / P31 CARROT), test–val (P49 / P21 LIPS), train–train;
+**no test–train pair detected by these checks** (the split our evaluations depend on). As on ASL Signs,
+the pose-track test probably does not separate similar movements of different people, so this is a
+screen, not proof. Ghost rule fires in 1,232 clips (7,755 frames): v4 applies here too.
+
 **Ghost rule v4 — decision round 2 (planned 2026-11-14; criteria fixed before sampling).**
 One bounded round; the frozen rule above is the baseline (B0). Fresh recordings only: every recording
 content already seen (main samples, low-IoU frames, contact sheets — `ghost_labels/used_content.csv`,
