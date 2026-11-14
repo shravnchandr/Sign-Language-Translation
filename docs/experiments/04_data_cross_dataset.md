@@ -163,3 +163,31 @@ What it shows:
 its test split 70.9 → 86.7 %, mostly by learning its sign forms (variants 59 → 87 %; untrained synonym
 glosses unchanged), and WLASL 83.7 → 86.9 % (p = 0.004). Details in
 [03](03_phrases_and_browser.md#phrases06--asl-citizens-train-split-research-only-2026-11-12).
+
+### PopSign ASL v1.0: shippable extra signers, and do they overlap with ASL Signs? (2026-11-13)
+
+PopSign ASL v1.0 (Starner et al., NeurIPS 2023 D&B; **CC BY 4.0** at the source — credit it where a
+model trained on it ships; the Kaggle mirror `mrgeislinger/popsign-asl-v1-0-game-*` labels some
+parts differently, the source license governs). Same 250 signs as ASL Signs, from the same game,
+Deaf signers on phones. Game train split: 111,406 videos, 31 signers. `scripts/extract_popsign.py`
+takes 4 videos per (signer, sign), evenly spaced over the pair's recordings → 26,278 clips, MediaPipe
+Holistic 0.10.14 on Kaggle CPU in 12 shards (frames downscaled to 1280 px; 3 h-ish per shard, max 5
+sessions at once). `build_popsign_lmdb`: 0 errors; 24,946 clips at 1944×2592 and 1,332 at
+1080×1920 (portrait like ASL Signs, raw shoulder ratio 0.41 vs 0.40 → no aspect correction); 1 clip
+mirrored; both hands in some frame in 14 % of clips (ASL Signs 2 %); median 68 frames.
+
+**Signer overlap** (`islr.evaluation.signer_overlap`): neither dataset links its anonymised ids, so
+each signer gets a landmark fingerprint — face / body spacings ÷ shoulder width (pose eye, ear, mouth
+width, shoulder drop, lip width, inner-eyebrow gap, eyebrow-to-lip) and hand bone proportions — per
+clip median over frames, per signer median over clips, standardised and weighted by split-half
+reliability (face / body r ≈ 0.99, hand bones 0.6–0.9; unweighted, the 20 hand bones drowned the
+signal: AUC 0.85). Calibration on ASL Signs split halves (400 clips per signer): same person ≤ 0.32,
+different people ≥ 0.46, AUC 1.0. Negative control WLASL vs ASL Signs: nearest 0.49, 0 of 67 flagged.
+
+PopSign vs ASL Signs: 0 of 31 in the same-person range; three at 0.42–0.43 (closer than any two
+different ASL Signs signers), all to ASL Signs *training* signers (26734, 28656, 61333); the fold-0
+val signers (34503, 49445, 62590) are ≥ 0.57 from every PopSign signer. A screen, not proof (another
+phone / session may move a same-person distance up). Practical rule: score PopSign-trained models
+on ASL Citizen and WLASL; read ASL Signs held-out gains with caution (same recording set-up).
+Output: `results/phrases/phrases07-popsign/popsign_vs_aslsigns_overlap.json`; model results in
+[03](03_phrases_and_browser.md) (phrases07).

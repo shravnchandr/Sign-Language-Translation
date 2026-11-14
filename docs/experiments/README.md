@@ -11,9 +11,9 @@ has never seen — in the browser, from a webcam.
 | 0. VQ-VAE → translator | `research/models/vqvae_seq2seq/` | dormant | — |
 | A. Isolated classifier | `islr/isolated/` | fold 0: 0.686 single (GraphConformer), 0.708 ensemble | [01](01_isolated_runs.md), [02](02_isolated_folds.md) |
 | B. Fingerspelling pre-training | `islr/pretrain/` | no single-model gain; useful ensemble member | [02](02_isolated_folds.md) |
-| **C. Continuous phrases (CTC)** — product model | `islr/phrases/` | phrases05 (app since 2026-11-12) / phrases04: WLASL unseen signers 80.8 % single-sign, ASL Signs held-out 65 % top-1 / 81 % top-3; ASL Citizen (independent, research only) phrases04 68.7 %, phrases05 72.4 % | [03](03_phrases_and_browser.md) |
+| **C. Continuous phrases (CTC)** — product model | `islr/phrases/` | phrases05 (app since 2026-11-12) / phrases04: WLASL unseen signers 80.8 % single-sign, ASL Signs held-out 65 % top-1 / 81 % top-3; ASL Citizen (independent, research only) phrases04 68.7 %, phrases05 72.4 %; **phrases07** (+ PopSign, CC BY 4.0) = candidate browser model: ASL Citizen test 70.9 → 73.4 % exact (p = 2e-5), WLASL 84.2 %; 60-epoch schedules help only the training sources | [03](03_phrases_and_browser.md) |
 
-Data findings (one-hand training data, WLASL / MS-ASL / ASL Citizen) are in [04](04_data_cross_dataset.md);
+Data findings (one-hand training data, WLASL / MS-ASL / ASL Citizen / PopSign) are in [04](04_data_cross_dataset.md);
 open ideas in [ideas](ideas.md); Kaggle leaderboard context and the 1st-place recipe in
 [kaggle_reference](kaggle_reference.md).
 
@@ -24,7 +24,7 @@ open ideas in [ideas](ideas.md); Kaggle leaderboard context and the 1st-place re
 | [01_isolated_runs.md](01_isolated_runs.md) | Runs 001–005 on the default 3-signer split and the fixes between them |
 | [02_isolated_folds.md](02_isolated_folds.md) | Signer folds, review fixes, GraphConformer, bone aug, FS pre-training, VQ, AdaBN, ensembles, 1st-place anchor, error review |
 | [03_phrases_and_browser.md](03_phrases_and_browser.md) | phrases01–05, browser export, Kaggle GPU runner, live-test diagnoses, per-sign reliability |
-| [04_data_cross_dataset.md](04_data_cross_dataset.md) | Training-data limits and cross-dataset tests (WLASL, MS-ASL, ASL Citizen) |
+| [04_data_cross_dataset.md](04_data_cross_dataset.md) | Training-data limits and cross-dataset tests (WLASL, MS-ASL, ASL Citizen, PopSign + signer overlap) |
 | [ideas.md](ideas.md) | Pending ideas, by priority |
 | [kaggle_reference.md](kaggle_reference.md) | Leaderboard context, 1st-place recipe |
 
