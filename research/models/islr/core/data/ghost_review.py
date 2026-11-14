@@ -46,7 +46,10 @@ def frame_evidence(raw: dict, status: np.ndarray, aspect: float) -> pd.DataFrame
         near = [min(np.linalg.norm((pose[t, w, :2] - h) * scale) for h in hw) / sw for w in (15, 16)]
         d = {f"{s}_to_pose{w}": float(np.linalg.norm((h[t, 0, :2] - pose[t, w, :2]) * scale) / sw)
              for s, h in (("lh", lh), ("rh", rh)) for w in (15, 16)}
-        size = np.mean([np.linalg.norm((h[t, 9, :2] - h[t, 0, :2]) * scale) for h in (lh, rh)])
+        sizes = [np.linalg.norm((h[t, 9, :2] - h[t, 0, :2]) * scale) for h in (lh, rh)]  # wrist → middle MCP, projected
+        boxes = [np.linalg.norm((K._box(h[t])[2:] - K._box(h[t])[:2]) * scale) for h in (lh, rh)]  # box diagonal
+        size = np.mean(sizes)
+        d.update({"lh_size": sizes[0] / sw, "rh_size": sizes[1] / sw, "lh_box": boxes[0] / sw, "rh_box": boxes[1] / sw})
         rows.append({"frame": int(t), "iou": K._iou(K._box(lh[t]), K._box(rh[t])), **d,
                      # mean landmark distance between the two slots / hand size: ~0 = one hand fitted twice
                      "slot_landmark_dist": float(np.linalg.norm((lh[t, :, :2] - rh[t, :, :2]) * scale, axis=-1).mean()
@@ -122,7 +125,8 @@ def contact_sheet(video: str, raw: dict, status: np.ndarray, ev: pd.DataFrame, t
     return np.vstack([head, sheet])
 
 
-BINS = [0.0, 0.05, 0.1, 0.2, 0.3, 0.45, 0.6, 0.8]  # slot landmark distance / hand size
+BINS = [0.0, 0.05, 0.1, 0.2, 0.3, 0.45, 0.6, 0.8, np.inf]  # slot landmark distance / hand size (last = tail)
+LOW_IOU = 0.1  # control band: IoU in [LOW_IOU, AMBIGUOUS_IOU), any distance — bin -1
 
 
 LABELS = """Label each numbered row: video crop 3 frames before | the frame | the same frame with the
@@ -136,14 +140,16 @@ boxed). Judge the middle frame.
 
 
 def sample_frames(ev: pd.DataFrame, per_bin: int, seed: int) -> pd.DataFrame:
-    """One candidate frame (both hands detected, IoU >= AMBIGUOUS_IOU) per recording, per_bin per
-    distance bin and per set. Sets are assigned by recording *content* (raw-landmark hash), not video
+    """One frame per recording, per_bin per band and per set. Bands: copy distance (both hands detected,
+    IoU >= AMBIGUOUS_IOU) up to an open tail, plus a control band of frames just below the overlap gate
+    (LOW_IOU <= IoU < AMBIGUOUS_IOU) — v4 decides copies only above the gate, so labels there test it. Sets are assigned by recording *content* (raw-landmark hash), not video
     id: WLASL files identical recordings under several ids, which must not land in both sets — the
     threshold is chosen on `calibration` recordings and checked on different `holdout` recordings."""
     import zlib
 
-    c = ev[ev["iou"] >= K.AMBIGUOUS_IOU].copy()
+    c = ev[ev["iou"] >= LOW_IOU].copy()
     c["bin"] = pd.cut(c["slot_landmark_dist"], BINS, right=False, labels=False)
+    c.loc[c["iou"] < K.AMBIGUOUS_IOU, "bin"] = -1  # below the overlap gate: controls (a copy should not get here)
     c = c[c["bin"].notna()]
     c["set"] = ["holdout" if zlib.crc32(str(v).encode()) % 2 else "calibration" for v in c["content"]]
     c = c.sample(frac=1, random_state=seed).drop_duplicates(["content", "bin"])  # one frame per recording and bin
