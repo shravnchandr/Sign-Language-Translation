@@ -239,6 +239,36 @@ dataset rate. The policy is chosen on calibration recordings, frozen, then evalu
 reference judgements, not ground truth. Sampling covers copy-distance bands up to an open tail (PopSign: 2,200 rejected frames, 11 %, lie above 0.8) and a control band just below the overlap gate (IoU 0.1–0.2) — 8 distance bands + 1 control, 216 frames per dataset. Near-copy joints do not guarantee box overlap (a thin hand shifted sideways: distance 0.09, IoU 0), so whether v4 keeps an overlap gate is decided by measured performance, not geometry; the 8 WLASL frames with IoU < 0.1 and distance < 0.3 (6 clips) and PopSign's 2 with IoU < 0.2 are labelled separately (`ghost_review --frames`). Result (labelled blind, then the key opened): WLASL 7 two / 1 unclear / 0 copy — all palms pressed together seen edge-on (REQUEST, PRAY, BOOKSHELF, TRAFFIC, MOTIVATE), copy distance 0.19–0.30 yet two real hands; the current rule keeps both (correct); a distance-only cut near 0.3 would delete a hand in every one. Both slots' wrists are nearer their own pose wrist in 7 of 8 (#3 only by 0.141 vs 0.146, a near-tie); in #2 (BOOKSHELF, labelled two) the right slot's wrist is nearer pose wrist 15 (0.154 vs 0.182) — so wrist proximity does not separate every case either; it is a feature to test, not a result. An independent labelling (partly blinded: the summary had been seen) agreed on 8 / 10; the two disagreements (WLASL #6, #7: two vs unclear, each way) are why `unclear` stays available. PopSign 2 unclear (JACKET, two fists, one skeleton collapsed; right-slot wrist nearer the left pose wrist, 0.22 vs 0.32). 10 frames from 7 clips: evidence that distance alone is not enough, not a rate. Labels: `results/kaggle/lowiou-*/out/labels_*_claude.csv`. Each slot's projected hand size and box diagonal are logged, so a foreshortened denominator can be told from a loose fit. Rule candidates in order, on calibration only: distance alone; distance with the IoU gate (the baseline — it already keeps the low-IoU palm-to-palm pairs); distance plus the recorded hand-to-pose-wrist distances; a handedness (thumb-side) feature only if those fail. PopSign's rejected frames differ from WLASL's (fewer exact copies: 14 % vs 37 % below 0.1; pose wrists further apart, 0.55 vs 0.36 shoulder widths), so one threshold is not assumed to fit both. ASL Signs (no video) gets a statistical transfer check only —
 changed decisions, fallbacks, distance distributions — and its correctness is stated as unverified.
 
+**Ghost rule v4 — calibration result and frozen copy rule (2026-11-14, before the holdout key was opened).**
+432 tiles labelled blind (`docs/experiments/ghost_labels/`, committed in 2ccbf0f before any key was
+opened). Calibration: WLASL 85 labelled (41 two, 44 copy, 23 unclear), PopSign 103 (0 two, 103 copy, 5
+unclear). Errors per rule (counts; w = weighted by each band's share of the dataset's IoU ≥ 0.1 frames):
+
+| Rule (copy decision) | WLASL real hands deleted | WLASL copies kept | PopSign copies kept |
+|---|---|---|---|
+| current (IoU gate + window) | 12 / 41 (w 0.090) | 2 / 44 (w 0.012) | 18 / 103 (w 0.092) |
+| distance < 0.3 | 3 / 41 | 13 / 44 | 56 / 103 |
+| distance < 0.3, IoU ≥ 0.2 | 3 / 41 | 13 / 44 | 56 / 103 |
+| distance < 0.8 | 18 / 41 | 0 / 44 | 19 / 103 |
+| wrist side, margin 0.05 | 5 / 41 (w 0.051) | 5 / 44 (w 0.023) | 6 / 103 (w 0.036) |
+| **wrist side, margin 0.1** | **5 / 41 (w 0.051)** | **3 / 44 (w 0.014)** | **4 / 103 (w 0.014)** |
+| wrist side, margin 0.15 | 7 / 41 (w 0.102) | 1 / 44 | 2 / 103 |
+
+Findings: joint distance does not detect copies on PopSign (labelled copies in every band, 11 / 12 in the
+tail ≥ 0.8); the IoU ≥ 0.2 gate costs PopSign (11 / 11 labelled frames at IoU 0.1–0.2 are copies); on
+WLASL the 12 labelled frames at IoU 0.1–0.2 and the 8 below 0.1 are all real pairs. Wrist-side evidence
+is the strongest single feature; adding distance does not improve it.
+
+**Frozen copy rule** (chosen on calibration only; margin 0.1 = the largest before deletions rise —
+preservation breaks the near-tie): for a frame with both slots detected, the slots are a **copy** iff
+(a) IoU of their 2D boxes ≥ 0.1 and (b) NOT both [left-slot wrist nearer pose 15 than pose 16 by more than
+0.1] and [right-slot wrist nearer pose 16 than pose 15 by more than 0.1] — distances in aspect-scaled
+image units / the clip's median shoulder width. Below IoU 0.1 both slots are kept (unlabelled there:
+2,470 WLASL and 60 PopSign frames would otherwise turn into copies, e.g. crossed arms). Scope of the
+error estimates: frames with IoU ≥ 0.1. Slot assignment of a copy is a separate decision, not evaluated
+by these labels (they do not record the side); its fallback frequency is reported, and the side needs
+its own labels before it is frozen. Next: this rule, unchanged, on the holdout labels.
+
 **Aspect: same clips, builder vs browser preparation (`islr-aspect-wlasl`, `aspect_compare`, 824
 held-out-signer WLASL clips, 0 errors).** k builder / browser median 1.08 (p10–p90 0.99–1.23).
 
