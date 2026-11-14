@@ -75,7 +75,12 @@ def main() -> None:
         d["full_path"] = [str(csv.parent / p_) for p_ in d["path"]]
         parts.append(d)
         print(f"{csv}: {len(d)} clips")
-    df = pd.concat(parts, ignore_index=True).drop_duplicates("path")
+    df = pd.concat(parts, ignore_index=True)
+    dup = df[df.duplicated("path", keep=False)]
+    if len(dup):  # e.g. v1 and v2 extraction outputs mounted together: never keep one silently
+        roots = sorted({str(Path(f).parent.parent) for f in dup["full_path"]})
+        raise SystemExit(f"{dup['path'].nunique()} clip paths appear in more than one shard folder "
+                         f"({roots[:4]}{' …' if len(roots) > 4 else ''}): mount one extraction version only")
 
     df["aslc_gloss"] = df["gloss"]
     df["sign"] = [gmap[g]["sign"] if g in gmap else None for g in df["gloss"]]
