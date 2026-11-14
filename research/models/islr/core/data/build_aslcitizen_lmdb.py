@@ -42,16 +42,18 @@ _GLOSS_MAP = Path(__file__).with_name("aslcitizen_gloss_map.json")
 _SIGNER_OFFSET = 800_000  # apart from ASL Signs participant ids and WLASL's 900000 + signer
 
 
-def participant_number(p: str) -> int:
-    """'P15' / '15' → 15. A missing id, one without digits or with more than one number raises:
-    a made-up number would look like a real, separate signer."""
+def participant_number(p) -> int:
+    """'P15' / 'p15' / '15' / 15 → 15. Anything else raises — a missing id, a sign, extra characters
+    ('-1', 'P-1', 'P15_2'): a number pulled out of a malformed id would look like a real, separate
+    signer."""
     if isinstance(p, numbers.Real) and not isinstance(p, bool):  # read_csv gives numbers for numeric ids
-        nums = [str(int(p))] if p == p and float(p).is_integer() and p >= 0 else []
-    else:
-        nums = re.findall(r"\d+", p) if isinstance(p, str) else []
-    if len(nums) != 1:
-        raise ValueError(f"ASL Citizen participant id {p!r} is not one number")
-    return int(nums[0])
+        if p == p and float(p).is_integer() and p >= 0:
+            return int(p)
+    elif isinstance(p, str):
+        m = re.fullmatch(r"[Pp]?(\d+)", p.strip())
+        if m:
+            return int(m.group(1))
+    raise ValueError(f"ASL Citizen participant id {p!r} is not P<digits> or <digits>")
 
 
 def main() -> None:

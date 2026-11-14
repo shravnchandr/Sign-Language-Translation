@@ -268,9 +268,11 @@ def experiment_spec(args, sign2idx: dict, train_source, val_ds, releases: list, 
     recipe = {k: (str(v) if isinstance(v, Path) else v) for k, v in sorted(vars(args).items())}
     return {"code": code_revision(), "contract": CONTRACT_VERSION, "cache_version": CACHE_VERSION,
             "data": {"release": releases[0], "annotations": _annotations([sources[0], val_ds.source]),
-                     "share": shares[0], "manifest": _manifest(args.data_dir)},
-            "extra_data": [{"dir": d, "release": r, "annotations": _annotations([s]), "share": sh, "manifest": _manifest(d)}
-                           for d, s, r, sh in zip(args.extra_data_dir, sources[1:], releases[1:], shares[1:])],
+                     "manifest": _manifest(args.data_dir)},
+            "extra_data": [{"dir": d, "release": r, "annotations": _annotations([s]), "manifest": _manifest(d)}
+                           for d, s, r in zip(args.extra_data_dir, sources[1:], releases[1:])],
+            # the mixture (set by --extra-frac, the comparison variable) — kept apart from dataset identity
+            "sampling": {"data": shares[0], "extra_data": shares[1:]},
             "vocab": _sha(json.dumps(sign2idx, sort_keys=True).encode()),
             "init": _sha(Path(args.init).read_bytes()) if args.init else None,
             "val_set": _sha(json.dumps(val_set).encode()), "recipe": recipe}
@@ -278,8 +280,17 @@ def experiment_spec(args, sign2idx: dict, train_source, val_ds, releases: list, 
 
 def spec_differences(ref: dict, spec: dict, allowed: set) -> dict:
     """{field: (reference, this run)} for every difference not in `allowed` (recipe keys, or "code").
-    Code revisions differ also when either run had modified tracked files (not reproducible)."""
-    diff = {k: (ref.get(k), spec.get(k)) for k in spec if k not in ("extra_data", "recipe") and ref.get(k) != spec.get(k)}
+    Code revisions differ also when either run had modified tracked files (not reproducible). The
+    extra datasets and the sampling mixture are the comparison and may differ, but an extra dataset
+    of the same kind in both runs (e.g. WLASL all-gloss) must be the same release, same clips."""
+    diff = {k: (ref.get(k), spec.get(k)) for k in spec
+            if k not in ("extra_data", "recipe", "sampling") and ref.get(k) != spec.get(k)}
+    kind = lambda e: ((e.get("manifest") or {}).get("dataset"), (e.get("release") or {}).get("lmdb"))  # noqa: E731
+    mine = {kind(e): e for e in spec.get("extra_data", [])}
+    for e in ref.get("extra_data", []):
+        o = mine.get(kind(e))
+        if o is not None and (o.get("release"), o.get("annotations")) != (e.get("release"), e.get("annotations")):
+            diff[f"extra_data.{kind(e)[0]}"] = ((e.get("release"), e.get("annotations")), (o.get("release"), o.get("annotations")))
     if any((r or {}).get("dirty") for r in (ref.get("code"), spec.get("code"))):
         diff["code"] = (ref.get("code"), spec.get("code"))
     diff = {k: v for k, v in diff.items() if k not in allowed}

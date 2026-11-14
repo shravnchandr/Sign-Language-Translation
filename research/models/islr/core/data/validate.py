@@ -46,11 +46,16 @@ from ._cache_keys import CACHE_VERSION, lmdb_key, lmdb_length_key
 from .build_wlasl_lmdb import _process, signer_split
 
 
+# Bump whenever a check is added or tightened: reports written under an older policy no longer
+# admit a dataset (it must be validated again), so a release cannot pass on yesterday's checks.
+VALIDATION_POLICY = 2  # 1: 33b6971 (no coverage / prep_aspect checks); 2: e765dd4+ (coverage, prep_aspect, no-hand report)
+
+
 def require_accepted(data_dir, lmdb_path) -> dict:
     """Acceptance for training and scoring: a dataset is used only with a passing validation report
     (written by this module, with --raw-root) whose digests match what is opened now: the train.csv
     in data_dir and every clip it lists in the LMDB at lmdb_path. Exits otherwise. Returns
-    {"content", "csv"} — the release digests an experiment spec records."""
+    {"content", "csv", "lmdb"} — the release an experiment spec records."""
     from .dataset import _open_lmdb_env  # the datasets' own handle (an env opens once per process)
 
     rep_path = Path(data_dir) / "validation_report.json"
@@ -60,6 +65,8 @@ def require_accepted(data_dir, lmdb_path) -> dict:
     csv_path = Path(data_dir) / "train.csv"
     csv_digest = hashlib.sha256(csv_path.read_bytes()).hexdigest()[:16]
     problems = [m for ok, m in [
+        (rep.get("policy") == VALIDATION_POLICY,
+         f"validated under policy {rep.get('policy')}, current is {VALIDATION_POLICY} — run validate again"),
         (rep.get("passed") is True and not rep.get("failures"), f"validation failed: {rep.get('failures')}"),
         (rep.get("raw_resampled", 0) > 0, "validated without --raw-root (stored clips never compared with raw)"),
         ((rep.get("contract"), rep.get("cache_version")) == (K.CONTRACT_VERSION, CACHE_VERSION),
@@ -75,7 +82,7 @@ def require_accepted(data_dir, lmdb_path) -> dict:
         raise SystemExit(f"{data_dir}: not an accepted dataset — " + "; ".join(problems))
     print(f"Validated dataset {data_dir}: content {rep['content_digest']}, train.csv {csv_digest}, "
           f"{rep.get('clips')} clips ({rep.get('raw_resampled')} re-prepared from raw)")
-    return {"content": rep["content_digest"], "csv": csv_digest}
+    return {"content": rep["content_digest"], "csv": csv_digest, "lmdb": Path(lmdb_path).name}
 
 
 def main() -> None:
@@ -142,6 +149,10 @@ def main() -> None:
         if "wlasl_half" in df:
             want = np.where(df["participant_id"].isin(frozen), "test", "train")
             check(bool((df["wlasl_half"].to_numpy() == want).all()), "wlasl_half = frozen split")
+    if dataset == "aslsigns":  # validation folds are frozen (dataset.signer_fold_split)
+        folds = json.loads(Path(__file__).with_name("asl_signs_folds.json").read_text())["folds"]
+        unknown = sorted(set(df["participant_id"].astype(str)) - set(folds))
+        check(not unknown, f"every ASL Signs signer in the frozen folds ({len(unknown)} not, e.g. {unknown[:3]})")
     if dataset == "aslcitizen" and "split" in df:
         s = {k: set(g["participant_id"]) for k, g in df.groupby("split")}
         check(all(not (s[x] & s[y]) for x in s for y in s if x < y), f"ASL Citizen splits signer-disjoint ({sorted(s)})")
@@ -222,7 +233,7 @@ def main() -> None:
         report["raw_resampled"] = len(sample) - unfound
     env.close()
 
-    report.update({"failures": fails, "passed": not fails, "lmdb": a.lmdb_path.name, "content_digest": digest,
+    report.update({"policy": VALIDATION_POLICY, "failures": fails, "passed": not fails, "lmdb": a.lmdb_path.name, "content_digest": digest,
                    "csv_digest": csv_digest, "contract": K.CONTRACT_VERSION, "cache_version": CACHE_VERSION,
                    "raw_resampled": report.get("raw_resampled", 0), "code": code_revision()})
     (a.data_dir / "validation_report.json").write_text(json.dumps(report, indent=1, default=str))

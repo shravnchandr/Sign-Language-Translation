@@ -41,12 +41,13 @@ from .build_wlasl_lmdb import exclude_duplicates, finish_build, load_shards, wri
 _SIGNER_OFFSET = 700_000  # apart from ASL Signs ids, ASL Citizen (800000 + n) and WLASL (900000 + n)
 
 
-def participant_number(user: str) -> int:
-    """'4a.6001' / 'gtsignstudy4a.8031' → 6001 / 8031 (digits after the last '.'). A missing id or one
-    without that number raises: a made-up number would look like a real, separate signer."""
-    m = re.search(r"(\d+)$", str(user).rsplit(".", 1)[-1]) if isinstance(user, str) else None
+def participant_number(user) -> int:
+    """'4a.6001' / 'gtsignstudy4a.8031' → 6001 / 8031: the whole id must be <letters/digits>.<digits>.
+    Anything else raises ('-1', '4a.-1', a missing id): a number pulled out of a malformed id would
+    look like a real, separate signer."""
+    m = re.fullmatch(r"[A-Za-z0-9]+\.(\d+)", user.strip()) if isinstance(user, str) else None
     if m is None:
-        raise ValueError(f"PopSign user id {user!r} has no trailing number")
+        raise ValueError(f"PopSign user id {user!r} is not <letters/digits>.<digits>")
     return int(m.group(1))
 
 

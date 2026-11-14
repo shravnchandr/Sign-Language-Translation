@@ -170,3 +170,15 @@ wrong-slot single hands, ghosts, mirroring, extraction version, exact and near-d
 (different signer ids / across splits), labels and signers, split disjointness, aspect correction
 (per-clip ratio k vs the geometric (W/H)/0.75 the app applies), WLASL instance frame ranges;
 PopSign: same-recording test against all ASL Signs clips; inventories: coverage + fps probe.
+
+### Review of ce3c929 (three more, fixed)
+
+| Finding | Fix | Reproduction now |
+|---|---|---|
+| A report in the previous format passed `require_accepted` although today's checks fail that release | `VALIDATION_POLICY` (2) written into every report and required at preflight; bump on any new check. Also new under policy 2: every ASL Signs signer must be in the frozen folds | old report → "validated under policy None, current is 2 — run validate again"; revalidated → accepted |
+| phrases05 → phrases07 could not be compared: the ASL Signs share (70 → 50 %) sat inside the strictly compared `data` | Shares moved to `sampling` (free, like `--extra-frac`); dataset entries keep only identity (release + annotations). An extra dataset present in both runs (same type + LMDB name) must be the same release | adding a dataset (0.7 → 0.5): "Spec matches"; another PopSign release: `differs in ['extra_data.popsign']`; seed: `recipe.seed`, `val_set`; uncommitted code: `code` |
+| '-1', 'P-1' (Citizen) and '-1', '4a.-1' (PopSign) parsed as signer 1 | Whole-id formats: Citizen `P<digits>` / `<digits>` / a non-negative integer; PopSign `<letters/digits>.<digits>`; anything else raises | those four and 'P15_2', '1.5', '4a.6001x', '.6001', NaN, None all rejected; real ids (P15, 4a.6001, gtsignstudy4a.8031) parse |
+
+Every release must therefore be validated with the current code after it is built; the audit
+notebooks report example signer ids per dataset before any build, so an unexpected id format shows
+up there first.
