@@ -17,6 +17,7 @@ both hands detected).
 
 import argparse
 import glob
+import hashlib
 import os
 from pathlib import Path
 
@@ -124,24 +125,34 @@ def contact_sheet(video: str, raw: dict, status: np.ndarray, ev: pd.DataFrame, t
 BINS = [0.0, 0.05, 0.1, 0.2, 0.3, 0.45, 0.6, 0.8]  # slot landmark distance / hand size
 
 
+LABELS = """Label each numbered row: video crop 3 frames before | the frame | the same frame with the
+left_hand slot red, the right_hand slot blue, pose wrists as dots | 3 frames after | full frame (crop
+boxed). Judge the middle frame.
+  copy     both skeletons track the same physical hand — even when a second real hand is visible
+           elsewhere in the crop
+  two      the skeletons track two different physical hands
+  unclear  cannot tell from the tile (blur, occlusion, resolution) — never guess
+"""
+
+
 def sample_frames(ev: pd.DataFrame, per_bin: int, seed: int) -> pd.DataFrame:
-    """One candidate frame (both hands detected, IoU >= AMBIGUOUS_IOU) per clip, per_bin per distance
-    bin and per set: clips are split by a hash of their id into `calibration` and `holdout`, so the
-    threshold is chosen on one set of clips and checked on another."""
+    """One candidate frame (both hands detected, IoU >= AMBIGUOUS_IOU) per recording, per_bin per
+    distance bin and per set. Sets are assigned by recording *content* (raw-landmark hash), not video
+    id: WLASL files identical recordings under several ids, which must not land in both sets — the
+    threshold is chosen on `calibration` recordings and checked on different `holdout` recordings."""
     import zlib
 
     c = ev[ev["iou"] >= K.AMBIGUOUS_IOU].copy()
     c["bin"] = pd.cut(c["slot_landmark_dist"], BINS, right=False, labels=False)
     c = c[c["bin"].notna()]
-    c["set"] = ["holdout" if zlib.crc32(str(v).encode()) % 2 else "calibration" for v in c["video"]]
-    c = c.sample(frac=1, random_state=seed).drop_duplicates(["video", "bin"])  # one frame per clip and bin
-    pick = c.groupby(["set", "bin"], group_keys=False).apply(
-        lambda g: g.drop_duplicates("video").head(per_bin))
-    return pick.sort_values(["set", "bin"]).reset_index(drop=True)
+    c["set"] = ["holdout" if zlib.crc32(str(v).encode()) % 2 else "calibration" for v in c["content"]]
+    c = c.sample(frac=1, random_state=seed).drop_duplicates(["content", "bin"])  # one frame per recording and bin
+    return pd.concat([g.head(per_bin) for _, g in c.groupby(["set", "bin"])], ignore_index=True)
 
 
-def frame_tile(img, raw: dict, t: int, label: str):
-    """[video crop | same crop with left slot red, right slot blue, pose wrists 15 / 16] around the hands.
+def frame_tile(img, raw: dict, t: int, label: str, before=None, after=None):
+    """One row: [video crop 3 frames before | crop | same crop with left slot red, right slot blue, pose
+    wrists 15 / 16 | crop 3 frames after | full frame with the crop boxed], cropped around the hands.
     Both slots are drawn solid: the tile must not show what the current rule decided."""
     import cv2
 
@@ -161,10 +172,18 @@ def frame_tile(img, raw: dict, t: int, label: str):
         if x == x:
             cv2.circle(ann, (int(x * W), int(y * H)), 5, color, -1, cv2.LINE_AA)
             cv2.circle(ann, (int(x * W), int(y * H)), 5, (255, 255, 255), 1, cv2.LINE_AA)
-    crops = [cv2.resize(im[b:d, a:c], (240, 240), interpolation=cv2.INTER_CUBIC) for im in (img, ann)]
-    tile = np.hstack(crops)
-    cv2.putText(tile, label, (4, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 3, cv2.LINE_AA)
-    cv2.putText(tile, label, (4, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
+
+    def crop(im):
+        return np.zeros((220, 220, 3), np.uint8) if im is None else \
+            cv2.resize(im[b:d, a:c], (220, 220), interpolation=cv2.INTER_CUBIC)
+
+    full = img.copy()
+    cv2.rectangle(full, (a, b), (c, d), (0, 255, 255), max(1, W // 300))
+    full = cv2.resize(full, (int(W * 220 / H), 220), interpolation=cv2.INTER_AREA)
+    sep = np.full((220, 6, 3), 255, np.uint8)
+    tile = np.hstack([crop(before), sep, crop(img), crop(ann), sep, crop(after), sep, full])
+    cv2.putText(tile, label, (4, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 3, cv2.LINE_AA)
+    cv2.putText(tile, label, (4, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
     return tile
 
 
@@ -187,7 +206,10 @@ def _clip_evidence(job: tuple):
     """(stem, gloss, full path, aspect, draw) → (evidence frame rows, and for a clip to draw: pose-kept
     raw arrays, status, original frame ids)."""
     stem, gloss, full, aspect, draw = job
-    raw = K.raw_arrays(pd.read_parquet(full))
+    df = pd.read_parquet(full)
+    content = hashlib.sha1(pd.util.hash_pandas_object(df[["frame", "type", "landmark_index", "x", "y", "z"]],
+                                                      index=False).values.tobytes()).hexdigest()
+    raw = K.raw_arrays(df)
     orig = np.nonzero(~np.isnan(raw["pose"][:, 0, 0]))[0]  # contract step 1: pose-less frames dropped
     raw = {k: v[orig] for k, v in raw.items()}
     status, _ = K.resolve_ghosts(raw, aspect)
@@ -195,6 +217,7 @@ def _clip_evidence(job: tuple):
     if not ev.empty:
         ev.insert(0, "video", stem)
         ev.insert(1, "gloss", gloss)
+        ev.insert(2, "content", content)
     return (ev, raw, status, orig) if draw else (ev, None, None, None)
 
 
@@ -265,30 +288,45 @@ def videos_by_stem(root: Path, ids) -> dict:
 
 
 def label_sheets(ev: pd.DataFrame, clips: pd.DataFrame, videos: dict, per_bin: int, seed: int, out: Path) -> None:
-    """sample_frames → `label_<set>_bin<k>.png` (numbered tiles) + `label_frames.csv` (number → frame,
-    evidence, empty `label` column to fill: copy / two / unclear)."""
+    """sample_frames → per set, shuffled tiles numbered #n with nothing else shown,
+    6 per sheet (`label_<set>_<page>.png`) + `labels_<set>.csv` (n, empty label) to fill in, and `label_key.csv`
+    (n → recording, frame, distance, bin, evidence) — kept apart so the score being calibrated is not
+    seen while labelling. Exits unless every selected frame is rendered and every sheet written."""
     import cv2
 
-    pick = sample_frames(ev, per_bin, seed)
-    pick.insert(0, "n", range(len(pick)))
-    pick["label"] = ""
-    pick.to_csv(out / "label_frames.csv", index=False)
+    pick = sample_frames(ev, per_bin, seed).sample(frac=1, random_state=seed + 1)  # shuffled
+    pick.insert(0, "n", range(1, len(pick) + 1))
     clip = clips.set_index("stem")
     tiles: dict = {}
     for stem, g in pick.groupby("video"):
+        if stem not in videos:
+            continue
         r = clip.loc[stem]
         _, raw, _, orig = _clip_evidence((stem, r["gloss"], r["full_path"], r["aspect"], True))
-        frames = read_frames(videos[stem], {int(orig[f]) for f in g["frame"]}) if stem in videos else {}
+        frames = read_frames(videos[stem], {int(orig[f]) + k for f in g["frame"] for k in (-3, 0, 3)} - {-3, -2, -1})
         for x in g.itertuples():
-            img = frames.get(int(orig[x.frame]))
-            if img is not None:
-                tiles.setdefault((x.set, int(x.bin)), []).append(
-                    (x.n, frame_tile(img, raw, int(x.frame), f"#{x.n} d={x.slot_landmark_dist:.2f}")))
-    for (st, b), ts in tiles.items():
-        ts = [t for _, t in sorted(ts, key=lambda z: z[0])]
-        ts += [np.zeros_like(ts[0])] * (-len(ts) % 3)
-        cv2.imwrite(str(out / f"label_{st}_bin{b}.png"), np.vstack([np.hstack(ts[i:i + 3]) for i in range(0, len(ts), 3)]))
-    print(f"{len(pick)} frames to label ({pick.groupby('set').size().to_dict()}) → label_*.png, label_frames.csv")
+            t = int(orig[x.frame])
+            if t in frames:
+                tiles[x.n] = frame_tile(frames[t], raw, int(x.frame), f"#{x.n}", frames.get(t - 3), frames.get(t + 3))
+    missing = sorted(set(pick["n"]) - set(tiles))
+    if missing:
+        m = pick[pick["n"].isin(missing)]
+        raise SystemExit(f"{len(missing)} of {len(pick)} selected frames not rendered (video missing or frame "
+                         f"not decoded): {m[['video', 'frame']].head(10).to_dict('records')}")
+    pick.to_csv(out / "label_key.csv", index=False)
+    (out / "label_instructions.txt").write_text(LABELS)
+    for st, g in pick.groupby("set"):
+        ns = g["n"].sort_values().tolist()
+        g[["n"]].sort_values("n").assign(label="").to_csv(out / f"labels_{st}.csv", index=False)
+        for page in range(0, len(ns), 6):
+            ts = [tiles[n] for n in ns[page:page + 6]]
+            w = max(t.shape[1] for t in ts)
+            ts = [cv2.copyMakeBorder(t, 0, 4, 0, w - t.shape[1], cv2.BORDER_CONSTANT, value=(255, 255, 255)) for t in ts]
+            f = out / f"label_{st}_{page // 6 + 1:02d}.png"
+            if not cv2.imwrite(str(f), np.vstack(ts)):
+                raise SystemExit(f"could not write {f}")
+    print(f"{len(pick)} frames rendered ({pick.groupby('set').size().to_dict()}) → label_<set>_<page>.png, "
+          f"labels_<set>.csv; key in label_key.csv")
 
 
 if __name__ == "__main__":
