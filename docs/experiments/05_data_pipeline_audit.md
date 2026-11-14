@@ -181,22 +181,23 @@ wrong-slot single hands, ghosts, mirroring, extraction version, exact and near-d
 (per-clip ratio k vs the geometric (W/H)/0.75 the app applies), WLASL instance frame ranges;
 PopSign: same-recording test against all ASL Signs clips; inventories: coverage + fps probe.
 
-**WLASL (`islr-audit-wlasl` + `inventory-wlasl`, extraction eb9fea3, 4 shards) — no blocking finding.**
+**WLASL (`islr-audit-wlasl` + `inventory-wlasl`, extraction eb9fea3, 4 shards) — two checks open (below).**
 
 | Check | Result | Action |
 |---|---|---|
 | Coverage | inventory 11,980 selected = 11,980 extracted, none missing or extra | — |
 | Raw structure | 0 read / structure errors, no frame gaps, every frame complete, T = shard n_frames, nothing mirrored | — |
 | Pose-less frames | 3,672 clips with 1, 17 with 2–3 (≤ 6 % of a clip) — the known first frame | dropped by the contract |
-| Hands | left 44 % / right 63 % of frames; ghosts 23,005 frames (2,242 clips), ambiguous 27,204; single hand in the farther slot 637 of 208,675 frames (348 clips, median 1 frame) | contract unchanged (single hands are never moved) |
+| Hands | left 44 % / right 63 % of frames; ambiguous 27,204 frames; single hand in the farther slot 637 of 208,675 frames (348 clips, median 1 frame) | single hands are never moved |
+| Ghost rejections | a hand rejected in 23,005 frames of **2,242 clips (18.7 %)**; in 19 clips in every kept frame — all signers 10 / 11 at 288×192, all signs where the hands touch (pray ×2, help, aid, assist, thankful, grateful, sandwich, wait, …). Duplicate fits or real touching hands? The statistics cannot tell | **open**: visual review against the video (`ghost_review`), before the rule is left unchanged |
 | No-hand clips | 9, all signer 11 at 288×192 | reported by validate |
 | Exact raw duplicates | 1,883 clips in 849 groups; 823 groups carry different glosses — WLASL files one video under synonyms (gay / lesbian, attention / pay attention / concentrate, ill / sick); 4 groups under two signer ids (15 and 59, both in the test half) | builders already drop conflicting groups and keep one copy of a repeat (`excluded_clips.csv`) |
-| Near-duplicate recordings | 68 same-signer pairs, 1 pair under different ids (10 / 11, distance 0.084); **0 pairs across the frozen signer halves** | no leak |
+| Near-duplicate recordings | same gloss, equal length only: 68 same-signer pairs, 1 pair under different ids (10 / 11, distance 0.084); 0 pairs across the frozen signer halves | no cross-half duplicate detected by these checks (trimmed or re-encoded copies under other glosses are not covered) |
 | Signers | 78 ids; 11 (72 clips) not in `wlasl_signer_split.json` → train; none has a shared-sign gloss, so the 206-sign test half is unchanged | — |
 | Official splits | 75 signers in two splits (WLASL's splits are not signer-disjoint) | we use the frozen signer halves only |
 | Frame ranges | 2 instances carry a range, none longer than it | — |
-| Frame rate | JSON says 25 for every clip; files: 29.97 (45 %), 23.98 (16 %), 30 (13 %), 25 (7 %) | spec text and builder docstring corrected; the column is metadata only (nothing trains on it) |
-| Aspect | 8 frame sizes (288×192 … 1920×1080); per-clip k / geometric k median 1.05 (p10–p90 0.94–1.20) | input to the aspect comparison (step 2) |
+| Frame rate | JSON says 25 for every clip; probe of 300 files: 29.97 (45 %), 23.98 (16 %), 30 (13 %), 25 (7 %), ~30.2–30.4 (≈ 15 %), one 50 fps | spec text and builder docstring corrected (mostly 24–30); the column is metadata only (nothing trains on it) |
+| Aspect | 8 frame sizes (288×192 … 1920×1080); `ratio_raw / 0.40` vs the geometric (W/H)/0.75: median 1.05 (p10–p90 0.94–1.20). An approximation — the builder's `aspect_factor()` also accounts for shoulder tilt and falls back to 1 outside its bounds | **open**: the comparison (step 2) uses the actual `aspect_factor()` on the same clips |
 
 ### Review of ce3c929 (three more, fixed)
 
