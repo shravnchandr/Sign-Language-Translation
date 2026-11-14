@@ -129,7 +129,8 @@ def main() -> None:
     src.add_argument("--input-root", type=Path,
                      help="searched recursively for the shard_*.csv of `scripts/extract_wlasl.py` "
                           "(fresh tracker per video); mount one extraction version only")
-    p.add_argument("--wlasl-json", type=Path, help="WLASL_v0.3.json (signer, fps, source, split)")
+    p.add_argument("--wlasl-json", type=Path, help="WLASL_v0.3.json (signer, fps, source, split); "
+                   "with --input-root, found under it when not given")
     p.add_argument("--sign-map", required=True, type=Path,
                    help="ASL Signs sign_to_prediction_index_map.json")
     p.add_argument("--out-dir", required=True, type=Path)
@@ -183,6 +184,10 @@ def main() -> None:
     if args.limit:
         df = df.head(args.limit)
 
+    if args.input_root and not args.wlasl_json:  # e.g. the wlasl-processed dataset mounted next to the shards
+        hits = sorted(args.input_root.rglob("WLASL_v0.3.json"))
+        args.wlasl_json = hits[0] if hits else None
+        print(f"WLASL json: {args.wlasl_json}")
     meta = {}
     if args.wlasl_json and args.wlasl_json.exists():
         for entry in json.loads(args.wlasl_json.read_text()):
