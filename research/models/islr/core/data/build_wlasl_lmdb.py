@@ -142,12 +142,12 @@ def _process(args: tuple) -> tuple:
 _SHARD_DIR = re.compile(r"^(?P<version>.+)-s(?P<k>\d+)$")
 
 
-def load_shards(root: Path, keyword: str, expect: int | None = None) -> tuple[pd.DataFrame, dict]:
+def load_shards(root: Path, keyword: str, expect: int) -> tuple[pd.DataFrame, dict]:
     """The shard_*.csv of ONE extraction version under root (path containing keyword) → clips.
 
     Each shard must sit inside its notebook's folder `<version>-s<k>` (how Kaggle mounts a
     kernel's output). Exits when shards of two versions are mounted together, a shard number
-    repeats, shards are missing (with --expect-shards), a clip path is in two shard folders, or a
+    repeats, shards 0..expect-1 are not all there, a clip path is in two shard folders, or a
     listed parquet does not exist. Returns the clips (with full_path) and a manifest."""
     import glob  # follows symlinked folders (Path.rglob does not); Kaggle mounts may be links
 
@@ -166,7 +166,7 @@ def load_shards(root: Path, keyword: str, expect: int | None = None) -> tuple[pd
     ks = sorted(k for _, k in found.values())
     if len(set(ks)) != len(ks):
         raise SystemExit(f"shard numbers repeat: {ks}")
-    if expect is not None and ks != list(range(expect)):
+    if not expect or ks != list(range(expect)):
         raise SystemExit(f"expected shards 0..{expect - 1} of {versions[0]}, found {ks}")
     parts = []
     for c in csvs:
@@ -222,7 +222,7 @@ def main() -> None:
     p.add_argument("--lmdb-name", default="wlasl.lmdb.mdb")
     p.add_argument("--workers", type=int, default=os.cpu_count() or 4)
     p.add_argument("--limit", type=int, default=0, help="first N clips (smoke test)")
-    p.add_argument("--expect-shards", type=int, help="with --input-root: require shards 0..N-1")
+    p.add_argument("--expect-shards", type=int, help="required with --input-root: shards 0..N-1 must all be there")
     p.add_argument("--allow-errors", type=int, default=0, help="clips that may fail before the build exits")
     args = p.parse_args()
 
@@ -239,6 +239,8 @@ def main() -> None:
         df = df[[f not in set(missing) for f in df["full_path"]]]
         manifest = {"version": str(args.wlasl_dir), "shards": None, "clips_listed": len(df) + len(missing)}
     else:
+        if not args.expect_shards:
+            p.error("--input-root needs --expect-shards N (completeness is checked, never assumed)")
         df, manifest = load_shards(args.input_root, "wlasl", args.expect_shards)
         df = df.rename(columns={"gloss": "sign"})
         df["video_id"] = df["video"].map(lambda v: os.path.splitext(v)[0])

@@ -60,7 +60,7 @@ def main() -> None:
     p.add_argument("--lmdb-name", default="aslcitizen.lmdb.mdb")
     p.add_argument("--workers", type=int, default=os.cpu_count() or 4)
     p.add_argument("--limit", type=int, default=0, help="first N clips (smoke test)")
-    p.add_argument("--expect-shards", type=int, help="require shards 0..N-1 of one extraction version")
+    p.add_argument("--expect-shards", type=int, required=True, help="shards 0..N-1 of one extraction version must all be there")
     p.add_argument("--allow-errors", type=int, default=0, help="clips that may fail before the build exits")
     args = p.parse_args()
 
