@@ -63,3 +63,34 @@ Checked and sound:
 7. Then, in order: re-score unchanged checkpoints under the new contract (CPU) to measure what the
    contract alone changes; retrain the baseline (phrases05 recipe) and phrases07 on the v2 data —
    one run each; the record re-runs of phrases01–06 only after that, on the final pipeline.
+
+## Status (2026-11-14, after the review of the plan)
+
+Done and verified (commits 0e41084 … c706bd4):
+- **Ghost rule calibrated on data and video**, not on wrist proximity: in two-hand frames the
+  hands' 2D box IoU is ≤ 0.2 in 97–100 % of frames for ASL Citizen / WLASL / ASL Signs, while
+  PopSign's are mostly > 0.5. Six PopSign videos downloaded and overlaid: goose / any / same /
+  chocolate show one visible hand drawn in both slots (IoU 0.20–0.99, inter-hand distance up to
+  0.40 shoulder widths — so the earlier "< 0.1" distance criterion was too narrow, and
+  nearest-wrist assignment too aggressive: both pose wrists sit on the one hand). Rule: IoU ≥ 0.5
+  ghost; 0.2–0.5 ghost only within 2 frames of a clear ghost, else kept as AMBIGUOUS (provenance);
+  single hands never re-slotted.
+- **Contract** (`contract.py`) used by every builder, dataset, evaluator and the fixtures; stored
+  presence = canonicalised detections with per-hand provenance (absent / kept / ghost / ambiguous).
+  On clean real clips the stored coordinates are bit-identical to the legacy path (ASL Signs
+  256/256, PopSign 141/141, ASL Citizen 16/16) and presence equals the raw detections exactly.
+  It also exposed one pose-less frame at the start of each WLASL clip (legacy origin 0 → a jump).
+- **check_contract**: 9 synthetic cases, expected status, bit-exact features across isolated
+  training, phrase training, evaluation and fixtures — passes.
+- **Builders**: `--expect-shards` mandatory; duplicates excluded after final label mapping with a
+  manifest; extraction notebooks embed the cells of the pinned commit (digest recorded); resume
+  only reuses output of the same extraction version.
+- **validate.py** gate; end to end on 257 real competition clips: build → validate (200/200
+  re-prepared from raw byte-identical) → 1-epoch phrase run → `--frozen-spec` reproduces exactly,
+  refuses a changed seed.
+
+Next: when the v2 extraction finishes, rebuild every LMDB once on Kaggle (ASL Signs from the
+competition parquets; WLASL / ASL Citizen / PopSign from the v2 shards), validate each with
+`--raw-root`, publish as new datasets; re-score the frozen phrases05 / phrases07 checkpoints on them
+(CPU); then phrases05 and phrases07 retrained once with a shared `--frozen-spec`. The app must apply
+the same contract (preprocess.json now states the ghost rule, segment and integer subsample).
