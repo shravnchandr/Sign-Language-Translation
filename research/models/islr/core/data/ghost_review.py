@@ -33,8 +33,9 @@ NAMES = {K.ABSENT: "-", K.KEPT: "kept", K.GHOST: "GHOST", K.AMBIGUOUS: "ambig"}
 
 
 def frame_evidence(raw: dict, status: np.ndarray, aspect: float) -> pd.DataFrame:
-    """Per frame with both hands detected: IoU, statuses, each pose wrist's distance to the nearer
-    hand wrist and the two hand wrists' distance to each other (shoulder widths, aspect-scaled)."""
+    """Per frame with both hands detected: IoU, statuses, each slot's wrist distance to both pose
+    wrists, each pose wrist's distance to the nearer hand wrist, the two hand wrists' and the two pose
+    wrists' distance (shoulder widths, aspect-scaled) and the slots' mean landmark distance / hand size."""
     lh, rh, pose = raw["left_hand"], raw["right_hand"], raw["pose"]
     scale = np.array([aspect, 1.0])
     sw = np.nanmedian(np.linalg.norm((pose[:, 11, :2] - pose[:, 12, :2]) * scale, axis=-1))
@@ -42,7 +43,13 @@ def frame_evidence(raw: dict, status: np.ndarray, aspect: float) -> pd.DataFrame
     for t in np.nonzero(~np.isnan(lh[:, 0, 0]) & ~np.isnan(rh[:, 0, 0]))[0]:
         hw = [lh[t, 0, :2], rh[t, 0, :2]]
         near = [min(np.linalg.norm((pose[t, w, :2] - h) * scale) for h in hw) / sw for w in (15, 16)]
-        rows.append({"frame": int(t), "iou": K._iou(K._box(lh[t]), K._box(rh[t])),
+        d = {f"{s}_to_pose{w}": float(np.linalg.norm((h[t, 0, :2] - pose[t, w, :2]) * scale) / sw)
+             for s, h in (("lh", lh), ("rh", rh)) for w in (15, 16)}
+        size = np.mean([np.linalg.norm((h[t, 9, :2] - h[t, 0, :2]) * scale) for h in (lh, rh)])
+        rows.append({"frame": int(t), "iou": K._iou(K._box(lh[t]), K._box(rh[t])), **d,
+                     # mean landmark distance between the two slots / hand size: ~0 = one hand fitted twice
+                     "slot_landmark_dist": float(np.linalg.norm((lh[t, :, :2] - rh[t, :, :2]) * scale, axis=-1).mean()
+                                                 / max(size, 1e-6)),
                      "left_status": NAMES[int(status[t, 0])], "right_status": NAMES[int(status[t, 1])],
                      "pose15_to_hand": near[0], "pose16_to_hand": near[1],
                      "hand_wrists_apart": float(np.linalg.norm((hw[0] - hw[1]) * scale) / sw),
