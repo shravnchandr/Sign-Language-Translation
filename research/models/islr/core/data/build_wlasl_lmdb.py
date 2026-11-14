@@ -1,9 +1,10 @@
 """Build an ASL-Signs-compatible LMDB from WLASL landmark parquets (shared signs only).
 
-Input: the output of the `shravnchandr/preprocess-wlasl-mediapipe` Kaggle notebook
-(competition-format parquets from legacy MediaPipe Holistic, `train.csv` with
-path / sign / video_id / n_frames) and optionally `WLASL_v0.3.json` for signer, fps,
-source and split. WLASL glosses are mapped onto ASL Signs labels with
+Input: either --input-root, the shards of `scripts/extract_wlasl.py` (fresh MediaPipe tracker
+per video; `shard_<k>.csv` + `train_landmark_files/`, found recursively), or --wlasl-dir, the
+output of the old `shravnchandr/preprocess-wlasl-mediapipe` notebook (one tracker reused across a
+worker's videos; `train.csv` with path / sign / video_id / n_frames); optionally
+`WLASL_v0.3.json` for signer, fps, source and split. WLASL glosses are mapped onto ASL Signs labels with
 `wlasl_gloss_map.json` (233 glosses → 206 signs; 32 are synonyms such as
 father → dad — `--strict` keeps identical names only).
 
@@ -122,8 +123,12 @@ def _process(args: tuple) -> tuple:
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    p.add_argument("--wlasl-dir", required=True, type=Path,
-                   help="folder with train.csv and train_landmark_files/")
+    src = p.add_mutually_exclusive_group(required=True)
+    src.add_argument("--wlasl-dir", type=Path,
+                     help="folder with train.csv and train_landmark_files/ (old single-notebook extraction)")
+    src.add_argument("--input-root", type=Path,
+                     help="searched recursively for the shard_*.csv of `scripts/extract_wlasl.py` "
+                          "(fresh tracker per video); mount one extraction version only")
     p.add_argument("--wlasl-json", type=Path, help="WLASL_v0.3.json (signer, fps, source, split)")
     p.add_argument("--sign-map", required=True, type=Path,
                    help="ASL Signs sign_to_prediction_index_map.json")
@@ -140,7 +145,28 @@ def main() -> None:
     idx2sign = {v: k for k, v in sign2idx.items()}
     gmap = json.loads(_GLOSS_MAP.read_text())
 
-    df = pd.read_csv(args.wlasl_dir / "train.csv", dtype={"video_id": str})
+    if args.wlasl_dir:
+        df = pd.read_csv(args.wlasl_dir / "train.csv", dtype={"video_id": str})
+        df["full_path"] = [str(args.wlasl_dir / p_) for p_ in df["path"]]
+    else:
+        shards = sorted(args.input_root.rglob("shard_*.csv"))
+        shards = [c for c in shards if "wlasl" in str(c).lower()] or shards
+        if not shards:
+            raise SystemExit(f"no shard_*.csv under {args.input_root}")
+        parts = []
+        for csv in shards:
+            d = pd.read_csv(csv, dtype={"video": str})
+            d["full_path"] = [str(csv.parent / p_) for p_ in d["path"]]
+            parts.append(d)
+            print(f"{csv}: {len(d)} clips")
+        df = pd.concat(parts, ignore_index=True)
+        dup = df[df.duplicated("path", keep=False)]
+        if len(dup):  # e.g. two extraction versions mounted together: never keep one silently
+            roots = sorted({str(Path(f).parent.parent) for f in dup["full_path"]})
+            raise SystemExit(f"{dup['path'].nunique()} clip paths appear in more than one shard folder "
+                             f"({roots[:4]}{' …' if len(roots) > 4 else ''}): mount one extraction version only")
+        df = df.rename(columns={"gloss": "sign"})
+        df["video_id"] = df["video"].map(lambda v: os.path.splitext(v)[0])
     df["wlasl_gloss"] = df["sign"]
     df["sign"] = df["wlasl_gloss"].map(lambda g: idx2sign.get(gmap[g]) if g in gmap
                                        else g if g in sign2idx else None)
@@ -153,7 +179,7 @@ def main() -> None:
         vocab.update({g: len(sign2idx) + i for i, g in enumerate(extra)})
         df["sign"] = df["sign"].fillna(df["wlasl_gloss"])
     df = df[df["sign"].notna()].copy()
-    df = df[[(args.wlasl_dir / p_).exists() for p_ in df["path"]]]
+    df = df[[os.path.exists(f) for f in df["full_path"]]]
     if args.limit:
         df = df.head(args.limit)
 
@@ -174,7 +200,7 @@ def main() -> None:
     lmdb_path = args.out_dir / args.lmdb_name
     env = lmdb.open(str(lmdb_path), subdir=False, map_size=1 << 36)
     stats, errors = {}, []
-    jobs = [(p_, str(args.wlasl_dir / p_)) for p_ in df["path"]]
+    jobs = list(zip(df["path"], df["full_path"]))
     with ProcessPoolExecutor(args.workers) as pool, env.begin(write=True) as txn:
         for path, data, n, k, raw, both, err in tqdm(pool.map(_process, jobs, chunksize=8),
                                                     total=len(jobs)):
