@@ -64,10 +64,19 @@ os.makedirs(f"{OUT}/train_landmark_files", exist_ok=True)
 PARTS = (("pose", 33, "pose_landmarks"), ("left_hand", 21, "left_hand_landmarks"),
          ("right_hand", 21, "right_hand_landmarks"), ("face", 468, "face_landmarks"))
 
+# A fresh Holistic per video: in video mode MediaPipe tracks from the previous frame, so a tracker
+# shared across a worker's videos let one clip's last pose / hands seed the next clip's first frames.
+# FRESH_TRACKER = False restores the shared tracker (how the WLASL / ASL Citizen / PopSign shards
+# up to 2026-11-13 were extracted) for comparisons.
+FRESH_TRACKER = globals().get("FRESH_TRACKER", True)
+
+def new_tracker():
+    return mp.solutions.holistic.Holistic(static_image_mode=False, model_complexity=1,
+                                          min_detection_confidence=0.5, min_tracking_confidence=0.5)
+
 def init():
     global holistic
-    holistic = mp.solutions.holistic.Holistic(static_image_mode=False, model_complexity=1,
-                                              min_detection_confidence=0.5, min_tracking_confidence=0.5)
+    holistic = None if FRESH_TRACKER else new_tracker()
 
 N_LM = sum(n for _, n, _ in PARTS)
 TYPES = np.concatenate([[part] * n for part, n, _ in PARTS])
@@ -77,6 +86,7 @@ def extract(job):
     video, out = job
     if os.path.exists(out):
         return out, (pd.read_parquet(out, columns=["frame"])["frame"].nunique(), None, None, None)
+    tracker = new_tracker() if FRESH_TRACKER else holistic
     cap = cv2.VideoCapture(video)
     frames, size = [], (None, None)
     while True:
@@ -87,7 +97,7 @@ def extract(job):
         if MAX_SIDE and max(size) > MAX_SIDE:
             f = MAX_SIDE / max(size)
             img = cv2.resize(img, (round(size[0] * f), round(size[1] * f)), interpolation=cv2.INTER_AREA)
-        res = holistic.process(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        res = tracker.process(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
         xyz = np.full((N_LM, 3), np.nan, dtype=np.float32)
         i = 0
         for part, n, attr in PARTS:
@@ -97,6 +107,8 @@ def extract(job):
             i += n
         frames.append(xyz)
     cap.release()
+    if FRESH_TRACKER:
+        tracker.close()
     if not frames:
         return out, (0, None, None, None)
     T = len(frames)
