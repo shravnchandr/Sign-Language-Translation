@@ -223,10 +223,20 @@ def _content(sources) -> str:
     return "+".join(parts)
 
 
+_ANNOTATION_COLS = ("path", "sign", "participant_id", "split", "wlasl_half", "kind", "synonym")
+
+
+def _annotations(sources) -> str:
+    """Digest of the annotations the run uses: per clip path, label, signer and split-like columns
+    (the tensor digest says nothing about what a clip is labelled)."""
+    rows = pd.concat([s.df[[c for c in _ANNOTATION_COLS if c in s.df]] for s in sources]).drop_duplicates("path")
+    return _sha(rows.sort_values("path").to_csv(index=False).encode())
+
+
 def _manifest(data_dir: str) -> dict | None:
     man = Path(data_dir) / "build_manifest.json"
     m = json.loads(man.read_text()) if man.exists() else None
-    return {k: m.get(k) for k in ("version", "dataset", "content_digest", "contract", "cache_version")} if m else None
+    return {k: m.get(k) for k in ("version", "dataset", "content_digest", "csv_digest", "contract", "cache_version")} if m else None
 
 
 # Recipe arguments two compared runs may differ in (the extra training data is the comparison;
@@ -246,8 +256,9 @@ def experiment_spec(args, sign2idx: dict, train_source, val_ds) -> dict:
     val_set = [(s[0], s[1], [paths[c] for c in s[3]], s[4]) for s in val_ds.specs]
     recipe = {k: (str(v) if isinstance(v, Path) else v) for k, v in sorted(vars(args).items())}
     return {"contract": CONTRACT_VERSION, "cache_version": CACHE_VERSION,
-            "data": {"content": _content([sources[0], val_ds.source]), "manifest": _manifest(args.data_dir)},
-            "extra_data": [{"dir": d, "content": _content([s]), "manifest": _manifest(d)}
+            "data": {"content": _content([sources[0], val_ds.source]),
+                     "annotations": _annotations([sources[0], val_ds.source]), "manifest": _manifest(args.data_dir)},
+            "extra_data": [{"dir": d, "content": _content([s]), "annotations": _annotations([s]), "manifest": _manifest(d)}
                            for d, s in zip(args.extra_data_dir, sources[1:])],
             "vocab": _sha(json.dumps(sign2idx, sort_keys=True).encode()),
             "init": _sha(Path(args.init).read_bytes()) if args.init else None,

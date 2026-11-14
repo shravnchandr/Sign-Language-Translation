@@ -248,8 +248,11 @@ def finish_build(lmdb_path: Path, paths: list[str], errors: list, allow_errors: 
     digest = content_digest(env, paths)
     env.close()
 
+    import hashlib
+
+    csv_digest = hashlib.sha256((lmdb_path.parent / "train.csv").read_bytes()).hexdigest()[:16]
     manifest = {**manifest, "dataset": dataset, "aspect_correction": aspect_correction,
-                "allow_errors": allow_errors, "content_digest": digest,
+                "allow_errors": allow_errors, "content_digest": digest, "csv_digest": csv_digest,
                 "clips_written": len(paths), "errors": len(errors), "error_examples": errors[:20],
                 "lmdb": lmdb_path.name, "contract": CONTRACT_VERSION, "cache_version": CACHE_VERSION,
                 "contract_counts": contract_summary({p_: stats[p_] for p_ in paths}) if stats else None,

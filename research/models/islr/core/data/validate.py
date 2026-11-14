@@ -7,7 +7,7 @@ Exits non-zero when any hard check fails; writes validation_report.json next to 
 Hard checks:
   - build_manifest.json present, built with this contract and cache version; build errors within
     the allowance recorded at build time; dataset type = the train.csv schema; content digest
-    recomputed from the LMDB = the manifest's
+    recomputed from the LMDB = the manifest's; train.csv digest = the manifest's (annotations)
   - every train.csv path has a data + length key; stored length = clip length = n_frames
   - every clip: finite, (T > 0, COORD_FEAT); presence binary and = status in {KEPT, AMBIGUOUS};
     status codes valid; a hand never present has an all-zero block
@@ -62,9 +62,12 @@ def main() -> None:
     check(man.get("errors", 1) <= man.get("allow_errors", 0),
           f"build errors {man.get('errors')} within the allowance it was built with ({man.get('allow_errors', 0)})")
     report["manifest"] = {k: man.get(k) for k in ("version", "dataset", "aspect_correction", "shards", "clips_listed",
-                                                   "clips_written", "errors", "allow_errors", "content_digest",
+                                                   "clips_written", "errors", "allow_errors", "content_digest", "csv_digest",
                                                    "contract_counts", "commit")}
 
+    csv_digest = hashlib.sha256((a.data_dir / "train.csv").read_bytes()).hexdigest()[:16]
+    check(csv_digest == man.get("csv_digest"),
+          f"train.csv digest {csv_digest} = manifest {man.get('csv_digest')} (labels / signers / splits unchanged since the build)")
     df = pd.read_csv(a.data_dir / "train.csv")
     sign_map = json.loads((a.data_dir / "sign_to_prediction_index_map.json").read_text())
     check(df["sign"].isin(sign_map).all(), f"labels in the sign map ({int((~df['sign'].isin(sign_map)).sum())} not)")

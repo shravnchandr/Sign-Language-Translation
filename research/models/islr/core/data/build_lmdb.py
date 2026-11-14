@@ -157,6 +157,7 @@ def build_lmdb(
     env.close()
     manifest = {"version": "asl-signs-competition", "dataset": "aslsigns", "aspect_correction": False,
                 "allow_errors": errors if allow_errors else 0, "content_digest": digest,
+                "csv_digest": __import__("hashlib").sha256((data_dir / "train.csv").read_bytes()).hexdigest()[:16],
                 "shards": None, "clips_listed": n, "clips_written": written + skipped,
                 "errors": errors, "lmdb": lmdb_path.name, "contract": CONTRACT_VERSION, "cache_version": CACHE_VERSION,
                 "contract_counts": contract_summary(stats) if stats else None, "resumed_clips": skipped}
