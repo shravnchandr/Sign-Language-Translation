@@ -47,6 +47,7 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 
+from ..revision import code_revision
 from ._cache_keys import CACHE_VERSION, lmdb_key, lmdb_length_key
 
 _GLOSS_MAP = Path(__file__).with_name("wlasl_gloss_map.json")
@@ -140,7 +141,7 @@ def _process(args: tuple) -> tuple:
         coords[:, 2::3] *= k  # z
         pres = clip["presence"].astype(bool)
         info = {"n": len(coords), "k": k, "raw": raw, "both": float((pres[:, 0] & pres[:, 1]).mean()),
-                "content": content, **clip["stats"]}
+                "content": content, "prep_aspect": float(aspect), **clip["stats"]}
         return path, dump_clip(clip), info, None
     except Exception as e:  # noqa: BLE001 — reported per clip
         return path, None, None, str(e)
@@ -188,13 +189,30 @@ def contract_summary(stats: dict) -> dict:
 _SHARD_DIR = re.compile(r"^(?P<version>.+)-s(?P<k>\d+)$")
 
 
-def load_shards(root: Path, keyword: str, expect: int) -> tuple[pd.DataFrame, dict]:
+def _selection(c: Path, k: int, inventory: pd.DataFrame | None) -> tuple[set, set, str]:
+    """(selected paths, paths recorded as failed, where the selection came from) for shard k whose
+    shard_<k>.csv is c: the shard's own selected_<k>.csv (extractions since the coverage fix) or
+    the --inventory (selection re-run at the extraction's commit by scripts/extraction_inventory.py)."""
+    own, failed = c.with_name(f"selected_{k}.csv"), c.with_name(f"failed_{k}.csv")
+    fail = set(pd.read_csv(failed)["path"]) if failed.exists() else set()
+    if own.exists():
+        return set(pd.read_csv(own)["path"]), fail, own.name
+    if inventory is not None and k in set(inventory["shard"]):
+        return set(inventory.loc[inventory["shard"] == k, "path"]), fail, "inventory"
+    raise SystemExit(f"shard {k} ({c.parent}): no selected_{k}.csv and not in --inventory — a shard's clip "
+                     "list alone cannot show which selected videos are missing (scripts/extraction_inventory.py)")
+
+
+def load_shards(root: Path, keyword: str, expect: int, inventory: Path | None = None,
+                allow_missing: int = 0) -> tuple[pd.DataFrame, dict]:
     """The shard_*.csv of ONE extraction version under root (path containing keyword) → clips.
 
     Each shard must sit inside its notebook's folder `<version>-s<k>` (how Kaggle mounts a
     kernel's output). Exits when shards of two versions are mounted together, a shard number
-    repeats, shards 0..expect-1 are not all there, a clip path is in two shard folders, or a
-    listed parquet does not exist. Returns the clips (with full_path) and a manifest."""
+    repeats, shards 0..expect-1 are not all there, a clip path is in two shard folders, a listed
+    parquet does not exist, a listed clip was never selected, or more than allow_missing selected
+    videos are not listed (a video that failed to decode is dropped from shard_<k>.csv). Returns
+    the clips (with full_path) and a manifest with the coverage accounting."""
     import glob  # follows symlinked folders (Path.rglob does not); Kaggle mounts may be links
 
     csvs = sorted(Path(c) for c in glob.glob(f"{root}/**/shard_*.csv", recursive=True) if keyword in c.lower())
@@ -214,12 +232,28 @@ def load_shards(root: Path, keyword: str, expect: int) -> tuple[pd.DataFrame, di
         raise SystemExit(f"shard numbers repeat: {ks}")
     if not expect or ks != list(range(expect)):
         raise SystemExit(f"expected shards 0..{expect - 1} of {versions[0]}, found {ks}")
-    parts = []
+    inv = pd.read_csv(inventory) if inventory else None
+    inv_meta = json.loads(Path(inventory).with_suffix(".json").read_text()) if inventory and Path(inventory).with_suffix(".json").exists() else None
+    parts, missing_sel, recorded_failed, selected_n, sources = [], [], [], 0, {}
     for c in csvs:
         d = pd.read_csv(c, dtype={"video": str})
         d["full_path"] = [str(c.parent / p_) for p_ in d["path"]]
         parts.append(d)
-        print(f"{c}: {len(d)} clips")
+        k = found[c][1]
+        sel, fail, sources[k] = _selection(c, k, inv)
+        listed = set(d["path"])
+        if listed - sel:
+            raise SystemExit(f"shard {k}: {len(listed - sel)} listed clips were never selected, e.g. {sorted(listed - sel)[0]}")
+        if listed & fail:
+            raise SystemExit(f"shard {k}: {len(listed & fail)} clips are both listed and recorded as failed")
+        miss = sorted(sel - listed)
+        missing_sel += miss
+        recorded_failed += [m for m in miss if m in fail]
+        selected_n += len(sel)
+        print(f"{c}: {len(d)} clips of {len(sel)} selected ({len(miss)} missing; selection from {sources[k]})")
+    if len(missing_sel) > allow_missing:
+        raise SystemExit(f"{len(missing_sel)} selected videos are not in the shard lists (allowed {allow_missing}; "
+                         f"{len(recorded_failed)} recorded as failed), e.g. {missing_sel[:3]}")
     df = pd.concat(parts, ignore_index=True)
     dup = df[df.duplicated("path", keep=False)]
     if len(dup):
@@ -229,13 +263,20 @@ def load_shards(root: Path, keyword: str, expect: int) -> tuple[pd.DataFrame, di
     missing = [f for f in df["full_path"] if not os.path.exists(f)]
     if missing:
         raise SystemExit(f"{len(missing)} listed parquets do not exist, e.g. {missing[0]}")
-    return df, {"version": versions[0], "shards": ks, "clips_listed": len(df), "csvs": [str(c) for c in csvs]}
+    coverage = {"selected": selected_n, "listed": len(df), "missing": len(missing_sel),
+                "missing_recorded_failed": len(recorded_failed), "allow_missing": allow_missing,
+                "missing_paths": missing_sel, "selection_sources": sources, "inventory": inv_meta}
+    return df, {"version": versions[0], "shards": ks, "clips_listed": len(df), "csvs": [str(c) for c in csvs],
+                "coverage": coverage}
 
 
 def finish_build(lmdb_path: Path, paths: list[str], errors: list, allow_errors: int, manifest: dict,
-                 stats: dict | None = None, dataset: str = "", aspect_correction: bool = True) -> None:
+                 stats: dict | None = None, dataset: str = "", aspect_correction: bool = True,
+                 attempted: int | None = None) -> None:
     """Fail on clip errors beyond --allow-errors, check every written path has data + length keys,
-    and write build_manifest.json next to the LMDB."""
+    and write build_manifest.json next to the LMDB. attempted = clips sent to the contract (the
+    listed clips minus those filtered out, e.g. labels outside the vocabulary): the manifest's
+    coverage then accounts for every listed clip (filtered + errors + excluded duplicates + written)."""
     if len(errors) > allow_errors:
         raise SystemExit(f"{len(errors)} clips failed (allowed {allow_errors}), e.g. {errors[:3]}")
     from .contract import CONTRACT_VERSION, content_digest
@@ -251,12 +292,21 @@ def finish_build(lmdb_path: Path, paths: list[str], errors: list, allow_errors: 
     import hashlib
 
     csv_digest = hashlib.sha256((lmdb_path.parent / "train.csv").read_bytes()).hexdigest()[:16]
+    excl = lmdb_path.parent / "excluded_clips.csv"
+    n_excl = len(pd.read_csv(excl)) if excl.exists() else 0
+    if attempted is not None:
+        cov = manifest.setdefault("coverage", {"selected": manifest.get("clips_listed"), "listed": manifest.get("clips_listed"),
+                                               "missing": 0})
+        cov.update({"filtered": cov["listed"] - attempted, "build_errors": len(errors),
+                    "excluded_duplicates": n_excl, "written": len(paths)})
+        if cov["filtered"] + len(errors) + n_excl + len(paths) != cov["listed"]:
+            raise SystemExit(f"coverage does not add up: {cov}")
     manifest = {**manifest, "dataset": dataset, "aspect_correction": aspect_correction,
                 "allow_errors": allow_errors, "content_digest": digest, "csv_digest": csv_digest,
                 "clips_written": len(paths), "errors": len(errors), "error_examples": errors[:20],
                 "lmdb": lmdb_path.name, "contract": CONTRACT_VERSION, "cache_version": CACHE_VERSION,
                 "contract_counts": contract_summary({p_: stats[p_] for p_ in paths}) if stats else None,
-                "commit": os.environ.get("REPO_COMMIT")}
+                "code": code_revision()}
     (lmdb_path.parent / "build_manifest.json").write_text(json.dumps(manifest, indent=1))
     print(f"manifest: {manifest['version']} shards {manifest['shards']}, {len(paths)} clips, {len(errors)} errors")
 
@@ -282,6 +332,9 @@ def main() -> None:
     p.add_argument("--limit", type=int, default=0, help="first N clips (smoke test)")
     p.add_argument("--expect-shards", type=int, help="required with --input-root: shards 0..N-1 must all be there")
     p.add_argument("--allow-errors", type=int, default=0, help="clips that may fail before the build exits")
+    p.add_argument("--inventory", type=Path, help="selection inventory (scripts/extraction_inventory.py) for shards "
+                   "without their own selected_<k>.csv")
+    p.add_argument("--allow-missing", type=int, default=0, help="selected videos that may be absent from the shard lists")
     args = p.parse_args()
 
     sign2idx = json.loads(args.sign_map.read_text())
@@ -295,11 +348,13 @@ def main() -> None:
         if len(missing) > args.allow_errors:
             raise SystemExit(f"{len(missing)} listed parquets do not exist, e.g. {missing[0]}")
         df = df[[f not in set(missing) for f in df["full_path"]]]
-        manifest = {"version": str(args.wlasl_dir), "shards": None, "clips_listed": len(df) + len(missing)}
+        manifest = {"version": str(args.wlasl_dir), "shards": None, "clips_listed": len(df),
+                    "coverage": {"selected": None, "listed": len(df), "missing": len(missing),
+                                 "note": "old single-notebook extraction: selection not recorded (validate.py fails it)"}}
     else:
         if not args.expect_shards:
             p.error("--input-root needs --expect-shards N (completeness is checked, never assumed)")
-        df, manifest = load_shards(args.input_root, "wlasl", args.expect_shards)
+        df, manifest = load_shards(args.input_root, "wlasl", args.expect_shards, args.inventory, args.allow_missing)
         df = df.rename(columns={"gloss": "sign"})
         df["video_id"] = df["video"].map(lambda v: os.path.splitext(v)[0])
     df["wlasl_gloss"] = df["sign"]
@@ -342,6 +397,11 @@ def main() -> None:
     if signer.isna().any():  # an unknown signer would land in the train half (frozen split) — never guess
         raise SystemExit(f"{int(signer.isna().sum())} clips without a WLASL signer id (no shard participant "
                          f"and not in {args.wlasl_json}), e.g. {df.loc[signer.isna(), 'video_id'].iloc[0]}")
+    signer = pd.to_numeric(signer, errors="coerce")
+    invalid = signer.isna() | (signer < 0) | (signer != signer.round())  # -1 + offset would pass as a signer
+    if invalid.any():
+        raise SystemExit(f"{int(invalid.sum())} clips with an invalid WLASL signer id (negative / non-integral), "
+                         f"e.g. {df.loc[invalid, 'video_id'].iloc[0]}: {signer[invalid].iloc[0]}")
     df["participant_id"] = _SIGNER_OFFSET + signer.astype(int)
     for col in ("fps", "source"):
         df[col] = [meta.get(v, {}).get(col) for v in df["video_id"]]
@@ -361,15 +421,17 @@ def main() -> None:
     lmdb_path = args.out_dir / args.lmdb_name
     env = lmdb.open(str(lmdb_path), subdir=False, map_size=1 << 36)
     aspect = (df["width"] / df["height"]) if {"width", "height"} <= set(df) else pd.Series(float("nan"), df.index)
-    stats, errors = write_clips(env, list(zip(df["path"], df["full_path"], [True] * len(df), aspect)), args.workers)
+    jobs = list(zip(df["path"], df["full_path"], [True] * len(df), aspect))
+    stats, errors = write_clips(env, jobs, args.workers)
     env.close()
 
     df = df[df["path"].isin(stats)].copy()
     df = exclude_duplicates(df, stats, args.out_dir)
-    df["aspect_k"], df["ratio_raw"], df["both_hands"], df["n_frames"] = zip(
-        *((stats[p_]["k"], stats[p_]["raw"], stats[p_]["both"], stats[p_]["n"]) for p_ in df["path"]))
+    df["aspect_k"], df["ratio_raw"], df["both_hands"], df["n_frames"], df["prep_aspect"] = zip(
+        *((stats[p_]["k"], stats[p_]["raw"], stats[p_]["both"], stats[p_]["n"], stats[p_]["prep_aspect"]) for p_ in df["path"]))
     cols = ["path", "participant_id", "sequence_id", "sign", "wlasl_gloss", "synonym", "fps",
-            "source", "split", "aspect_k", "ratio_raw", "both_hands", "n_frames"]
+            "source", "split", "aspect_k", "ratio_raw", "both_hands", "n_frames", "prep_aspect"]
+    cols += [c for c in ("width", "height") if c in df]  # frame size: validation re-prepares with it
     if args.all_glosses:
         test = set(signer_split(df)["test"])
         df["wlasl_half"] = np.where(df["participant_id"].isin(test), "test", "train")
@@ -379,7 +441,7 @@ def main() -> None:
               f"{df['wlasl_half'].value_counts().to_dict()} clips")
     df[cols].to_csv(args.out_dir / "train.csv", index=False)
     (args.out_dir / "sign_to_prediction_index_map.json").write_text(json.dumps(vocab))
-    finish_build(lmdb_path, df["path"].tolist(), errors, args.allow_errors, manifest, stats, "wlasl", True)
+    finish_build(lmdb_path, df["path"].tolist(), errors, args.allow_errors, manifest, stats, "wlasl", True, attempted=len(jobs))
 
     print(f"wrote {len(df)} clips → {lmdb_path} ({lmdb_path.stat().st_size / 2**20:.0f} MiB); "
           f"{len(errors)} errors" + (f", e.g. {errors[0]}" if errors else ""))

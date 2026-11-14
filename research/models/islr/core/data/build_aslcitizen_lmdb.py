@@ -27,6 +27,7 @@ Usage (inside `scripts/kaggle_run.py push ... --kernel <user>/extract-aslcitizen
 """
 
 import argparse
+import numbers
 import json
 import os
 import re
@@ -42,9 +43,15 @@ _SIGNER_OFFSET = 800_000  # apart from ASL Signs participant ids and WLASL's 900
 
 
 def participant_number(p: str) -> int:
-    """'P15' / '15' → 15; ids without digits get a stable hash below 100000."""
-    m = re.search(r"\d+", str(p))
-    return int(m.group()) if m else sum(map(ord, str(p))) % 100_000
+    """'P15' / '15' → 15. A missing id, one without digits or with more than one number raises:
+    a made-up number would look like a real, separate signer."""
+    if isinstance(p, numbers.Real) and not isinstance(p, bool):  # read_csv gives numbers for numeric ids
+        nums = [str(int(p))] if p == p and float(p).is_integer() and p >= 0 else []
+    else:
+        nums = re.findall(r"\d+", p) if isinstance(p, str) else []
+    if len(nums) != 1:
+        raise ValueError(f"ASL Citizen participant id {p!r} is not one number")
+    return int(nums[0])
 
 
 def main() -> None:
@@ -59,12 +66,15 @@ def main() -> None:
     p.add_argument("--limit", type=int, default=0, help="first N clips (smoke test)")
     p.add_argument("--expect-shards", type=int, required=True, help="shards 0..N-1 of one extraction version must all be there")
     p.add_argument("--allow-errors", type=int, default=0, help="clips that may fail before the build exits")
+    p.add_argument("--inventory", type=Path, help="selection inventory (scripts/extraction_inventory.py) for shards "
+                   "without their own selected_<k>.csv")
+    p.add_argument("--allow-missing", type=int, default=0, help="selected videos that may be absent from the shard lists")
     args = p.parse_args()
 
     sign2idx = json.loads(args.sign_map.read_text())
     gmap = {k: v for k, v in json.loads(_GLOSS_MAP.read_text()).items() if not k.startswith("_")}
 
-    df, manifest = load_shards(args.input_root, "aslcitizen", args.expect_shards)
+    df, manifest = load_shards(args.input_root, "aslcitizen", args.expect_shards, args.inventory, args.allow_missing)
 
     df["aslc_gloss"] = df["gloss"]
     df["sign"] = [gmap[g]["sign"] if g in gmap else None for g in df["gloss"]]
@@ -72,6 +82,9 @@ def main() -> None:
     df = df[df["sign"].isin(sign2idx)].copy()
     df["synonym"] = df["kind"] != "identical"
     df["participant_id"] = [_SIGNER_OFFSET + participant_number(x) for x in df["participant"]]
+    clash = df.groupby("participant_id")["participant"].nunique()
+    if (clash > 1).any():
+        raise SystemExit(f"ASL Citizen participant ids collide after numbering: {clash[clash > 1].index.tolist()}")
     df["sequence_id"] = df["video"].map(lambda v: os.path.splitext(str(v))[0])
     df["fps"], df["source"] = float("nan"), "aslcitizen"
     if args.limit:
@@ -83,18 +96,20 @@ def main() -> None:
     lmdb_path = args.out_dir / args.lmdb_name
     env = lmdb.open(str(lmdb_path), subdir=False, map_size=1 << 36)
     aspect = (df["width"] / df["height"]) if {"width", "height"} <= set(df) else pd.Series(float("nan"), df.index)
-    stats, errors = write_clips(env, list(zip(df["path"], df["full_path"], [True] * len(df), aspect)), args.workers)
+    jobs = list(zip(df["path"], df["full_path"], [True] * len(df), aspect))
+    stats, errors = write_clips(env, jobs, args.workers)
     env.close()
 
     df = df[df["path"].isin(stats)].copy()
     df = exclude_duplicates(df, stats, args.out_dir)
-    df["aspect_k"], df["ratio_raw"], df["both_hands"], df["n_frames"] = zip(
-        *((stats[p_]["k"], stats[p_]["raw"], stats[p_]["both"], stats[p_]["n"]) for p_ in df["path"]))
+    df["aspect_k"], df["ratio_raw"], df["both_hands"], df["n_frames"], df["prep_aspect"] = zip(
+        *((stats[p_]["k"], stats[p_]["raw"], stats[p_]["both"], stats[p_]["n"], stats[p_]["prep_aspect"]) for p_ in df["path"]))
     cols = ["path", "participant_id", "sequence_id", "sign", "aslc_gloss", "kind", "synonym", "fps",
-            "source", "split", "aspect_k", "ratio_raw", "both_hands", "n_frames"]
+            "source", "split", "aspect_k", "ratio_raw", "both_hands", "n_frames", "prep_aspect"]
+    cols += [c for c in ("width", "height") if c in df]  # frame size: validation re-prepares with it
     df[cols].to_csv(args.out_dir / "train.csv", index=False)
     (args.out_dir / "sign_to_prediction_index_map.json").write_text(json.dumps(sign2idx))
-    finish_build(lmdb_path, df["path"].tolist(), errors, args.allow_errors, manifest, stats, "aslcitizen", True)
+    finish_build(lmdb_path, df["path"].tolist(), errors, args.allow_errors, manifest, stats, "aslcitizen", True, attempted=len(jobs))
 
     print(f"wrote {len(df)} clips → {lmdb_path} ({lmdb_path.stat().st_size / 2**20:.0f} MiB); "
           f"{len(errors)} errors" + (f", e.g. {errors[0]}" if errors else ""))

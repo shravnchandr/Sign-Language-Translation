@@ -46,17 +46,53 @@ _PARTS = {"pose": 33, "left_hand": 21, "right_hand": 21, "face": 468}
 _MIN_FRAMES = 8
 
 
+def _exact(a: np.ndarray) -> list:
+    """float32 values as JSON numbers that parse back to the same float32 (no rounding: a rounded
+    coordinate can flip a ghost-hand decision near the IoU threshold); NaN → null."""
+    a = np.asarray(a, dtype=np.float32).astype(np.float64)
+    return np.where(np.isnan(a), None, a).tolist()
+
+
 def raw_frames(df: pd.DataFrame) -> list:
-    """Per frame: {part: [[x, y, z], ...] or None if the part was not detected}."""
+    """Per frame: {part: [[x, y, z], ...] or None if the part was not detected}, values exactly the
+    float32 the contract reads."""
     out = []
     for _, f in df.sort_values(["frame", "type", "landmark_index"]).groupby("frame", sort=True):
         frame = {}
         for part, n in _PARTS.items():
             rows = f[f["type"] == part].set_index("landmark_index").reindex(range(n))
-            xyz = rows[["x", "y", "z"]].to_numpy(dtype=np.float64)
-            frame[part] = None if np.isnan(xyz).all() else np.round(xyz, 7).tolist()
+            xyz = rows[["x", "y", "z"]].to_numpy(dtype=np.float32)
+            frame[part] = None if np.isnan(xyz).all() else _exact(xyz)
         out.append(frame)
     return out
+
+
+def frames_to_rows(frames: list) -> pd.DataFrame:
+    """A fixture's serialized `frames` back to competition-format rows (frame = position)."""
+    rows = []
+    for t, frame in enumerate(frames):
+        for part, n in _PARTS.items():
+            xyz = frame[part]
+            for i in range(n):
+                v = xyz[i] if xyz is not None else (None, None, None)
+                rows.append((t, part, i, *(np.nan if c is None else c for c in v)))
+    df = pd.DataFrame(rows, columns=["frame", "type", "landmark_index", "x", "y", "z"])
+    df[["x", "y", "z"]] = df[["x", "y", "z"]].astype(np.float32)
+    return df
+
+
+def verify(fx: dict, max_frames: int) -> None:
+    """The fixture must be reproducible from its own serialized frames: kept frames, hand status,
+    segment, subsample and features bit-exact. Raises otherwise."""
+    clip = contract.prepare(frames_to_rows(fx["frames"]))
+    coords, presence = torch.from_numpy(clip["coords"]), torch.from_numpy(clip["presence"]).float()
+    seg = contract.segment(presence)
+    feats = contract.clip_input(coords, presence, max_frames, trim=True).numpy()
+    got = {"kept_frames": [int(f) for f in clip["frames"]], "hand_status": clip["status"].tolist(),
+           "segment": list(range(seg.start, seg.stop)), "features": _exact(feats)}
+    bad = [k for k, v in got.items() if v != fx[k]]
+    if bad:
+        raise SystemExit(f"fixture {fx['name']}: {bad} not reproducible from its serialized frames")
 
 
 def fixture(name: str, df: pd.DataFrame, label: str, sess, labels: list,
@@ -82,7 +118,7 @@ def fixture(name: str, df: pd.DataFrame, label: str, sess, labels: list,
         "hand_status": clip["status"].tolist(),  # per kept frame: [left_hand, right_hand] (rule 2)
         "segment": list(range(seg.start, seg.stop)),  # indices into kept frames (rule 6)
         "subsample": keep.tolist() if T > max_frames else None,  # positions into `segment` (rule 7)
-        "features": np.round(feats.astype(np.float64), 7).tolist(),
+        "features": _exact(feats),  # float32, exact
         "logits": None,
         "decoded": None,
     }
@@ -93,8 +129,9 @@ def fixture(name: str, df: pd.DataFrame, label: str, sess, labels: list,
             if c != prev and c != len(labels):
                 decoded.append(labels[c])
             prev = c
-        fx["logits"] = np.round(logits.astype(np.float64), 5).tolist()
+        fx["logits"] = np.round(logits.astype(np.float64), 5).tolist()  # compare with a tolerance (kernels differ)
         fx["decoded"] = decoded
+    verify(fx, max_frames)
     print(f"{name}: {len(frames)} frames, {len(kept)} kept, segment {seg.start}..{seg.stop - 1}, T {feats.shape[0]}, "
           f"ghost frames {clip['stats']['ghost_frames']}, label {label!r}, decoded {fx['decoded']}")
     return fx

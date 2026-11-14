@@ -25,7 +25,6 @@ import json
 import os
 from pathlib import Path
 
-import lmdb
 import numpy as np
 import pandas as pd
 import torch
@@ -34,12 +33,13 @@ from sklearn.model_selection import GroupKFold
 from ..core.data._cache_keys import lmdb_key
 from ..core.data.build_wlasl_lmdb import signer_split
 from ..core.data.contract import clip_input, load_clip
+from ..core.data.dataset import _open_lmdb_env
+from ..core.data.validate import require_accepted
 from ..export.export_onnx import load_ctc_model
 
 
 def _env(path: Path):
-    return lmdb.open(str(path), subdir=False, readonly=True, lock=False,
-                     map_size=os.path.getsize(path) + (1 << 28))
+    return _open_lmdb_env(str(path))  # the handle require_accepted opened (one env per process)
 
 
 def score_clips(model, df: pd.DataFrame, lmdb_path: Path, sign2idx: dict, max_frames: int,
@@ -117,6 +117,9 @@ def main() -> None:
     idx2sign = {v: k for k, v in sign2idx.items()}
     model = load_ctc_model(args.checkpoint, meta, len(sign2idx)).eval()
 
+    releases = {"asl_signs": require_accepted(args.data_dir, args.lmdb_path)}
+    if args.wlasl_dir:
+        releases["wlasl"] = require_accepted(args.wlasl_dir, args.wlasl_dir / "wlasl.lmdb.mdb")
     df = pd.read_csv(args.data_dir / "train.csv")
     _, va = list(GroupKFold(args.n_folds).split(df, groups=df["participant_id"]))[args.val_fold]
     parts = [score_clips(model, df.iloc[va], args.lmdb_path, sign2idx, args.max_frames,
@@ -133,6 +136,7 @@ def main() -> None:
         "scoring": "pooled: per sign, max over the segment's frames of softmax(logits)[t, sign], "
                    "blank excluded; rank signs by it. p1 = the top sign's pooled probability. "
                    "Segment = hand-span trim, uniformly subsampled to <= 384 frames.",
+        "dataset_releases": releases,
         "clips": "signers not seen in training: " + ", ".join(sorted(res["source"].unique())),
     } | summarise(res, idx2sign)
     args.out.parent.mkdir(parents=True, exist_ok=True)

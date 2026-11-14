@@ -11,12 +11,18 @@ with placeholders filled in:
     {CKPT_DIR}     root of <user>/islr-checkpoints (fold0_graph/, phrases01/03/04/05/)
     {WLASL_DIR}    folder of wlasl.lmdb.mdb + train.csv (<user>/wlasl-lmdb)
     {WLASL_ALL_DIR} folder of wlasl_all.lmdb.mdb (all 2,000 glosses; <user>/wlasl-all-lmdb)
+    {ASLC_DIR}     folder of aslcitizen.lmdb.mdb, {POPSIGN_DIR} folder of popsign.lmdb.mdb (build
+                   notebooks mounted with --kernel)
+    {COMP_<slug>}  a competition mounted with --competition <slug> (- → _), e.g. {COMP_asl_signs}
     {INPUT}        /kaggle/input (e.g. outputs of notebooks mounted with --kernel)
     {MODEL_<v>}    folder of model variation <v> mounted with --model <v> (Kaggle model <user>/islr,
                    or islr-research for research-only checkpoints), e.g. {MODEL_phrases05}/best_phrases.pth
     {OUT}          /kaggle/working/out — everything written here is the run's output
-The IS / WLASL / WLASL-all LMDB folders are copied to local disk first (/kaggle/input is slow for
-random reads); --no-copy reads them in place.
+Each LMDB placeholder must match exactly one mounted file (two releases mounted together fail
+instead of one being picked). --bare mounts only what --dataset / --kernel / --model /
+--competition name (not the default legacy datasets below) — use it for contract-v3 data.
+The LMDB folders are copied to local disk first (/kaggle/input is slow for random reads);
+--no-copy reads them in place.
 stdout/stderr also go to {OUT}/run.log.
 
 Usage (from the repo root):
@@ -59,7 +65,8 @@ def user() -> str:
     return os.environ.get("KAGGLE_USERNAME") or json.loads(cfg.read_text())["username"]
 
 
-def notebook(ref: str, commands: list[list[str]], local_copy: bool = True, models: tuple = ()) -> dict:
+def notebook(ref: str, commands: list[list[str]], local_copy: bool = True, models: tuple = (),
+             competitions: tuple = ()) -> dict:
     """commands: [[module, *args], ...], run in order; the first failure stops the notebook."""
     def code(src: str) -> dict:
         return {"cell_type": "code", "metadata": {}, "execution_count": None, "outputs": [],
@@ -72,7 +79,7 @@ def notebook(ref: str, commands: list[list[str]], local_copy: bool = True, model
                         + "; ".join(f"`python -m {c[0]}`" for c in commands)]},
             code(f"""
 import glob, os, subprocess, sys
-REF, COMMANDS, LOCAL_COPY, MODELS = {ref!r}, {commands!r}, {local_copy!r}, {list(models)!r}
+REF, COMMANDS, LOCAL_COPY, MODELS, COMPETITIONS = {ref!r}, {commands!r}, {local_copy!r}, {list(models)!r}, {list(competitions)!r}
 subprocess.run("pip install -q lmdb", shell=True, check=True)
 subprocess.run(f"git clone -q {REPO_URL} /tmp/repo && git -C /tmp/repo checkout -q {{REF}}",
                shell=True, check=True)
@@ -85,6 +92,7 @@ print("torch", torch.__version__, "| CUDA", torch.cuda.is_available(),
             code("""
 def find(pattern):
     hits = sorted(glob.glob(f"/kaggle/input/**/{pattern}", recursive=True))
+    assert len(hits) <= 1, f"{pattern} is mounted more than once (mount one release): {hits}"
     return hits[0] if hits else None
 
 paths = {
@@ -92,9 +100,14 @@ paths = {
     "CKPT_DIR": os.path.dirname(os.path.dirname(find("fold0_graph/best_phase1.pth") or "/x/x")),
     "WLASL_DIR": os.path.dirname(find("wlasl.lmdb.mdb") or ""),
     "WLASL_ALL_DIR": os.path.dirname(find("wlasl_all.lmdb.mdb") or ""),
+    "ASLC_DIR": os.path.dirname(find("aslcitizen.lmdb.mdb") or ""),
+    "POPSIGN_DIR": os.path.dirname(find("popsign.lmdb.mdb") or ""),
     "INPUT": "/kaggle/input",
     "OUT": "/kaggle/working/out",
 }
+for c in COMPETITIONS:  # /kaggle/input/<slug> or /kaggle/input/competitions/<slug>
+    hits = sorted(d for d in glob.glob(f"/kaggle/input/**/{c}", recursive=True) if os.path.isdir(d))
+    paths["COMP_" + c.replace("-", "_")] = hits[0] if hits else ""
 for v in MODELS:  # model variations mount as .../<model>/<framework>/<variation>/<version>/
     hits = sorted(d for d in glob.glob(f"/kaggle/input/**/{v}/*/", recursive=True) if os.path.isdir(d))
     paths[f"MODEL_{v}"] = hits[-1].rstrip("/") if hits else ""
@@ -102,7 +115,7 @@ os.makedirs(paths["OUT"], exist_ok=True)
 # /kaggle/input is slow for random reads: the phrase loader read ~125 ms per phrase from it
 # (4 ms from a local disk). Copy the LMDB folders to local disk first (minutes, once per run).
 import shutil, time
-for key in ("IS_LMDB_DIR", "WLASL_DIR", "WLASL_ALL_DIR") if LOCAL_COPY else ():
+for key in ("IS_LMDB_DIR", "WLASL_DIR", "WLASL_ALL_DIR", "ASLC_DIR", "POPSIGN_DIR") if LOCAL_COPY else ():
     if paths[key]:
         t0, dst = time.time(), f"/tmp/{key.lower()}"
         shutil.copytree(paths[key], dst, dirs_exist_ok=True)
@@ -167,12 +180,12 @@ def push(a: argparse.Namespace) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         nb = Path(tmp) / f"islr-{a.name}.ipynb"
         variations = [m.rsplit("/", 2)[-2] if m.count("/") >= 4 else m for m in a.model]
-        nb.write_text(json.dumps(notebook(ref, commands, not a.no_copy, variations), indent=1))
+        nb.write_text(json.dumps(notebook(ref, commands, not a.no_copy, variations, a.competition), indent=1))
         meta = {"id": slug, "title": f"islr-{a.name}", "code_file": nb.name, "language": "python",
                 "kernel_type": "notebook", "is_private": True, "enable_gpu": a.gpu,
                 "enable_tpu": False, "enable_internet": True, "keywords": [],
-                "dataset_sources": [f"{user()}/{d}" for d in DATASETS] + a.dataset, "kernel_sources": a.kernel,
-                "competition_sources": [],
+                "dataset_sources": ([] if a.bare else [f"{user()}/{d}" for d in DATASETS]) + a.dataset,
+                "kernel_sources": a.kernel, "competition_sources": a.competition,
                 "model_sources": [m if m.count("/") >= 4 else model_source(m) for m in a.model]}
         (Path(tmp) / "kernel-metadata.json").write_text(json.dumps(meta, indent=2))
         extra = ["--accelerator", a.accelerator] if a.gpu else []
@@ -190,6 +203,8 @@ def main() -> None:
     s.add_argument("--accelerator", default="NvidiaTeslaT4")
     s.add_argument("--ref", help="git commit/branch to clone (default: local HEAD, must be pushed)")
     s.add_argument("--dataset", action="append", default=[], help="extra dataset source")
+    s.add_argument("--competition", action="append", default=[], help="competition source, e.g. asl-signs ({COMP_asl_signs})")
+    s.add_argument("--bare", action="store_true", help="do not mount the default (legacy) datasets")
     s.add_argument("--kernel", action="append", default=[],
                    help="mount another notebook's output (<user>/<slug>), e.g. extract-aslcitizen-s0")
     s.add_argument("--model", action="append", default=[],

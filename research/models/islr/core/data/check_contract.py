@@ -6,7 +6,8 @@ fixtures). Run before any LMDB rebuild or training:
 
 Cases: leading / trailing hand gaps, a lone detection, frames without a pose, crossed hands, two
 real hands touching, a ghost (one hand in both slots), an ambiguous overlap, a clip longer than
-max_frames. Exits non-zero on the first failure.
+max_frames; plus raw rows the contract must refuse (repeated records, landmark indices outside
+their part, unknown types, missing frame ids). Exits non-zero on the first failure.
 """
 
 import argparse
@@ -157,7 +158,7 @@ def main() -> None:
             if not torch.equal(K.model_input(c[k], p_[k]), ref):
                 fail(f"{name}: phrase training features ≠ evaluation features")
             fx = BF.fixture(name, raw[name], name, _Sess(), [idx2sign[i] for i in range(len(idx2sign))], MAX_FRAMES)
-            if fx is None or not np.array_equal(np.asarray(fx["features"], np.float32), np.round(ref.numpy().astype(np.float64), 7).astype(np.float32)):
+            if fx is None or not np.array_equal(np.asarray(fx["features"], np.float32), ref.numpy()):
                 fail(f"{name}: browser fixture features ≠ evaluation features")
             if float(ref[0, coords.shape[1]: 2 * coords.shape[1]].abs().max()) != 0.0:
                 fail(f"{name}: Δ1 of the first frame must be 0")
@@ -166,6 +167,22 @@ def main() -> None:
             print(f"ok  {name:20s} T {len(coords):3d} → {ref.shape[0]:3d} | presence frames lh {int(presence[:, 0].sum())} "
                   f"rh {int(presence[:, 1].sum())} | ghost {st['ghost_frames']} ambiguous {st['ambiguous_frames']} "
                   f"no-pose {st['frames_no_pose']}")
+    # 3. raw structure the contract must refuse (each would still give finite, well-shaped arrays)
+    base = clip(5, lh=range(5), seed=99)
+    broken = {
+        "duplicate record": pd.concat([base, base.iloc[[0]].assign(x=0.9)], ignore_index=True),
+        "negative landmark index": base.assign(landmark_index=np.where(base.index == 3, -1, base["landmark_index"])),
+        "index past the part": base.assign(landmark_index=np.where((base["type"] == "left_hand") & (base["landmark_index"] == 20), 21, base["landmark_index"])),
+        "unknown part type": base.assign(type=np.where(base.index == 0, "hand", base["type"])),
+        "missing frame id": base.assign(frame=np.where(base.index == 0, np.nan, base["frame"])),
+    }
+    for what, df in broken.items():
+        try:
+            K.prepare(df)
+        except ValueError as e:
+            print(f"ok  refuses {what}: {e}")
+        else:
+            fail(f"contract accepted raw rows with a {what}")
     print("contract checks passed")
 
 

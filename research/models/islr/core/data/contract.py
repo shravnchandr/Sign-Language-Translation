@@ -5,6 +5,8 @@ functions, so training, evaluation and the app cannot drift apart (audit 2026-11
 docs/experiments/05_data_pipeline_audit.md).
 
 Raw → stored (`prepare`, run once at LMDB build time):
+  0. Raw rows are checked (check_raw): known part types, integral frame ids, landmark indices
+     inside their part, no repeated (frame, type, landmark_index) record.
   1. Frames without a pose are dropped (no body origin; the browser drops them too).
   2. Ghost hands: MediaPipe Holistic sometimes fits ONE physical hand into both hand slots
      (PopSign: 100 of 128 two-hand frames in a 160-clip sample; ASL Signs / ASL Citizen / WLASL
@@ -45,9 +47,37 @@ _FACE_POS = {lm: i for i, lm in enumerate(SELECTED_FACE_INDICES)}
 _OWN_WRIST = (15, 16)  # pose landmark of the left / right wrist
 
 
+_RAW_COUNT = {"pose": N_POSE, "left_hand": N_LH, "right_hand": N_LH, "face": 468}  # MediaPipe Holistic
+
+
+def check_raw(df: pd.DataFrame) -> None:
+    """Raises on raw rows that would still produce finite, well-shaped arrays but wrong ones: an
+    unknown part type, a missing / non-integral frame id, a landmark index outside the part (a
+    negative one would index from the end), or a repeated (frame, type, landmark_index) record."""
+    bad_type = set(df["type"].unique()) - set(_RAW_COUNT)
+    if bad_type:
+        raise ValueError(f"unknown landmark types {sorted(map(str, bad_type))}")
+    for col in ("frame", "landmark_index"):
+        v = pd.to_numeric(df[col], errors="coerce")
+        if v.isna().any() or (v != np.floor(v)).any():
+            raise ValueError(f"{int((v.isna() | (v != np.floor(v))).sum())} rows with a missing or non-integral {col}")
+    n = df["type"].map(_RAW_COUNT)
+    out = (df["landmark_index"] < 0) | (df["landmark_index"] >= n)
+    if out.any():
+        r = df[out].iloc[0]
+        raise ValueError(f"{int(out.sum())} landmark indices outside their part, e.g. {r['type']} {r['landmark_index']}")
+    dup = df.duplicated(["frame", "type", "landmark_index"])
+    if dup.any():
+        r = df[dup].iloc[0]
+        raise ValueError(f"{int(dup.sum())} repeated (frame, type, landmark_index) records, "
+                         f"e.g. frame {r['frame']} {r['type']} {r['landmark_index']}")
+
+
 def raw_arrays(df: pd.DataFrame) -> dict:
     """Competition-format rows (frame, type, landmark_index, x, y, z) → {part: (T, n, 3)} with NaN
-    where a part was not detected, frames in order (`frame` holds their ids)."""
+    where a part was not detected, frames in order (`frame` holds their ids). Rows are checked
+    first (check_raw)."""
+    check_raw(df)
     frames = np.sort(df["frame"].unique())
     pos = {f: i for i, f in enumerate(frames)}
     out = {"frame": frames}

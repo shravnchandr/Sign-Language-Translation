@@ -94,3 +94,35 @@ competition parquets; WLASL / ASL Citizen / PopSign from the v2 shards), validat
 `--raw-root`, publish as new datasets; re-score the frozen phrases05 / phrases07 checkpoints on them
 (CPU); then phrases05 and phrases07 retrained once with a shared `--frozen-spec`. The app must apply
 the same contract (preprocess.json now states the ghost rule, segment and integer subsample).
+
+## Acceptance gate (2026-11-14, review of 33b6971)
+
+The review found seven gaps *between* stages (each component correct, combinable incorrectly). All
+fixed; each failure path reproduced and now refused (scratchpad `acc_tests.sh`: 257 real ASL Signs
+clips + synthetic PopSign / ASL Citizen / WLASL shards):
+
+| # | Gap | Fix | Reproduction now |
+|---|---|---|---|
+| 1 | Training ran on data without a validation result; a source with 0 training clips silently lost its 20 % share | `validate.require_accepted`: `phrases.train`, `cross_dataset`, `sign_reliability` need a passing `validation_report.json` made with `--raw-root` whose train.csv and content digests (recomputed over every listed clip) match what they open. `phrases.train` asserts each source's effective sampling share = requested | no report → exit 1; validated without raw → refused; NaN + status 7 in a clip with the old report → content mismatch; revalidated → 3 FAILs, training refused; 0-clip PopSign → "effective sampling share 1.0000 ≠ requested 0.8000"; PopSign 20 % → shares [0.8, 0.2] |
+| 2 | Documented ASL Signs notebook wrote legacy LMDBs | It and the WLASL build / extraction notebooks moved to `notebooks/data/legacy/` (README says why). ASL Signs builds through `build_lmdb` (flat `is.lmdb.mdb` release folder) + `validate` in one `kaggle_run.py --bare --competition asl-signs` notebook | 257 clips: built, all checks pass, 200 / 200 re-prepared from raw identical |
+| 3 | A video that failed to decode vanished from `shard_<k>.csv`; shard counts could not show it | Extraction writes `selected_<k>.csv` before and `failed_<k>.csv` after; for shards extracted before, `scripts/extraction_inventory.py` re-runs the pinned commit's selection cell (nothing extracted) → `--inventory`. Builders reconcile selection with listings (listed-but-unselected and missing beyond `--allow-missing` exit; shards with neither record exit); the manifest accounts for every clip (selected = listed + missing; listed = filtered + errors + duplicates + written), re-checked by `validate` | 9 selected / 8 listed → exits (recorded or not); `--allow-missing 1` → builds, validate passes and shows the count; inventory with one lost video → exits; no selection record → exits. Inventory dry run on a fake WLASL tree: paths and shard assignment = the extraction's |
+| 4 | WLASL / Citizen dropped width / height → validation re-prepared at 0.75 | `prep_aspect` (the aspect the contract used) + width / height per clip in train.csv; validation uses it and fails when absent (ASL Signs: fixed 0.75 in the manifest) | 16:9 ghost tie: prepared at 1.778 keeps the right slot, at 0.75 the left; validate with the stored aspect: 9 / 9 identical |
+| 5 | Signer −1 → 899999 (train half); missing Citizen / PopSign ids hashed | Missing, negative, non-integral (and Citizen colliding) ids rejected before the offset | WLASL −1, Citizen NaN, PopSign NaN → build exits |
+| 6 | Duplicate `(frame, type, landmark_index)` and negative indices accepted | `contract.check_raw` before any array is built (also unknown part types, missing / non-integral frame ids); 5 refusal cases in `check_contract` | clip with a repeated record → build error → exit |
+| 7 | Fixtures rounded raw coordinates to 7 decimals, so near the IoU threshold their provenance differed from their own frames | float32 values serialised exactly; every fixture is rebuilt from its serialised frames and must match bit-exactly (kept frames, hand status, segment, features) or the export exits | 160 PopSign clips (up to 38 ghost frames each) all self-verify |
+
+Also: the reviewer's six all-gloss WLASL clips with no hand at all — `validate` lists clips with no
+hand ever present by split / half in the report, `cross_dataset` reports their count and accuracy;
+they are kept and scored as-is (the model sees body and face only). `kaggle_run.py --bare` mounts no
+legacy dataset and every LMDB placeholder must match exactly one mounted file (two releases cannot
+be mixed by search order). Manifests, reports and experiment specs record the code revision
+(commit + modified-files flag); `--frozen-spec` refuses a different commit or a run from modified
+files (`--allow-diff code` only by explicit choice), so the two comparison runs are pinned to one
+revision and, through the release digests, to the same dataset releases.
+
+Not covered (from the review): the full v2 Kaggle artifacts and the live browser client are checked
+only when built / run; label linguistics and detector physical correctness are outside any gate.
+
+Release procedure, per dataset: (inventory for pre-fix shards) → build + `validate --raw-root` in one
+CPU notebook → the notebook's output is the release, mounted with `--kernel` in `--bare` runs. The v2
+raw parquets are kept; no re-extraction is needed.

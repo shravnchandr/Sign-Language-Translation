@@ -42,9 +42,12 @@ _SIGNER_OFFSET = 700_000  # apart from ASL Signs ids, ASL Citizen (800000 + n) a
 
 
 def participant_number(user: str) -> int:
-    """'4a.6001' / 'gtsignstudy4a.8031' → 6001 / 8031 (digits after the last '.')."""
-    m = re.search(r"(\d+)$", str(user).rsplit(".", 1)[-1])
-    return int(m.group(1)) if m else sum(map(ord, str(user))) % 100_000
+    """'4a.6001' / 'gtsignstudy4a.8031' → 6001 / 8031 (digits after the last '.'). A missing id or one
+    without that number raises: a made-up number would look like a real, separate signer."""
+    m = re.search(r"(\d+)$", str(user).rsplit(".", 1)[-1]) if isinstance(user, str) else None
+    if m is None:
+        raise ValueError(f"PopSign user id {user!r} has no trailing number")
+    return int(m.group(1))
 
 
 def main() -> None:
@@ -59,12 +62,15 @@ def main() -> None:
     p.add_argument("--limit", type=int, default=0, help="first N clips (smoke test)")
     p.add_argument("--expect-shards", type=int, required=True, help="shards 0..N-1 of one extraction version must all be there")
     p.add_argument("--allow-errors", type=int, default=0, help="clips that may fail before the build exits")
+    p.add_argument("--inventory", type=Path, help="selection inventory (scripts/extraction_inventory.py) for shards "
+                   "without their own selected_<k>.csv")
+    p.add_argument("--allow-missing", type=int, default=0, help="selected videos that may be absent from the shard lists")
     args = p.parse_args()
 
     sign2idx = json.loads(args.sign_map.read_text())
     by_lower = {s.lower(): s for s in sign2idx}
 
-    df, manifest = load_shards(args.input_root, "popsign", args.expect_shards)
+    df, manifest = load_shards(args.input_root, "popsign", args.expect_shards, args.inventory, args.allow_missing)
 
     df["popsign_gloss"] = df["gloss"]
     df["sign"] = df["gloss"].map(lambda g: by_lower.get(str(g).lower()))
@@ -92,19 +98,20 @@ def main() -> None:
     lmdb_path = args.out_dir / args.lmdb_name
     env = lmdb.open(str(lmdb_path), subdir=False, map_size=1 << 37)
     aspect = (df["width"] / df["height"]) if {"width", "height"} <= set(df) else pd.Series(float("nan"), df.index)
-    stats, errors = write_clips(env, list(zip(df["path"], df["full_path"], [False] * len(df), aspect)), args.workers)
+    jobs = list(zip(df["path"], df["full_path"], [False] * len(df), aspect))
+    stats, errors = write_clips(env, jobs, args.workers)
     env.close()
 
     df = df[df["path"].isin(stats)].copy()
     df = exclude_duplicates(df, stats, args.out_dir)
-    df["aspect_k"], df["ratio_raw"], df["both_hands"], df["n_frames"] = zip(
-        *((stats[p_]["k"], stats[p_]["raw"], stats[p_]["both"], stats[p_]["n"]) for p_ in df["path"]))
+    df["aspect_k"], df["ratio_raw"], df["both_hands"], df["n_frames"], df["prep_aspect"] = zip(
+        *((stats[p_]["k"], stats[p_]["raw"], stats[p_]["both"], stats[p_]["n"], stats[p_]["prep_aspect"]) for p_ in df["path"]))
     cols = ["path", "participant_id", "sequence_id", "sign", "popsign_gloss", "popsign_user", "synonym",
-            "fps", "source", "split", "aspect_k", "ratio_raw", "both_hands", "n_frames"]
+            "fps", "source", "split", "aspect_k", "ratio_raw", "both_hands", "n_frames", "prep_aspect"]
     cols += [c for c in ("width", "height") if c in df]  # frame size (some clips are 9:16, most 3:4)
     df[cols].to_csv(args.out_dir / "train.csv", index=False)
     (args.out_dir / "sign_to_prediction_index_map.json").write_text(json.dumps(sign2idx))
-    finish_build(lmdb_path, df["path"].tolist(), errors, args.allow_errors, manifest, stats, "popsign", False)
+    finish_build(lmdb_path, df["path"].tolist(), errors, args.allow_errors, manifest, stats, "popsign", False, attempted=len(jobs))
 
     print(f"wrote {len(df)} clips → {lmdb_path} ({lmdb_path.stat().st_size / 2**20:.0f} MiB); "
           f"{len(errors)} errors" + (f", e.g. {errors[0]}" if errors else ""))

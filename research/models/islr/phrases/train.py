@@ -55,6 +55,7 @@ from ..core.data.augmentation import AdvancedAugmentation
 from ..core.data.build_wlasl_lmdb import signer_split
 from ..core.data.dataset import ASLDataset, BucketBatchSampler, get_data_loaders, worker_context
 from ..core.data.fingerspelling_dataset import collate_ctc
+from ..core.data.validate import require_accepted
 from .dataset import ConcatSource, phrase_datasets
 from ..core.model import GraphConformer, LandmarkConformer
 from ..pretrain.fingerspelling import _fmt_time, edit_distance, greedy_decode
@@ -206,21 +207,28 @@ def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()[:16]
 
 
-def _content(sources) -> str:
-    """Content digest (contract.content_digest) of the clips these ASLDataset-like sources read,
-    from the LMDB each actually opens."""
-    from ..core.data.contract import content_digest
-    from ..core.data.dataset import _open_lmdb_env  # the datasets' own handle (an env opens once per process)
+def require_validated(data_dir: str, source) -> dict:
+    """validate.require_accepted for the LMDB this source actually reads."""
+    if source.lmdb_path is None:
+        raise SystemExit(f"{data_dir}: the dataset is not read from an LMDB (the LMDB failed to open?)")
+    return require_accepted(data_dir, source.lmdb_path)
 
-    by_lmdb: dict = {}
-    for src in sources:
-        if src.lmdb_path is None:
-            raise SystemExit("experiment spec: every dataset must be read from an LMDB (content digest)")
-        by_lmdb.setdefault(src.lmdb_path, set()).update(src.df["path"])
-    parts = []
-    for path, clips in sorted(by_lmdb.items(), key=lambda kv: str(kv[0])):
-        parts.append(content_digest(_open_lmdb_env(path), clips))
-    return "+".join(parts)
+
+def sampling_shares(train_ds, sources, requested: list) -> list:
+    """Effective share of phrases each source's signers get (from the dataset's signer
+    probabilities) — must equal the requested share, and every source must supply clips."""
+    p = dict(zip(train_ds.signers, train_ds.signer_p if train_ds.signer_p is not None
+                 else np.full(len(train_ds.signers), 1 / len(train_ds.signers))))
+    shares = []
+    for src, want in zip(sources, requested):
+        signers = set(src.df["participant_id"].astype(str))
+        if not len(src.df):
+            raise SystemExit(f"a requested data source supplies no training clips (wanted {want:.0%} of phrases)")
+        got = float(sum(p.get(s_, 0.0) for s_ in signers))
+        if abs(got - want) > 1e-6:
+            raise SystemExit(f"effective sampling share {got:.4f} ≠ requested {want:.4f}")
+        shares.append(round(got, 6))
+    return shares
 
 
 _ANNOTATION_COLS = ("path", "sign", "participant_id", "split", "wlasl_half", "kind", "synonym")
@@ -236,7 +244,7 @@ def _annotations(sources) -> str:
 def _manifest(data_dir: str) -> dict | None:
     man = Path(data_dir) / "build_manifest.json"
     m = json.loads(man.read_text()) if man.exists() else None
-    return {k: m.get(k) for k in ("version", "dataset", "content_digest", "csv_digest", "contract", "cache_version")} if m else None
+    return {k: m.get(k) for k in ("version", "dataset", "content_digest", "csv_digest", "contract", "cache_version", "code")} if m else None
 
 
 # Recipe arguments two compared runs may differ in (the extra training data is the comparison;
@@ -245,29 +253,36 @@ ALLOWED_DIFF = {"extra_data_dir", "extra_frac", "extra_lmdb_path", "extra_kinds"
                 "frozen_spec", "allow_diff", "data_dir", "lmdb_path", "init", "vocab"}
 
 
-def experiment_spec(args, sign2idx: dict, train_source, val_ds) -> dict:
-    """Everything a run depends on: contract / cache version, the content of every dataset it reads,
-    vocabulary, initial checkpoint, the exact validation phrases, and the full effective recipe."""
+def experiment_spec(args, sign2idx: dict, train_source, val_ds, releases: list, shares: list) -> dict:
+    """Everything a run depends on: code revision, contract / cache version, the validated release
+    of every dataset it reads (releases: require_validated per dataset, main first) and the
+    annotations of the clips it uses, the effective sampling share per source, vocabulary, initial
+    checkpoint, the exact validation phrases, and the full effective recipe."""
     from ..core.data._cache_keys import CACHE_VERSION
     from ..core.data.contract import CONTRACT_VERSION
+    from ..core.revision import code_revision
 
     sources = list(getattr(train_source, "sources", [train_source]))
     paths = val_ds.source.df["path"].tolist()
     val_set = [(s[0], s[1], [paths[c] for c in s[3]], s[4]) for s in val_ds.specs]
     recipe = {k: (str(v) if isinstance(v, Path) else v) for k, v in sorted(vars(args).items())}
-    return {"contract": CONTRACT_VERSION, "cache_version": CACHE_VERSION,
-            "data": {"content": _content([sources[0], val_ds.source]),
-                     "annotations": _annotations([sources[0], val_ds.source]), "manifest": _manifest(args.data_dir)},
-            "extra_data": [{"dir": d, "content": _content([s]), "annotations": _annotations([s]), "manifest": _manifest(d)}
-                           for d, s in zip(args.extra_data_dir, sources[1:])],
+    return {"code": code_revision(), "contract": CONTRACT_VERSION, "cache_version": CACHE_VERSION,
+            "data": {"release": releases[0], "annotations": _annotations([sources[0], val_ds.source]),
+                     "share": shares[0], "manifest": _manifest(args.data_dir)},
+            "extra_data": [{"dir": d, "release": r, "annotations": _annotations([s]), "share": sh, "manifest": _manifest(d)}
+                           for d, s, r, sh in zip(args.extra_data_dir, sources[1:], releases[1:], shares[1:])],
             "vocab": _sha(json.dumps(sign2idx, sort_keys=True).encode()),
             "init": _sha(Path(args.init).read_bytes()) if args.init else None,
             "val_set": _sha(json.dumps(val_set).encode()), "recipe": recipe}
 
 
 def spec_differences(ref: dict, spec: dict, allowed: set) -> dict:
-    """{field: (reference, this run)} for every difference not in `allowed` (recipe keys)."""
+    """{field: (reference, this run)} for every difference not in `allowed` (recipe keys, or "code").
+    Code revisions differ also when either run had modified tracked files (not reproducible)."""
     diff = {k: (ref.get(k), spec.get(k)) for k in spec if k not in ("extra_data", "recipe") and ref.get(k) != spec.get(k)}
+    if any((r or {}).get("dirty") for r in (ref.get("code"), spec.get("code"))):
+        diff["code"] = (ref.get("code"), spec.get("code"))
+    diff = {k: v for k, v in diff.items() if k not in allowed}
     r0, r1 = ref.get("recipe", {}), spec["recipe"]
     diff.update({f"recipe.{k}": (r0.get(k), r1.get(k)) for k in sorted(set(r0) | set(r1))
                  if k not in allowed and r0.get(k) != r1.get(k)})
@@ -328,8 +343,18 @@ def train(args):
           f"val {len(val_ds):,} fixed phrases from {sorted({s[0] for s in val_ds.specs})} "
           f"(kinds {kinds}; 1-sign phrases count as seen)")
 
+    # Acceptance: every dataset validated (digests of what this run opens), every source at its share.
+    sources = list(getattr(train_source, "sources", [train_source]))
+    releases = [require_validated(args.data_dir, tl.dataset)]
+    if vl.dataset.lmdb_path != tl.dataset.lmdb_path:
+        raise SystemExit("training and validation clips must come from the same validated LMDB")
+    releases += [require_validated(d, s_) for d, s_ in zip(args.extra_data_dir, sources[1:])]
+    shares = sampling_shares(train_ds, sources, [1 - sum(args.extra_frac)] + list(args.extra_frac)
+                             if args.extra_data_dir else [1.0])
+    print(f"Effective sampling shares: {shares}")
+
     ref = json.loads(Path(args.frozen_spec).read_text()) if args.frozen_spec else None  # read before writing
-    spec = experiment_spec(args, sign2idx, train_source, val_ds)
+    spec = experiment_spec(args, sign2idx, train_source, val_ds, releases, shares)
     if ref is not None:  # a comparison run must share every dependency but its training data
         diff = spec_differences(ref, spec, ALLOWED_DIFF | set(args.allow_diff))
         if diff:

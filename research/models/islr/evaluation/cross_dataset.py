@@ -27,11 +27,9 @@ Usage:
 
 import argparse
 import json
-import os
 from math import comb
 from pathlib import Path
 
-import lmdb
 import numpy as np
 import pandas as pd
 import torch
@@ -39,6 +37,8 @@ import torch
 from ..core import config as C
 from ..core.data._cache_keys import lmdb_key
 from ..core.data.build_wlasl_lmdb import signer_split
+from ..core.data.dataset import _open_lmdb_env
+from ..core.data.validate import require_accepted
 from ..isolated.error_review import load_model
 from ..core.data.contract import clip_input, load_clip
 from ..export.export_onnx import load_ctc_model
@@ -121,8 +121,8 @@ def main() -> None:
     if args.split:
         df = df[df["split"] == args.split]
     lmdb_path = args.lmdb_path or args.data_dir / "wlasl.lmdb.mdb"
-    env = lmdb.open(str(lmdb_path), subdir=False, readonly=True, lock=False,
-                    map_size=os.path.getsize(lmdb_path) + (1 << 28))
+    release = require_accepted(args.data_dir, lmdb_path)  # scores only on a validated dataset release
+    env = _open_lmdb_env(str(lmdb_path))  # the handle require_accepted opened (one env per process)
     rows = []
     with env.begin() as txn:
         for r in df.itertuples():
@@ -150,6 +150,7 @@ def main() -> None:
         "wlasl_signers": args.signers,
         "split": args.split,
         "kind": "phrase (single-sign exact decode)" if phrase else "isolated (top-1)",
+        "dataset_release": release,
         "clips": len(res), "signs": int(df["sign"].nunique()), "signers": int(res["signer"].nunique()),
         "accuracy": float(res["correct"].mean()),
         "accuracy_uncorrected": float(res["uncorrected"].mean()),
@@ -163,6 +164,9 @@ def main() -> None:
                         "top5": float(g["top5"].mean()),
                         "pooled_top1": float(g["pooled"].mean()) if phrase else None}
                     for k, g in res.groupby("kind")},
+        # never a detected hand: kept and scored like any clip (the model sees body / face only)
+        "no_hand_clips": {"n": int((res["hand_frac"] == 0).sum()),
+                          "accuracy": float(res.loc[res["hand_frac"] == 0, "correct"].mean()) if (res["hand_frac"] == 0).any() else None},
         "two_hand_clips": {"n": len(two), "accuracy": float(two["correct"].mean())},
         "one_hand_clips": {"n": int((~res["two_hands"]).sum()),
                            "accuracy": float(res.loc[~res["two_hands"], "correct"].mean())},

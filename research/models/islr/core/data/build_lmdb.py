@@ -9,7 +9,17 @@ Run once before training (from the project root):
 
     PYTHONPATH=research/models uv run python -m islr.core.data.build_lmdb \\
         --data-dir  data/Isolated_ASL_Recognition \\
-        --lmdb-path data/cache/islr/asl.lmdb
+        --lmdb-path data/asl-is-lmdb-v3/is.lmdb.mdb
+
+A path ending in .mdb is written as one flat file (the released layout the loaders and
+validate.py read); the competition train.csv and sign map are copied next to it, with
+build_manifest.json. Then: python -m islr.core.data.validate --data-dir <that folder>
+--lmdb-path <that file> --raw-root <data-dir>. On Kaggle (the canonical build; the competition
+data never leaves it):
+
+    python3 scripts/kaggle_run.py push build-aslsigns-v3 --bare --competition asl-signs --no-copy -- \\
+        islr.core.data.build_lmdb --data-dir {COMP_asl_signs} --lmdb-path {OUT}/is.lmdb.mdb :: \\
+        islr.core.data.validate --data-dir {OUT} --lmdb-path {OUT}/is.lmdb.mdb --raw-root {COMP_asl_signs}
 
 Resume safety: existing keys are skipped, so an interrupted run can be
 restarted without re-processing completed samples.
@@ -29,6 +39,7 @@ import lmdb
 import pandas as pd
 from tqdm import tqdm
 
+from ..revision import code_revision
 from ._cache_keys import lmdb_key as _lmdb_key, lmdb_length_key as _lmdb_length_key
 from .contract import load_clip
 
@@ -70,7 +81,8 @@ def build_lmdb(
 ) -> None:
     data_dir = Path(data_dir)
     lmdb_path = Path(lmdb_path)
-    lmdb_path.mkdir(parents=True, exist_ok=True)
+    flat = lmdb_path.suffix == ".mdb"  # one file (is.lmdb.mdb, the released layout) or a directory
+    (lmdb_path.parent if flat else lmdb_path).mkdir(parents=True, exist_ok=True)
 
     if num_workers is None:
         num_workers = os.cpu_count() or 4
@@ -80,7 +92,7 @@ def build_lmdb(
     paths = df["path"].tolist()
     print(f"Building LMDB: {n} samples → {lmdb_path}  (workers={num_workers})")
 
-    env = lmdb.open(str(lmdb_path), map_size=map_size)
+    env = lmdb.open(str(lmdb_path), map_size=map_size, subdir=not flat)
 
     written = skipped = errors = 0
     stats: dict = {}
@@ -150,17 +162,28 @@ def build_lmdb(
 
     from .contract import content_digest
 
-    env = lmdb.open(str(lmdb_path), readonly=True, lock=False)
+    env = lmdb.open(str(lmdb_path), readonly=True, lock=False, subdir=not flat)
     with env.begin() as txn:  # every clip actually stored (written now or by an earlier run)
         stored = [p_ for p_ in paths if txn.get(_lmdb_key(p_)) is not None]
     digest = content_digest(env, stored)
     env.close()
+    out = lmdb_path.parent  # the release folder: LMDB + train.csv + sign map + manifest
+    if out.resolve() != data_dir.resolve():
+        import shutil
+
+        for f in ("train.csv", "sign_to_prediction_index_map.json"):
+            shutil.copyfile(data_dir / f, out / f)
     manifest = {"version": "asl-signs-competition", "dataset": "aslsigns", "aspect_correction": False,
                 "allow_errors": errors if allow_errors else 0, "content_digest": digest,
                 "csv_digest": __import__("hashlib").sha256((data_dir / "train.csv").read_bytes()).hexdigest()[:16],
                 "shards": None, "clips_listed": n, "clips_written": written + skipped,
                 "errors": errors, "lmdb": lmdb_path.name, "contract": CONTRACT_VERSION, "cache_version": CACHE_VERSION,
-                "contract_counts": contract_summary(stats) if stats else None, "resumed_clips": skipped}
+                "contract_counts": contract_summary(stats) if stats else None, "resumed_clips": skipped,
+                # the competition's train.csv is the selection; every listed clip is attempted
+                "coverage": {"selected": n, "listed": n, "missing": 0, "filtered": 0, "build_errors": errors,
+                             "excluded_duplicates": 0, "written": written + skipped},
+                "prep_aspect": 0.75,  # contract.prepare default: portrait 3:4 phone video (frame size not recorded)
+                "code": code_revision()}
     (lmdb_path.parent / "build_manifest.json").write_text(json.dumps(manifest, indent=1))
     print(
         f"\nDone. LMDB at {lmdb_path}\n"
@@ -181,7 +204,7 @@ def main():
     parser.add_argument(
         "--data-dir", required=True, help="Directory containing train.csv"
     )
-    parser.add_argument("--lmdb-path", required=True, help="Output LMDB directory path")
+    parser.add_argument("--lmdb-path", required=True, help="output LMDB: a directory, or one flat file when it ends in .mdb (released layout)")
     parser.add_argument(
         "--map-size-gb",
         type=int,

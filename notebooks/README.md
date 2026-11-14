@@ -5,7 +5,7 @@ Grouped by approach. Training code lives in `research/models/`; most current wor
 
 | Folder | What | Status |
 |---|---|---|
-| `data/` | Dataset builders: `build_asl_signs_lmdb` (ASL Signs → LMDB), `build_fingerspelling_lmdb` (fingerspelling), `preprocess-wlasl-mediapipe` (WLASL videos → landmarks), `build-wlasl-lmdb/` and `build-wlasl-all-lmdb/` (Kaggle kernel folders, push with `kaggle kernels push -p <folder>`); `legacy/` = older LMDB builders | Active |
+| `data/` | `build_fingerspelling_lmdb` (fingerspelling LMDB; pre-contract format, CTC pre-training only). **Sign LMDBs are no longer built by notebooks**: contract-v3 builds run as `scripts/kaggle_run.py` notebooks (`islr.core.data.build_*` then `islr.core.data.validate --raw-root`; commands in `docs/experiments/05_data_pipeline_audit.md`), landmarks from `scripts/extract_*.py`. `legacy/` = retired builders that write pre-contract LMDBs the loaders reject (`build_asl_signs_lmdb`, `build-wlasl-lmdb/`, `build-wlasl-all-lmdb/`, `preprocess-wlasl-mediapipe` — shared tracker, unpinned MediaPipe) and older `create-*-lmdb` | Active |
 | `exploration/` | Early data exploration: `data_playground`, `feature_extraction`, `pilot` | Historical |
 | `early_transformers/` | First classifier attempts (improved transformer, face-aware transformer, landmark-attention, multi-stream TCN-transformer) — before the LandmarkConformer | Superseded by `islr` approach A |
 | `vqvae/` | Approach 0: VQ-VAE pre-training (`sign-vqvae-*`), token classifier, standalone VQ-VAE / translator trainers | Dormant (code: `research/models/vqvae_seq2seq/`) |

@@ -134,6 +134,9 @@ def extract(job):
 from multiprocessing import Pool
 jobs = [(src, f"{OUT}/train_landmark_files/{os.path.splitext(v)[0]}.parquet")
         for src, v in zip(mine["src"], mine["video"])]
+# the selection, written before extraction: builders reconcile it with shard_<k>.csv + failed_<k>.csv
+mine.assign(path=[os.path.relpath(o, OUT) for _, o in jobs]).drop(columns="src").to_csv(
+    f"{OUT}/selected_{SHARD}.csv", index=False)
 t0, done = time.time(), []
 with Pool(os.cpu_count(), initializer=init) as pool:
     for i, r in enumerate(pool.imap(extract, jobs, chunksize=4)):
@@ -144,10 +147,13 @@ nf = dict(done)
 stats = [nf[o] for _, o in jobs]
 mine = mine.assign(path=[os.path.relpath(o, OUT) for _, o in jobs], n_frames=[t[0] for t in stats],
                    width=[t[1] for t in stats], height=[t[2] for t in stats], lr_dx=[t[3] for t in stats])
+failed = mine[mine["n_frames"] == 0]  # no decodable frame
+failed[["path", "video", "participant", "gloss"]].assign(reason="no frames decoded").to_csv(
+    f"{OUT}/failed_{SHARD}.csv", index=False)
 mine = mine[mine["n_frames"] > 0]
 mine[["path", "participant", "split", "gloss", "video", "n_frames", "width", "height", "lr_dx"]].to_csv(
     f"{OUT}/shard_{SHARD}.csv", index=False)
-print(f"done: {len(mine)} clips in {(time.time() - t0) / 3600:.2f} h; frames median {mine['n_frames'].median()}; "
+print(f"done: {len(mine)} clips ({len(failed)} failed to decode, failed_{SHARD}.csv) in {(time.time() - t0) / 3600:.2f} h; frames median {mine['n_frames'].median()}; "
       f"frame sizes {mine.groupby(['width', 'height']).size().to_dict()}; "
       f"unmirrored (pose 11 x > pose 12 x) {(mine['lr_dx'] > 0).mean():.0%}")
 """

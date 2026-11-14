@@ -3,11 +3,17 @@
   PYTHONPATH=research/models python -m islr.core.data.validate --data-dir /tmp/popsign \
       --lmdb-path /tmp/popsign/popsign.lmdb.mdb [--raw-root {INPUT} --resample 200]
 
-Exits non-zero when any hard check fails; writes validation_report.json next to the LMDB.
+Exits non-zero when any hard check fails; writes validation_report.json into --data-dir. Training
+(`islr.phrases.train`) refuses a dataset without a passing report whose digests match the data it
+opens, and one validated without --raw-root.
 Hard checks:
   - build_manifest.json present, built with this contract and cache version; build errors within
     the allowance recorded at build time; dataset type = the train.csv schema; content digest
     recomputed from the LMDB = the manifest's; train.csv digest = the manifest's (annotations)
+  - coverage: selected = listed + missing (missing within the build's allowance; the selection
+    recorded by the extraction or re-run by scripts/extraction_inventory.py), listed = filtered +
+    build errors + excluded duplicates + written, written = train.csv rows
+  - preparation parameters recorded: prep_aspect per clip (ASL Signs: the manifest's fixed 0.75)
   - every train.csv path has a data + length key; stored length = clip length = n_frames
   - every clip: finite, (T > 0, COORD_FEAT); presence binary and = status in {KEPT, AMBIGUOUS};
     status codes valid; a hand never present has an all-zero block
@@ -17,7 +23,8 @@ Hard checks:
   - no two clips with identical stored content
   - --raw-root: a random sample re-prepared from its raw parquet is byte-identical to the stored
     value — coords, presence and provenance status (the LMDB is what the contract produces today)
-Reported (not failed): two-hand clip rate, ghost / ambiguous / pose-less frame totals.
+Reported (not failed): two-hand clip rate, ghost / ambiguous / pose-less frame totals, clips in
+which no hand is ever present (low information; listed with their split, kept and scored as-is).
 """
 
 import argparse
@@ -32,10 +39,43 @@ import numpy as np
 import pandas as pd
 import torch
 
+from ..revision import code_revision
 from ..config import COORD_FEAT, COORDS_PER_LM, LH_START, N_LH, RH_START
 from . import contract as K
 from ._cache_keys import CACHE_VERSION, lmdb_key, lmdb_length_key
 from .build_wlasl_lmdb import _process, signer_split
+
+
+def require_accepted(data_dir, lmdb_path) -> dict:
+    """Acceptance for training and scoring: a dataset is used only with a passing validation report
+    (written by this module, with --raw-root) whose digests match what is opened now: the train.csv
+    in data_dir and every clip it lists in the LMDB at lmdb_path. Exits otherwise. Returns
+    {"content", "csv"} — the release digests an experiment spec records."""
+    from .dataset import _open_lmdb_env  # the datasets' own handle (an env opens once per process)
+
+    rep_path = Path(data_dir) / "validation_report.json"
+    if not rep_path.exists():
+        raise SystemExit(f"{data_dir}: no validation_report.json — run islr.core.data.validate --raw-root first")
+    rep = json.loads(rep_path.read_text())
+    csv_path = Path(data_dir) / "train.csv"
+    csv_digest = hashlib.sha256(csv_path.read_bytes()).hexdigest()[:16]
+    problems = [m for ok, m in [
+        (rep.get("passed") is True and not rep.get("failures"), f"validation failed: {rep.get('failures')}"),
+        (rep.get("raw_resampled", 0) > 0, "validated without --raw-root (stored clips never compared with raw)"),
+        ((rep.get("contract"), rep.get("cache_version")) == (K.CONTRACT_VERSION, CACHE_VERSION),
+         f"validated under contract {rep.get('contract')} / cache {rep.get('cache_version')}"),
+        (rep.get("lmdb") == Path(lmdb_path).name, f"report is for {rep.get('lmdb')}, run reads {Path(lmdb_path).name}"),
+        (rep.get("csv_digest") == csv_digest, f"train.csv changed since validation ({csv_digest} ≠ {rep.get('csv_digest')})"),
+    ] if not ok]
+    if not problems:
+        content = K.content_digest(_open_lmdb_env(str(Path(lmdb_path).resolve())), pd.read_csv(csv_path)["path"].tolist())
+        if content != rep.get("content_digest"):
+            problems.append(f"LMDB content {content} ≠ validated {rep.get('content_digest')}")
+    if problems:
+        raise SystemExit(f"{data_dir}: not an accepted dataset — " + "; ".join(problems))
+    print(f"Validated dataset {data_dir}: content {rep['content_digest']}, train.csv {csv_digest}, "
+          f"{rep.get('clips')} clips ({rep.get('raw_resampled')} re-prepared from raw)")
+    return {"content": rep["content_digest"], "csv": csv_digest}
 
 
 def main() -> None:
@@ -61,9 +101,17 @@ def main() -> None:
           f"contract {man.get('contract')} / cache {man.get('cache_version')} = {K.CONTRACT_VERSION} / {CACHE_VERSION}")
     check(man.get("errors", 1) <= man.get("allow_errors", 0),
           f"build errors {man.get('errors')} within the allowance it was built with ({man.get('allow_errors', 0)})")
+    cov = man.get("coverage") or {}
+    check(cov.get("selected") is not None, f"selection recorded (coverage {({k: v for k, v in cov.items() if k != 'missing_paths'}) or 'absent'})")
+    if cov.get("selected") is not None:
+        check(cov["selected"] == cov.get("listed", -1) + cov.get("missing", 0) and cov.get("missing", 0) <= cov.get("allow_missing", 0),
+              f"selected {cov['selected']} = listed {cov.get('listed')} + missing {cov.get('missing')} (allowed {cov.get('allow_missing', 0)})")
+        check(cov.get("listed") == sum(cov.get(k, -10**9) for k in ("filtered", "build_errors", "excluded_duplicates", "written")),
+              f"listed {cov.get('listed')} = filtered {cov.get('filtered')} + errors {cov.get('build_errors')} + "
+              f"excluded {cov.get('excluded_duplicates')} + written {cov.get('written')}")
     report["manifest"] = {k: man.get(k) for k in ("version", "dataset", "aspect_correction", "shards", "clips_listed",
                                                    "clips_written", "errors", "allow_errors", "content_digest", "csv_digest",
-                                                   "contract_counts", "commit")}
+                                                   "contract_counts", "code")}
 
     csv_digest = hashlib.sha256((a.data_dir / "train.csv").read_bytes()).hexdigest()[:16]
     check(csv_digest == man.get("csv_digest"),
@@ -79,6 +127,13 @@ def main() -> None:
     dataset = man.get("dataset") or schema
     check(dataset == schema, f"manifest dataset {man.get('dataset')!r} matches the train.csv schema ({schema})")
     correct = man.get("aspect_correction", dataset in ("wlasl", "aslcitizen"))
+    check(cov.get("written") == len(df), f"train.csv rows {len(df)} = clips written {cov.get('written')}")
+    if dataset == "aslsigns":
+        prep_aspect = pd.Series(man.get("prep_aspect", np.nan), index=df.index, dtype=float)
+    else:
+        prep_aspect = pd.to_numeric(df.get("prep_aspect", pd.Series(np.nan, index=df.index)), errors="coerce")
+    check(bool(prep_aspect.notna().all() and (prep_aspect > 0).all()),
+          f"preparation aspect recorded for every clip ({int(prep_aspect.isna().sum())} missing)")
 
     if "wlasl_gloss" in df:  # WLASL: halves must equal the frozen split
         sp = signer_split(df)
@@ -93,7 +148,7 @@ def main() -> None:
 
     env = lmdb.open(str(a.lmdb_path), subdir=False, readonly=True, lock=False,
                     map_size=os.path.getsize(a.lmdb_path) + (1 << 28))
-    missing, bad, contents, two_hand = [], [], {}, 0
+    missing, bad, contents, two_hand, no_hand = [], [], {}, 0, []
     with env.begin() as txn:
         for r in df.itertuples():
             v, n = txn.get(lmdb_key(r.path)), txn.get(lmdb_length_key(r.path))
@@ -124,6 +179,8 @@ def main() -> None:
             h = hashlib.sha1(c.numpy().tobytes() + pres.numpy().tobytes()).hexdigest()
             contents.setdefault(h, []).append(r.path)
             two_hand += bool((pres[:, 0].bool() & pres[:, 1].bool()).any())
+            if not pres.any():
+                no_hand.append(r.path)
     check(not missing, f"every train.csv path has data + length keys ({len(missing)} missing)")
     check(not bad, f"clips well-formed ({len(bad)} bad{', e.g. ' + str(bad[0]) if bad else ''})")
     dups = [v for v in contents.values() if len(v) > 1]
@@ -132,6 +189,12 @@ def main() -> None:
     check(digest == man.get("content_digest"), f"content digest {digest} = manifest {man.get('content_digest')}")
     report["two_hand_clip_rate"] = round(two_hand / max(len(df) - len(missing), 1), 4)
     report["clips"] = len(df)
+    split_col = next((c for c in ("wlasl_half", "split") if c in df), None)
+    nh = df[df["path"].isin(no_hand)]
+    report["no_hand_clips"] = {"count": len(nh), "by_split": nh[split_col].value_counts().to_dict() if split_col else None,
+                               "paths": nh["path"].tolist()}
+    print(f"info  clips with no hand ever present (low information, kept and scored as-is): {len(nh)}"
+          + (f" by {split_col} {report['no_hand_clips']['by_split']}" if split_col and len(nh) else ""))
     print(f"info  {len(df)} clips, dataset {dataset} (aspect correction {correct}); clips with both hands in a frame {report['two_hand_clip_rate']:.1%}; "
           f"contract counts {man.get('contract_counts')}")
 
@@ -150,17 +213,19 @@ def main() -> None:
                 if not os.path.exists(full):
                     unfound += 1
                     continue
-                aspect = (r.width / r.height) if hasattr(r, "width") and hasattr(r, "height") else float("nan")
-                _, value, _, err = _process((r.path, full, correct, aspect))
+                _, value, _, err = _process((r.path, full, correct, float(prep_aspect[r.Index])))
                 stored = K.load_record(txn.get(lmdb_key(r.path)))
                 if err or not all(torch.equal(K.load_record(value)[k], stored[k]) for k in ("coords", "presence", "status")):
                     mism.append(r.path)
         check(unfound == 0, f"raw parquets found for the re-prepare sample ({unfound} not)")
         check(not mism, f"re-prepared from raw = stored ({len(mism)} of {len(sample) - unfound} differ)")
+        report["raw_resampled"] = len(sample) - unfound
     env.close()
 
-    report["failures"] = fails
-    (a.lmdb_path.parent / "validation_report.json").write_text(json.dumps(report, indent=1, default=str))
+    report.update({"failures": fails, "passed": not fails, "lmdb": a.lmdb_path.name, "content_digest": digest,
+                   "csv_digest": csv_digest, "contract": K.CONTRACT_VERSION, "cache_version": CACHE_VERSION,
+                   "raw_resampled": report.get("raw_resampled", 0), "code": code_revision()})
+    (a.data_dir / "validation_report.json").write_text(json.dumps(report, indent=1, default=str))
     if fails:
         raise SystemExit(f"{len(fails)} validation checks failed")
     print("all validation checks passed")
