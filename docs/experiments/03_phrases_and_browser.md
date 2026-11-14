@@ -437,6 +437,24 @@ the product improves.
 **Extraction caveat (found 2026-11-13, review):** every extractor (WLASL notebook, ASL Citizen,
 PopSign) reused one MediaPipe Holistic per worker in video mode, so a clip's first frames could be
 tracked from the previous, unrelated clip. Fixed in the shared cell (fresh tracker per video,
-506a5ea); size of the effect on the extracted landmarks being measured (Kaggle
-`tracker-reset-check`) before deciding on re-extraction. The ASL Signs competition data is not
-affected (not extracted by us).
+506a5ea; WLASL notebook 07f23b7). The ASL Signs competition data is not affected (not extracted by us).
+Measured on the first 160 PopSign shard-0 clips (Kaggle `tracker-reset-check`), shared vs fresh
+tracker, against a noise floor of production vs a shared-tracker re-run:
+
+| | shared vs fresh | noise floor |
+|---|---|---|
+| Hand detection rate (left / right) | 23.3 / 16.2 % vs 23.2 / 16.4 % | — |
+| Frames whose hand detection differs | 2–3 % | 0.2–0.7 % |
+| Hand landmark xy difference (normalised) | 0.008 | 0.001–0.002 |
+| Upper-body pose difference, shoulder widths (median): first 5 frames / rest | 0.051 / 0.030 | ~0.003 (normalised) |
+| Shoulders / elbows / wrists (median, p90) | 0.067, 0.131 | |
+| phrases05 prediction changes (never saw PopSign) | 13.7 % of clips; accuracy 83.1 → 86.3 % (+11 / −6, p ≈ 0.3) | |
+| phrases07 prediction changes (trained on these clips) | 3.7 % | |
+
+So the shared tracker did not lose detections but shifted landmarks through the whole clip (largest
+at the start), enough to change one prediction in seven for a model that had not seen the data, with
+no clear accuracy direction on 160 clips. The fresh tracker is the correct reference (each clip
+independent, as in the browser where tracking starts from the person's own frames). Re-extraction
+started (CPU only; v1 outputs kept): `extract-popsign-v2-s0..11`, `extract-aslcitizen-v2-s0..2`.
+Then: rebuild, re-score phrases05 / phrases07 on ASL Citizen v2 and retrain phrases07 on PopSign v2.
+WLASL (training + test half) would need its own re-extraction from the videos — not started.
