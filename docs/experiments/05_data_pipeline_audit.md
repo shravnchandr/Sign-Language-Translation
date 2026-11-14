@@ -267,7 +267,21 @@ image units / the clip's median shoulder width. Below IoU 0.1 both slots are kep
 2,470 WLASL and 60 PopSign frames would otherwise turn into copies, e.g. crossed arms). Scope of the
 error estimates: frames with IoU ≥ 0.1. Slot assignment of a copy is a separate decision, not evaluated
 by these labels (they do not record the side); its fallback frequency is reported, and the side needs
-its own labels before it is frozen. Next: this rule, unchanged, on the holdout labels.
+its own labels before it is frozen. **Holdout (frozen rule, evaluated once):** WLASL 89 labelled (44 two, 45 copy, 19 unclear), PopSign 101
+(101 copy, 7 unclear).
+
+| Rule | WLASL real hands deleted | WLASL copies kept | PopSign copies kept | errors |
+|---|---|---|---|---|
+| current | 21 / 44 (w 0.201) | 0 / 45 | 19 / 101 (w 0.145) | 40 |
+| frozen v4 | 14 / 44 (w 0.094) | 2 / 45 (w 0.014) | 5 / 101 (w 0.024) | 21 |
+
+v4 halves the errors on both datasets, but holdout deletions (14 / 44) are well above calibration (5 / 41):
+the calibration estimate was optimistic. In 12 of the 14 (and 4 of the 5 on calibration) one slot is
+clearly on its own side and the other on the wrong side — hands stacked or crossed, one wrist resting by
+the other pose wrist (pose wrists 0.16–0.72 apart). A copy has the same signature (both slots by one
+pose wrist), so wrist side alone cannot separate stacked real pairs from copies. Not retuned on holdout.
+A further feature (e.g. whether the *other* pose wrist is also at the hands) would need a fresh
+calibration set and a fresh holdout, from recordings not used here.
 
 **Aspect: same clips, builder vs browser preparation (`islr-aspect-wlasl`, `aspect_compare`, 824
 held-out-signer WLASL clips, 0 errors).** k builder / browser median 1.08 (p10–p90 0.99–1.23).
