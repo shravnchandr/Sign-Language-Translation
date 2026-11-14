@@ -206,24 +206,31 @@ both slots or fits two overlapping hands. The IoU rule cannot tell these apart, 
 
 | Case | Evidence (of 23,005 rejected frames) | Example (drawn) |
 |---|---|---|
-| One hand fitted into both slots, correct slot kept | slots' mean landmark distance < 0.3 hand sizes in 54 % | PRAY 44132, HELP 27215 (left palm under the right fist not detected at all) |
-| Copy kept in the **wrong slot** | kept slot's wrist clearly nearer the other side's pose wrist: 3,077 frames, 535 clips | BASEBALL 05171 (right fist stored as the left hand), WASH 62358 |
+| Near-copy candidates (one hand fitted into both slots?) | slots' mean landmark distance < 0.3 hand sizes in 54 % — candidates, not verified; overlaps the next row | PRAY 44132, HELP 27215 (left palm under the right fist not detected at all) |
+| Kept slot on the **wrong side** | kept slot's wrist clearly nearer the other side's pose wrist: 3,077 frames, 535 clips (2,459 of them also near-copy candidates) | BASEBALL 05171 (right fist stored as the left hand), WASH 62358 |
 | **Real hand rejected** | skeletons distinct (≥ 0.3) and each slot's wrist on its own side: 6,205 frames | SOUP 53428 (the signing right hand dropped), BEGINNING 05778, DIVE 16891 |
 | Ambiguous (IoU 0.2–0.5, both kept) | 94 % have each slot on its own side | AMERICA 02353 (interlocked fingers), ATTRACT 04073 — correct |
 
-The rule was derived from PopSign (100 of 128 two-hand frames were copies). Candidate rule: a ghost only
-when the two slots are copies (landmark distance below a threshold); the copy goes to the slot whose
-own pose wrist is clearly nearer, else the current tie-break; distinct overlapping hands are kept.
+The rule was derived from PopSign (100 of 128 two-hand frames were copies). Candidate rule (contract v4):
+a ghost only when the two slots are near-copies — corresponding joints compared in aspect-corrected
+image coordinates, without aligning the hands (two real hands can share a shape, not a position); the
+copy goes to the slot whose pose wrist is confidently nearer; with no confident wrist evidence the
+frame stays AMBIGUOUS (no forced assignment); distinct overlapping hands are kept. A hand MediaPipe
+never detected stays absent. Threshold chosen on visually labelled frames, checked on separate
+clips from WLASL, PopSign and ASL Signs, erring towards keeping real hands.
 Before changing the contract: the same evidence on PopSign (`islr-ghost-popsign`) and ASL Signs, so
 the threshold is set on all three. A contract change means v4, re-fixtures, and the browser's rule.
 
 **ASL Signs (`islr-audit-aslsigns`, 94,477 clips).** Raw structure clean (0 errors, all frames
-complete, no pose-less frames, no no-hand clip); 43 clips with frame-number gaps (median 22 missing
-frames); 4 clips mirrored (pose 11 x ≤ 12 x); 0 exact duplicates; ghost rule fires in 439 clips
+complete, no pose-less frames, no no-hand clip); 43 clips with frame-number gaps (the audit's counter counted
+positions shifted after a gap, not missing frames — fixed to `frame_gaps` + `missing_frames`; the
+missing count comes with the next audit run); 4 clips flagged by orientation (pose 11 x ≤ 12 x; median lr_dx −0.003 to −0.70 — to inspect
+before calling them mirrored); 0 exact duplicates; ghost rule fires in 439 clips
 (1,667 frames). The near-duplicate test flags 25,619 cross-signer pairs (all ≥ 6 frames, 4,901 ≥ 15)
 — the upper-body pose track does not separate people in these short, static clips, so on ASL Signs
 it **proves nothing**; with 0 exact duplicates (one extraction pipeline) a true cross-id copy is
-unlikely, to be confirmed with a person-specific feature (face-mesh shape) on the flagged pairs.
+unlikely. Face-mesh shape can triage the flagged pairs, but only after its separation is measured on
+known same-recording and different-recording controls; similarity alone does not establish a copy.
 
 ### Review of ce3c929 (three more, fixed)
 

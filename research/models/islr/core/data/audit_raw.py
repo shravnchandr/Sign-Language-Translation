@@ -63,7 +63,9 @@ def _clip(job: tuple) -> dict:
         frames = np.sort(df["frame"].unique())
         T = len(frames)
         out["T"] = T
-        out["frame_gaps"] = int((frames != np.arange(frames[0], frames[0] + T)).sum()) if T else 0
+        steps = np.diff(frames)
+        out["frame_gaps"] = int((steps > 1).sum())  # places where frame numbers jump
+        out["missing_frames"] = int((steps - 1).clip(min=0).sum())  # frame numbers absent in between
         out["frames_start"] = int(frames[0]) if T else None
         out["rows_per_frame_ok"] = bool(len(df) == 543 * T)
         out["n_frames_csv_match"] = bool(n_frames != n_frames or int(n_frames) == T)
@@ -189,6 +191,8 @@ def main() -> None:
         "raw_structure_errors": count("raw_error", lambda s: s.astype(str).ne("0")),
         "raw_error_examples": res["raw_error"].dropna().head(5).tolist() if "raw_error" in res else [],
         "clips_with_frame_gaps": count("frame_gaps", lambda s: s > 0),
+        "missing_frames_in_gapped_clips": (res.loc[res["frame_gaps"].fillna(0) > 0, "missing_frames"]
+                                           .quantile([0, 0.5, 1]).tolist() if "missing_frames" in res else None),
         "clips_not_starting_at_frame_0": int((res["frames_start"].fillna(0) != 0).sum()),
         "clips_rows_per_frame_wrong": int((res["rows_per_frame_ok"] == False).sum()),  # noqa: E712
         "clips_T_ne_shard_n_frames": int((res["n_frames_csv_match"] == False).sum()),  # noqa: E712
