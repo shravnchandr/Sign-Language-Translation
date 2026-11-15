@@ -136,10 +136,10 @@ boxed). Judge the middle frame.
            elsewhere in the crop
   two      the skeletons track two different physical hands
   unclear  cannot tell from the tile (blur, occlusion, resolution) — never guess
-For a copy, also the side of the physical hand both skeletons track: left / right (the signer's own;
-the video is unmirrored, so the signer's left hand is on the image right) / unclear. Judge the side
-from the video — which arm the hand belongs to (raw crops, neighbouring frames, full frame) — not from
-the pose-wrist dots, which are the evidence being evaluated.
+For a copy, also the side of the physical hand both skeletons track: left / right (the signer's own) /
+unclear. Judge it from the video by following the arm to its shoulder (raw crops, neighbouring frames,
+full frame) — not from image position (arms cross) and not from the pose-wrist dots, which are the
+evidence being evaluated.
 """
 
 WRIST_MARGIN, NEAR = 0.1, 0.3  # shoulder widths: own-side margin (v4 baseline), pose wrist "at the hands"
@@ -158,16 +158,23 @@ def wrist_stratum(ev: pd.DataFrame) -> pd.Series:
 def sample_strata(ev: pd.DataFrame, per_stratum: int, seed: int, exclude: set) -> pd.DataFrame:
     """One frame per recording, per_stratum per wrist stratum and per set, among frames with both slots
     detected and IoU >= LOW_IOU (the v4 rule's scope), from recordings whose content is not in
-    `exclude` (recordings already seen). Sets by recording content, as in sample_frames."""
+    `exclude` (recordings already seen), each recording used once. Sets by recording content, as in
+    sample_frames."""
     import zlib
 
     c = ev[(ev["iou"] >= LOW_IOU) & ~ev["content"].isin(exclude)].copy()
     c["stratum"] = wrist_stratum(c)
     c["bin"] = pd.cut(c["slot_landmark_dist"], BINS, right=False, labels=False)
     c["set"] = ["holdout" if zlib.crc32(str(v).encode()) % 2 else "calibration" for v in c["content"]]
-    c = c.sample(frac=1, random_state=seed).drop_duplicates(["content", "stratum"])
-    return pd.concat([g.drop_duplicates("content").head(per_stratum)
-                      for _, g in c.groupby(["set", "stratum"])], ignore_index=True).drop_duplicates("content")
+    c = c.sample(frac=1, random_state=seed)
+    picked, used = [], set()
+    for _, g in c.groupby("set"):
+        # scarcest stratum first; a recording is used once, the next unused one refills the quota
+        for st in g["stratum"].value_counts().sort_values().index:
+            cand = g[(g["stratum"] == st) & ~g["content"].isin(used)].drop_duplicates("content").head(per_stratum)
+            used |= set(cand["content"])
+            picked.append(cand)
+    return pd.concat(picked, ignore_index=True)
 
 
 def sample_frames(ev: pd.DataFrame, per_bin: int, seed: int) -> pd.DataFrame:

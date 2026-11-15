@@ -286,10 +286,10 @@ calibration set and a fresh holdout, from recordings not used here.
 **ASL Citizen (`islr-audit-aslcitizen` + `inventory-aslcitizen`, extraction 07f23b7, 3 shards; research use
 only, data stays on Kaggle).** Coverage complete (8,557 selected = 8,557 extracted); 0 structure errors,
 no frame gaps, nothing mirrored, 0 exact duplicates; 135 clips with pose-less frames, 7 no-hand clips;
-frame sizes 640×480 (8,225), 960×540 (330), 480×640 (2); ~30 fps (probe). Upper-body pose values far
-outside the frame in 6.2 % (WLASL 0.05 %): webcam framing cuts the arms — pose wrists are then
-extrapolated, which weakens wrist evidence (ghost rule) on this dataset; to quantify with round 2's
-features. Signers: 51, official splits disjoint (35 / 5 / 11). The 280 `seed…` clips are all P52
+frame sizes 640×480 (8,225), 960×540 (330), 480×640 (2); ~30 fps (probe). Upper-body pose coordinates outside
+the expanded bounds [−0.5, 1.5]: mean per-clip fraction 6.2 % (WLASL 0.05 %) — not a measured wrist error
+or arm-cropping rate; pose wrists 15 / 16 are to be checked separately, since wrist evidence drives the
+ghost rule. Signers: 51, official splits disjoint (35 / 5 / 11). The 280 `seed…` clips are all P52
 (the reference signer, one per gloss, train). Near-duplicate test: 8 same-gloss pairs ≤ 0.095, 5 under
 different ids — val–train (P39 / P52-seed BOY, P26 / P31 CARROT), test–val (P49 / P21 LIPS), train–train;
 **no test–train pair detected by these checks** (the split our evaluations depend on). As on ASL Signs,
@@ -300,7 +300,9 @@ screen, not proof. Ghost rule fires in 1,232 clips (7,755 frames): v4 applies he
 One bounded round; the frozen rule above is the baseline (B0). Fresh recordings only: every recording
 content already seen (main samples, low-IoU frames, contact sheets — `ghost_labels/used_content.csv`,
 262 WLASL / 199 PopSign) is excluded; new calibration and holdout sets split by content. Sampling:
-frames with both slots and IoU ≥ 0.1, 18 per wrist stratum per set per dataset — `both_own` (B0 says
+frames with both slots and IoU ≥ 0.1, 18 per wrist stratum per set per dataset, each recording used once
+(scarcest stratum filled first, refilled from unused recordings; a first push that deduplicated after
+filling — 106 / 107 tiles — was discarded unseen) — `both_own` (B0 says
 two), `stacked` (not both own, both pose wrists ≤ 0.3 from a hand: stacked / crossed real pairs *and*
 PRAY / HELP-style copies), `one_far` (a pose wrist away from the hands). Labels: copy / two / unclear and,
 for a copy, the side of the physical hand (left / right / unclear, judged from the arm in the video, not
@@ -315,8 +317,9 @@ assignments (copies with a side label), assignment-uncertain share, unclear shar
 Adoption criteria (holdout): a candidate C replaces B0 iff (1) its weighted errors (deletions +
 retentions) summed over WLASL and PopSign are lower than B0's, and (2) on neither dataset is its weighted
 deletion rate or retention rate worse than B0's by more than 0.02. Otherwise B0 stays. The assignment
-rule is adopted iff confident assignments are on the wrong side in ≤ 5 % of side-labelled copies on
-holdout; otherwise every copy is assigned by the fixed tie-break and flagged `assignment_uncertain`.
+rule is adopted iff wrong confident assignments / confident assignments whose copy has a known reference
+side (left / right label) ≤ 5 % on holdout — reported with the uncertain share (assignment fallbacks)
+and the fallback tie-break's own errors on side-labelled copies; otherwise every copy is assigned by the fixed tie-break and flagged `assignment_uncertain`.
 Whatever passes is v4; remaining errors are documented, with no further holdout-driven revision.
 
 **Aspect: same clips, builder vs browser preparation (`islr-aspect-wlasl`, `aspect_compare`, 824
