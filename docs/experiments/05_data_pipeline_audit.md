@@ -599,7 +599,7 @@ phrases06's ASL Citizen score is in-domain (trained on other ASL Citizen signers
 | run | check_freeze | best val WER | WLASL test exact / top-5 | ASL Citizen test exact / top-5 |
 |---|---|---|---|---|
 | phrases05 (retrained on the accepted releases) | 15 / 15 | 0.2826 (epoch 27 / 30) | 82.5 / 95.4 % | 70.4 / 88.6 % |
-| phrases07 | pending | | | |
+| phrases07 (+ PopSign, 20 % of phrases) | 16 / 16 | 0.2326 (epoch 29 / 30) | 84.0 / 95.7 % | 73.2 / 89.9 % |
 | phrases06 (research only) | pending | | | |
 
 Paired against the re-scored legacy checkpoints (same clips): phrases05 legacy → frozen WLASL 82.7 →
@@ -608,6 +608,16 @@ statistically detectable difference — not shown equivalent (the ASL Citizen po
 lower). The frozen phrases05 is a valid baseline because its configuration and evaluation protocol pass
 the freeze checks, not because of this agreement. (legacy phrases07 → frozen phrases05: ASL Citizen 73.5 → 70.4 %, +116 / −220, p = 1.5e-8;
 this compares models, not data, and is not the planned test, which is frozen 05 vs frozen 07.)
+
+**Frozen phrases05 → frozen phrases07 (the planned test; same code, releases, init, seed, validation
+phrases; only the PopSign source added).** ASL Citizen test 70.4 → 73.2 % (+207 / −114, McNemar p =
+2.3e-7), higher for 9 of the 11 test signers (the two lower: −0.7 points each); WLASL test half 82.5 →
+84.0 % (+39 / −27, p = 0.18) — no statistically detectable difference there. Against the legacy
+phrases07 checkpoint, frozen phrases07 shows no detectable difference on either test (WLASL +24 / −26,
+p = 0.89; ASL Citizen +129 / −140, p = 0.54). The val WER drop (0.2826 → 0.2326) is not independent
+evidence: PopSign is likely to share signers with ASL Signs (same game), and the validation phrases are
+built from ASL Signs fold-0 signers, so some of it may be the val signers' own PopSign clips; the
+WLASL and ASL Citizen tests share no signers with any training source.
 
 **Browser / export review (2026-11-15; ASL-App issues are the app owner's to fix, this repo supplies the
 reference).**
