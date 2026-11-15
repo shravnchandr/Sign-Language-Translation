@@ -322,6 +322,33 @@ side (left / right label) ≤ 5 % on holdout — reported with the uncertain sha
 and the fallback tie-break's own errors on side-labelled copies; otherwise every copy is assigned by the fixed tie-break and flagged `assignment_uncertain`.
 Whatever passes is v4; remaining errors are documented, with no further holdout-driven revision.
 
+**Round 2 — calibration result and frozen decisions (before the round-2 holdout key was opened).**
+Labels (`ghost_labels/round2_*`, committed in 1ff49b1 before any key): WLASL calibration 24 two / 26 copy /
+4 unclear, PopSign 1 / 51 / 2. By stratum: WLASL `both_own` 18 two, `stacked` 11 copy / 4 two, `one_far`
+15 copy / 2 two; PopSign `stacked` 18 / 18 copies, `one_far` 18 / 18, and `both_own` 15 copies of 16.
+Weights: stratum shares of the IoU ≥ 0.1 frames (WLASL 65 / 22 / 13 %, PopSign 4 / 13 / 83 %).
+
+| Copy rule (calibration) | WLASL deleted | WLASL kept copies | PopSign kept copies | weighted sum |
+|---|---|---|---|---|
+| **B0 (frozen)** | 6 / 24 (w 0.074) | 0 / 26 | 15 / 51 (w 0.037) | **0.111** |
+| keep both in `stacked` | 2 / 24 | 11 / 26 (w 0.162) | 33 / 51 (w 0.167) | 0.344 |
+| `stacked`: copy iff distance < 0.6 | 4 / 24 | 4 / 26 | 22 / 51 | 0.191 |
+| `stacked`: copy iff hand wrists < 0.25 apart | 5 / 24 | 2 / 26 | 18 / 51 | 0.148 |
+
+The other pose wrist being near is not evidence of two hands on PopSign (all 18 labelled `stacked` frames
+are copies); every candidate that treats `stacked` differently raises PopSign retention more than it
+lowers WLASL deletion. **B0 stays the copy rule** (no candidate beats it on calibration; holdout is
+evaluated for the record). PopSign `both_own` copies (15 / 16, 4 % of its frames) are B0's known residual.
+
+**Assignment (frozen):** a copy goes to the slot on the side whose pose wrist is nearer the copy's wrist
+(mean of the two slot wrists); confident iff nearer / farther < 0.45 (the largest ratio with ≤ 5 % wrong
+confident assignments on PopSign calibration: 1 / 25; WLASL 0 / 15), otherwise the same nearer side is
+used and the frame flagged `assignment_uncertain` (calibration: 47 % of PopSign and 31 % of WLASL copies;
+fallback wrong 7 / 20 and 0 / 4 among side-labelled). This replaces the clip-level "alone more often"
+tie-break, which these labels cannot evaluate. Side labels follow the arm to its shoulder in the image
+(image-left shoulder = `right`, the pose model's frame); 7 / 26 WLASL and 6 / 51 PopSign calibration
+copies have no side label (unclear).
+
 **Aspect: same clips, builder vs browser preparation (`islr-aspect-wlasl`, `aspect_compare`, 824
 held-out-signer WLASL clips, 0 errors).** k builder / browser median 1.08 (p10–p90 0.99–1.23).
 
