@@ -521,6 +521,12 @@ spread evenly, → 1 when all motion falls on one phase), k = 2, 4, and its 24-f
    reported separately, outside the ×4-vs-ordinary evaluation. The 59 candidates and 198 controls are
    **proxy labels** (cross-dataset matches, not confirmed recordings): passing (4) supports transfer of
    the detector to ASL Signs, it does not establish each ASL Signs decision.
+6. Counts (review of a25b6a0): rates are compared unrounded — candidates need ≥ 42 of 59 flagged. The
+   198 control matches are **192 distinct ASL Signs clips** (6 are matched by two PopSign clips; no clip
+   is in both groups), so controls pass with ≤ 3 of 192 flagged (4 / 192 = 2.08 % fails). The threshold
+   is frozen by `repeat_check calibrate` (calibration signers only) into
+   `core/data/repeat_frames_threshold.json`, committed before `repeat_check evaluate` runs; `evaluate`
+   never refits and refuses a different calibration signer set.
 
 **v4 statistics per dataset** (raw audits at d19ba7c vs v3 at dd3d977, per clip; frame-level v3
 decisions are not stored, so "frames changed" is the per-clip count difference, a lower bound).
