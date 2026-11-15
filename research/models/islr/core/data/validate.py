@@ -15,15 +15,16 @@ Hard checks:
     build errors + excluded duplicates + written, written = train.csv rows
   - preparation parameters recorded: prep_aspect per clip (ASL Signs: the manifest's fixed 0.75)
   - every train.csv path has a data + length key; stored length = clip length = n_frames
-  - every clip: finite, (T > 0, COORD_FEAT); presence binary and = status in {KEPT, AMBIGUOUS};
-    status codes valid; a hand never present has an all-zero block
+  - every clip: the current record layout (contract.RECORD_KEYS); finite, (T > 0, COORD_FEAT);
+    presence binary and = status KEPT; status codes valid; assignment_uncertain binary (T,) and set
+    only in copy frames (one slot KEPT, the other GHOST); a hand never present has an all-zero block
   - labels in the sign map; participant ids resolved (no NaN / -1)
   - WLASL: signer halves = the frozen wlasl_signer_split.json (and wlasl_half, when present);
     ASL Citizen: official train / val / test signers disjoint
   - no two clips with identical stored content
   - --raw-root: a random sample re-prepared from its raw parquet is byte-identical to the stored
-    value — coords, presence and provenance status (the LMDB is what the contract produces today)
-Reported (not failed): two-hand clip rate, ghost / ambiguous / pose-less frame totals, clips in
+    value — every stored field (contract.RECORD_KEYS; the LMDB is what the contract produces today)
+Reported (not failed): two-hand clip rate, copy / assignment-uncertain / pose-less frame totals, clips in
 which no hand is ever present (low information; listed with their split, kept and scored as-is).
 """
 
@@ -48,7 +49,7 @@ from .build_wlasl_lmdb import _process, signer_split
 
 # Bump whenever a check is added or tightened: reports written under an older policy no longer
 # admit a dataset (it must be validated again), so a release cannot pass on yesterday's checks.
-VALIDATION_POLICY = 2  # 1: 33b6971 (no coverage / prep_aspect checks); 2: e765dd4+ (coverage, prep_aspect, no-hand report)
+VALIDATION_POLICY = 3  # 1: 33b6971 (no coverage / prep_aspect checks); 2: e765dd4+ (coverage, prep_aspect, no-hand report); 3: contract v4 (copy rule, assignment_uncertain)
 
 
 def require_accepted(data_dir, lmdb_path) -> dict:
@@ -166,8 +167,12 @@ def main() -> None:
             if v is None or n is None:
                 missing.append(r.path)
                 continue
-            d = torch.load(io.BytesIO(bytes(v)), weights_only=True)
-            c, pres, st = d["coords"], d["presence"], d["status"]
+            try:
+                d = K.load_record(v)
+            except ValueError as e:
+                bad.append((r.path, [str(e)]))
+                continue
+            c, pres, st, unc = d["coords"], d["presence"], d["status"], d["assignment_uncertain"]
             T = c.shape[0]
             problems = []
             if c.ndim != 2 or c.shape[1] != COORD_FEAT or T == 0:
@@ -178,10 +183,13 @@ def main() -> None:
                 problems.append(f"length {int(n)} / n_frames {getattr(r, 'n_frames', '?')} / T {T}")
             if pres.shape != (T, 2) or not ((pres == 0) | (pres == 1)).all():
                 problems.append("presence not binary (T, 2)")
-            if not torch.isin(st, torch.tensor([K.ABSENT, K.KEPT, K.GHOST, K.AMBIGUOUS])).all():
+            if st.shape != (T, 2) or not torch.isin(st, torch.tensor([K.ABSENT, K.KEPT, K.GHOST])).all():
                 problems.append("unknown status code")
-            if not torch.equal(pres.bool(), (st == K.KEPT) | (st == K.AMBIGUOUS)):
+            if not torch.equal(pres.bool(), st == K.KEPT):
                 problems.append("presence ≠ status")
+            copy = ((st == K.KEPT) & (st.flip(1) == K.GHOST)).any(1)
+            if unc.shape != (T,) or not ((unc == 0) | (unc == 1)).all() or (unc.bool() & ~copy).any():
+                problems.append("assignment_uncertain not binary (T,) or outside a copy frame")
             for h, hs in enumerate((LH_START, RH_START)):
                 if not pres[:, h].any() and c[:, hs: hs + N_LH * COORDS_PER_LM].abs().sum() > 0:
                     problems.append(f"hand {h} never present but non-zero")
@@ -226,7 +234,7 @@ def main() -> None:
                     continue
                 _, value, _, err = _process((r.path, full, correct, float(prep_aspect[r.Index])))
                 stored = K.load_record(txn.get(lmdb_key(r.path)))
-                if err or not all(torch.equal(K.load_record(value)[k], stored[k]) for k in ("coords", "presence", "status")):
+                if err or not all(torch.equal(K.load_record(value)[k], stored[k]) for k in K.RECORD_KEYS):
                     mism.append(r.path)
         check(unfound == 0, f"raw parquets found for the re-prepare sample ({unfound} not)")
         check(not mism, f"re-prepared from raw = stored ({len(mism)} of {len(sample) - unfound} differ)")

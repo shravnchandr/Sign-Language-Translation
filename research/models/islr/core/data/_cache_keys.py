@@ -9,7 +9,7 @@ from ..config import ALL_COLUMNS
 # Digest changes whenever ALL_COLUMNS changes (face selection, depth flag, etc.)
 # or when preprocessing normalization logic changes (_NORM_VERSION bump).
 _NORM_VERSION = (
-    "v3_contract"  # bump when the stored clip changes (contract.py; v3 = dict with explicit presence)
+    "v4_contract"  # bump when the stored clip changes (contract.py; v3 = dict with explicit presence; v4 = copy rule + assignment_uncertain)
 )
 CACHE_VERSION = hashlib.md5(
     ("|".join(ALL_COLUMNS) + "|" + _NORM_VERSION).encode()

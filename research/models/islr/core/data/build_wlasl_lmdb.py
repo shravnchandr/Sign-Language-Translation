@@ -178,10 +178,10 @@ def exclude_duplicates(df: pd.DataFrame, stats: dict, out_dir: Path, label: str 
 
 
 def contract_summary(stats: dict) -> dict:
-    """Totals of the contract's per-clip counts (pose-less frames dropped, ghost / ambiguous frames)."""
-    keys = ("frames_raw", "frames_no_pose", "two_hand_frames", "ghost_frames", "ambiguous_frames")
+    """Totals of the contract's per-clip counts (pose-less frames dropped, copy / assignment-uncertain frames)."""
+    keys = ("frames_raw", "frames_no_pose", "two_hand_frames", "copy_frames", "assignment_uncertain_frames")
     tot = {k: int(sum(i[k] for i in stats.values())) for k in keys}
-    tot["clips_with_ghosts"] = int(sum(i["ghost_frames"] > 0 for i in stats.values()))
+    tot["clips_with_copies"] = int(sum(i["copy_frames"] > 0 for i in stats.values()))
     tot["clips_with_no_pose_frames"] = int(sum(i["frames_no_pose"] > 0 for i in stats.values()))
     print(f"contract: {tot}")
     return tot

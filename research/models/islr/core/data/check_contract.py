@@ -5,8 +5,10 @@ fixtures). Run before any LMDB rebuild or training:
   PYTHONPATH=research/models uv run python -m islr.core.data.check_contract
 
 Cases: leading / trailing hand gaps, a lone detection, frames without a pose, crossed hands, two
-real hands touching, a ghost (one hand in both slots), an ambiguous overlap, a clip longer than
-max_frames; plus raw rows the contract must refuse (repeated records, landmark indices outside
+real hands touching, two real hands overlapping on their own sides, a copied hand (one hand in both
+slots) kept confidently and one kept with `assignment_uncertain`, a clip longer than max_frames; the
+copy rule's boundaries on single frames (IoU, own-side margin and assignment ratio just either side of
+their thresholds, an exact D tie); plus raw rows the contract must refuse (repeated records, landmark indices outside
 their part, unknown types, missing frame ids). Exits non-zero on the first failure.
 """
 
@@ -38,9 +40,11 @@ def _hand(cx: float, cy: float, size: float = 0.08) -> np.ndarray:
     return pts
 
 
-def clip(T: int, lh=None, rh=None, no_pose=(), ghost=(), ambiguous=(), seed=0) -> pd.DataFrame:
-    """Competition-format rows. lh / rh: frames where that hand is detected. ghost: frames where
-    rh copies lh (+ tiny jitter); ambiguous: frames where rh partly overlaps lh (IoU ≈ 0.3)."""
+def clip(T: int, lh=None, rh=None, no_pose=(), copy=(), copy_mid=(), overlap_own=(), seed=0) -> pd.DataFrame:
+    """Competition-format rows. lh / rh: frames where that hand is detected. copy: frames where rh
+    copies lh (+ tiny jitter) by the signer's left wrist; copy_mid: the same, both midway between the
+    pose wrists (assignment uncertain); overlap_own: two real hands whose boxes overlap, each wrist by
+    its own pose wrist."""
     rng = np.random.default_rng(seed)
     rows = []
     for t in range(T):
@@ -48,15 +52,22 @@ def clip(T: int, lh=None, rh=None, no_pose=(), ghost=(), ambiguous=(), seed=0) -
         pose = np.column_stack([rng.uniform(0.3, 0.7, 33), rng.uniform(0.2, 0.9, 33), rng.uniform(-1, 0, 33)])
         pose[0, :2] = 0.5 + drift, 0.3                 # nose
         pose[15, :2], pose[16, :2] = (0.65, 0.7), (0.35, 0.7)  # left / right wrist (unmirrored)
+        pose[11, :2], pose[12, :2] = (0.6, 0.45), (0.4, 0.45)  # shoulders: fixed width (copy rule scale)
         has_pose = t not in no_pose
         parts = {"pose": pose if has_pose else None,
                  "face": np.column_stack([rng.uniform(0.4, 0.6, 468), rng.uniform(0.2, 0.4, 468), rng.uniform(-0.1, 0.1, 468)]) if has_pose else None,
                  "left_hand": _hand(0.62 + drift, 0.6) if lh is not None and t in lh else None,
                  "right_hand": _hand(0.38 - drift, 0.6) if rh is not None and t in rh else None}
-        if t in ghost and parts["left_hand"] is not None:
+        if t in copy and parts["left_hand"] is not None:
             parts["right_hand"] = parts["left_hand"] + rng.normal(0, 0.002, (21, 3))
-        if t in ambiguous and parts["left_hand"] is not None:
-            parts["right_hand"] = parts["left_hand"] + np.array([0.04, 0.0, 0.0])  # half a hand's width over
+        if t in copy_mid:
+            parts["left_hand"] = _hand(0.5, 0.62)
+            parts["right_hand"] = parts["left_hand"] + rng.normal(0, 0.002, (21, 3))
+        if t in overlap_own:  # long hands reaching across: wrists by their own pose wrists, boxes overlap
+            for part, wx, tip in (("left_hand", 0.64, 0.42), ("right_hand", 0.36, 0.58)):
+                h = np.column_stack([np.linspace(wx, tip, 21), np.full(21, 0.66), np.zeros(21)])
+                h[1::2, 1] -= 0.03
+                parts[part] = h
         for part, n in (("face", 468), ("left_hand", 21), ("pose", 33), ("right_hand", 21)):
             xyz = parts[part] if parts[part] is not None else np.full((n, 3), np.nan)
             for i in range(n):
@@ -72,8 +83,9 @@ CASES = {
     "no_pose_frames": (30, dict(lh=range(30), no_pose=(0, 13, 29))),
     "crossed_hands": (30, dict(lh=range(30), rh=range(30))),  # rh drawn on the lh side below
     "two_hands_touching": (30, dict(lh=range(30), rh=range(30))),
-    "ghost": (40, dict(lh=range(40), rh=range(10, 16), ghost=range(10, 16))),
-    "ambiguous": (40, dict(lh=range(40), rh=[20], ambiguous=[20])),
+    "copy": (40, dict(lh=range(40), rh=range(10, 16), copy=range(10, 16))),
+    "copy_uncertain": (40, dict(lh=range(40), rh=[20], copy_mid=[20])),
+    "overlap_own_sides": (30, dict(lh=range(30), rh=range(30), overlap_own=range(30))),
     "long_clip": (500, dict(lh=range(30, 480), rh=range(200, 260))),
 }
 
@@ -83,11 +95,85 @@ def fail(msg: str) -> None:
     sys.exit(1)
 
 
+def _frame(lh_wrist, lh_box, rh_wrist, rh_box, p15=(0.75, 0.5), p16=(0.25, 0.5)) -> dict:
+    """One-frame raw arrays (aspect 1): each hand = its wrist + landmarks spanning its box corners;
+    shoulders 0.25 apart (= the distance unit), pose wrists at p15 / p16."""
+    pose = np.zeros((1, 33, 3), np.float64)
+    pose[0, 11, :2], pose[0, 12, :2] = (0.625, 0.25), (0.375, 0.25)
+    pose[0, 15, :2], pose[0, 16, :2] = p15, p16
+
+    def hand(w, box):
+        x0, y0, x1, y1 = box
+        h = np.zeros((1, 21, 3), np.float64)
+        h[0, :, 0] = np.resize([x0, x1], 21)
+        h[0, :, 1] = np.resize([y0, y0, y1, y1], 21)
+        h[0, 0, :2] = w
+        return h
+
+    return {"pose": pose, "left_hand": hand(lh_wrist, lh_box), "right_hand": hand(rh_wrist, rh_box)}
+
+
+def rule_cases(vectors: list | None = None) -> None:
+    """The copy rule at its thresholds (single frames, exact geometry, aspect 1, shoulder width 0.25).
+    vectors: if given, each case is appended as {inputs, expected} for a browser port's own tests."""
+    e = 1e-6
+
+    def record(name, frame, st, unc):
+        if vectors is not None:
+            vectors.append({"case": name, "aspect": 1.0,
+                            "pose": {str(j): frame["pose"][0, j, :2].tolist() for j in (11, 12, 15, 16)},
+                            "left_hand": frame["left_hand"][0, :, :2].tolist(), "right_hand": frame["right_hand"][0, :, :2].tolist(),
+                            "expected": {"hand_status": st[0].tolist(), "assignment_uncertain": int(unc[0])}})
+    # IoU: two equal squares (side 0.1) offset by dx, both wrists at x = 0.7 (copy signature) → IoU = (0.1 - dx) / (0.1 + dx)
+    for iou, want in ((K.COPY_IOU + e, "copy"), (K.COPY_IOU - e, "both")):
+        dx = 0.1 * (1 - iou) / (1 + iou)
+        fr = _frame((0.7, 0.5), (0.6, 0.45, 0.7, 0.55), (0.7, 0.5), (0.6 + dx, 0.45, 0.7 + dx, 0.55))
+        st, unc, _ = K.resolve_ghosts(fr, 1.0)
+        record(f"iou {iou:.7f}", fr, st, unc)
+        got = "copy" if (st == K.GHOST).any() else "both"
+        if got != want:
+            fail(f"rule: IoU {iou:.7f} gave {got}, want {want}")
+    # own-side margin: right slot clearly by pose 16; left wrist at x with (l16 - l15) = (2x - 1) / 0.25 (shoulder units)
+    for margin, want in ((K.WRIST_MARGIN + e, "both"), (K.WRIST_MARGIN - e, "copy")):
+        x = (margin * 0.25 + 1) / 2
+        fr = _frame((x, 0.5), (0.3, 0.45, 0.7, 0.55), (0.25, 0.5), (0.3, 0.45, 0.7, 0.55))
+        st, unc, _ = K.resolve_ghosts(fr, 1.0)
+        record(f"own-side margin {margin:.7f}", fr, st, unc)
+        got = "copy" if (st == K.GHOST).any() else "both"
+        if got != want:
+            fail(f"rule: own-side margin {margin:.7f} gave {got}, want {want}")
+    # assignment ratio: both wrists at x in (0.5, 0.75): D_left / D_right = (0.75 - x) / (x - 0.25)
+    for ratio, want in ((K.ASSIGN_RATIO - e, 0), (K.ASSIGN_RATIO + e, 1)):
+        x = (0.75 + ratio * 0.25) / (1 + ratio)
+        fr = _frame((x, 0.5), (0.55, 0.45, 0.7, 0.55), (x, 0.5), (0.55, 0.45, 0.7, 0.55))
+        st, unc, _ = K.resolve_ghosts(fr, 1.0)
+        record(f"assignment ratio {ratio:.7f}", fr, st, unc)
+        if st.tolist() != [[K.KEPT, K.GHOST]] or int(unc[0]) != want:
+            fail(f"rule: ratio {ratio:.7f} gave status {st.tolist()} uncertain {int(unc[0])}, want left kept, uncertain {want}")
+    # exact tie: both wrists at 0.5, D_left = D_right = 0.25 / 0.25 exactly → right slot kept, uncertain
+    fr = _frame((0.5, 0.5), (0.45, 0.45, 0.55, 0.55), (0.5, 0.5), (0.45, 0.45, 0.55, 0.55))
+    st, unc, _ = K.resolve_ghosts(fr, 1.0)
+    record("exact D tie", fr, st, unc)
+    if st.tolist() != [[K.GHOST, K.KEPT]] or int(unc[0]) != 1:
+        fail(f"rule: exact D tie gave {st.tolist()} uncertain {int(unc[0])}, want right kept, uncertain")
+    print("ok  copy rule at its thresholds (IoU, own-side margin, assignment ratio, exact tie)")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--sign-map", default="data/asl-is-lmdb/sign_to_prediction_index_map.json",
                     help="the 250 ASL Signs labels (the phrase grammar needs the real names)")
-    idx2sign = {v: k for k, v in json.loads(Path(ap.parse_args().sign_map).read_text()).items()}
+    ap.add_argument("--write-fixtures", type=Path,
+                    help="also write every case as a browser fixture (<case>.json) and the threshold cases "
+                         "as rule_vectors.json — for checking a browser port against the contract")
+    args = ap.parse_args()
+    idx2sign = {v: k for k, v in json.loads(Path(args.sign_map).read_text()).items()}
+    vectors: list = []
+    rule_cases(vectors)
+    if args.write_fixtures:
+        args.write_fixtures.mkdir(parents=True, exist_ok=True)
+        (args.write_fixtures / "rule_vectors.json").write_text(json.dumps(
+            {"contract_version": K.CONTRACT_VERSION, "cases": vectors}, indent=1))
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         (tmp / "train_landmark_files").mkdir()
@@ -126,7 +212,10 @@ def main() -> None:
         for j, name in enumerate(CASES):
             coords, presence = ds._load_clip(j)
             st = stats[f"train_landmark_files/{name}.parquet"]
-            status = K.prepare(raw[name])["status"]
+            prep = K.prepare(raw[name])
+            status, unc = prep["status"], prep["assignment_uncertain"]
+            if unc.any() and name != "copy_uncertain":
+                fail(f"{name}: assignment_uncertain set in frames {np.nonzero(unc)[0].tolist()}")
             # 1. expected stored presence / provenance per case
             if name == "no_pose_frames" and (st["frames_no_pose"] != 3 or len(coords) != 27):
                 fail(f"{name}: {st['frames_no_pose']} pose-less frames dropped, {len(coords)} kept (want 3, 27)")
@@ -136,14 +225,15 @@ def main() -> None:
                 fail(f"{name}: presence must start at frame 10")
             if name == "trailing_gap" and (presence[25:, 0].any() or not presence[:25, 0].all()):
                 fail(f"{name}: presence must end at frame 24")
-            if name in ("crossed_hands", "two_hands_touching") and (not presence.all() or (status != K.KEPT).any()):
+            if name in ("crossed_hands", "two_hands_touching", "overlap_own_sides") and (not presence.all() or (status != K.KEPT).any()):
                 fail(f"{name}: both hands must be kept in every frame (status {np.unique(status)})")
-            if name == "ghost":
+            if name == "copy":  # the copy sits by the left pose wrist: kept in the left slot, confidently
                 if not ((status[10:16, 1] == K.GHOST).all() and (status[10:16, 0] == K.KEPT).all()
                         and presence[10:16, 1].sum() == 0):
-                    fail(f"{name}: right-hand ghost not rejected in frames 10–15: {status[8:18].tolist()}")
-            if name == "ambiguous" and not (status[20] == K.AMBIGUOUS).all():
-                fail(f"{name}: frame 20 must be AMBIGUOUS (kept), got {status[20].tolist()}")
+                    fail(f"{name}: right-slot copy not rejected in frames 10–15: {status[8:18].tolist()}")
+            if name == "copy_uncertain" and not (sorted(status[20].tolist()) == [K.KEPT, K.GHOST]
+                                                 and unc[20] == 1 and unc.sum() == 1):
+                fail(f"{name}: frame 20 must be a copy flagged assignment_uncertain, got {status[20].tolist()} {unc[20]}")
             # held hands: a gap frame repeats the nearest detection exactly
             if name == "leading_gap" and not torch.equal(coords[0, :63], coords[10, :63]):
                 fail(f"{name}: leading frames must hold the first detection")
@@ -160,12 +250,15 @@ def main() -> None:
             fx = BF.fixture(name, raw[name], name, _Sess(), [idx2sign[i] for i in range(len(idx2sign))], MAX_FRAMES)
             if fx is None or not np.array_equal(np.asarray(fx["features"], np.float32), ref.numpy()):
                 fail(f"{name}: browser fixture features ≠ evaluation features")
+            BF.verify(fx, MAX_FRAMES)
+            if args.write_fixtures:
+                (args.write_fixtures / f"{name}.json").write_text(json.dumps(fx))
             if float(ref[0, coords.shape[1]: 2 * coords.shape[1]].abs().max()) != 0.0:
                 fail(f"{name}: Δ1 of the first frame must be 0")
             if name == "long_clip" and ref.shape[0] != MAX_FRAMES:
                 fail(f"{name}: {ref.shape[0]} frames after subsample, want {MAX_FRAMES}")
             print(f"ok  {name:20s} T {len(coords):3d} → {ref.shape[0]:3d} | presence frames lh {int(presence[:, 0].sum())} "
-                  f"rh {int(presence[:, 1].sum())} | ghost {st['ghost_frames']} ambiguous {st['ambiguous_frames']} "
+                  f"rh {int(presence[:, 1].sum())} | copies {st['copy_frames']} uncertain {st['assignment_uncertain_frames']} "
                   f"no-pose {st['frames_no_pose']}")
     # 3. raw structure the contract must refuse (each would still give finite, well-shaped arrays)
     base = clip(5, lh=range(5), seed=99)

@@ -83,12 +83,13 @@ def frames_to_rows(frames: list) -> pd.DataFrame:
 
 def verify(fx: dict, max_frames: int) -> None:
     """The fixture must be reproducible from its own serialized frames: kept frames, hand status,
-    segment, subsample and features bit-exact. Raises otherwise."""
+    assignment_uncertain, segment, subsample and features bit-exact. Raises otherwise."""
     clip = contract.prepare(frames_to_rows(fx["frames"]))
     coords, presence = torch.from_numpy(clip["coords"]), torch.from_numpy(clip["presence"]).float()
     seg = contract.segment(presence)
     feats = contract.clip_input(coords, presence, max_frames, trim=True).numpy()
     got = {"kept_frames": [int(f) for f in clip["frames"]], "hand_status": clip["status"].tolist(),
+           "assignment_uncertain": clip["assignment_uncertain"].tolist(),
            "segment": list(range(seg.start, seg.stop)), "features": _exact(feats)}
     bad = [k for k, v in got.items() if v != fx[k]]
     if bad:
@@ -116,6 +117,7 @@ def fixture(name: str, df: pd.DataFrame, label: str, sess, labels: list,
         "frames": frames,
         "kept_frames": kept,  # indices into `frames` (rule 1)
         "hand_status": clip["status"].tolist(),  # per kept frame: [left_hand, right_hand] (rule 2)
+        "assignment_uncertain": clip["assignment_uncertain"].tolist(),  # per kept frame (rule 2)
         "segment": list(range(seg.start, seg.stop)),  # indices into kept frames (rule 6)
         "subsample": keep.tolist() if T > max_frames else None,  # positions into `segment` (rule 7)
         "features": _exact(feats),  # float32, exact
@@ -133,7 +135,7 @@ def fixture(name: str, df: pd.DataFrame, label: str, sess, labels: list,
         fx["decoded"] = decoded
     verify(fx, max_frames)
     print(f"{name}: {len(frames)} frames, {len(kept)} kept, segment {seg.start}..{seg.stop - 1}, T {feats.shape[0]}, "
-          f"ghost frames {clip['stats']['ghost_frames']}, label {label!r}, decoded {fx['decoded']}")
+          f"copy frames {clip['stats']['copy_frames']}, label {label!r}, decoded {fx['decoded']}")
     return fx
 
 

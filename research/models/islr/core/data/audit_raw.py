@@ -96,8 +96,8 @@ def _clip(job: tuple) -> dict:
         clip = K.prepare(df, a_)
         st = clip["status"]
         out.update({"kept_T": int(len(st)), "ghost_frames": int((st == K.GHOST).sum()),
-                    "ambiguous_frames": int((st == K.AMBIGUOUS).sum()),
-                    "both_hands_frames": int(((st == K.KEPT) | (st == K.AMBIGUOUS)).all(1).sum()),
+                    "assignment_uncertain_frames": int(clip["assignment_uncertain"].sum()),
+                    "both_hands_frames": int((st == K.KEPT).all(1).sum()),
                     "no_hand_clip": bool(not clip["presence"].any())})
         if posed.sum() >= 2:
             p = pose[posed][:, :, :2]
@@ -210,7 +210,7 @@ def main() -> None:
         "wrong_slot_single_hand_frames": [int(res["wrong_slot_frames"].sum()), int(res["single_hand_frames"].sum())],
         "clips_with_wrong_slot": int((res["wrong_slot_frames"].fillna(0) > 0).sum()),
         "ghost_frames": int(res["ghost_frames"].sum()), "clips_with_ghosts": int((res["ghost_frames"].fillna(0) > 0).sum()),
-        "ambiguous_frames": int(res["ambiguous_frames"].sum()),
+        "assignment_uncertain_frames": int(res["assignment_uncertain_frames"].sum()),
         "clips_with_both_hands_in_a_frame": int((res["both_hands_frames"].fillna(0) > 0).sum()),
         "mirrored_clips (pose 11 x <= pose 12 x)": int((res["lr_dx_median"] <= 0).sum()),
     }

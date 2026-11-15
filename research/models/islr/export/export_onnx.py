@@ -119,14 +119,19 @@ def preprocess_spec(max_frames: int) -> dict:
                       "lower processing rate shortens every sign in frames — resample to ≈ 30 fps",
         "hand_slots": "left_hand = the signer's own left hand (nearest pose 15), "
                       "right_hand = nearest pose 16 — not a handedness label",
-        "ghost_hands": {"rule": "both hands detected and their 2D boxes overlap by IoU >= ghost_iou: "
-                                "one physical hand in both slots; keep the slot that holds this hand alone "
-                                "more often in the segment (tie: wrist nearer its own-side pose wrist), the "
-                                "other slot is not detected. IoU in [ambiguous_iou, ghost_iou) counts as a "
-                                "ghost only within window frames of a ghost frame, else both are kept",
-                        "ghost_iou": contract.GHOST_IOU, "ambiguous_iou": contract.AMBIGUOUS_IOU,
-                        "window": contract.GHOST_WINDOW},
-        "presence": "1 where the hand was detected and kept (after the ghost rule) — never re-inferred",
+        "copied_hands": {"rule": "per frame with both hand slots detected. Copy iff IoU of the two hands' 2D "
+                                 "boxes (normalised x, y) >= copy_iou AND NOT (left-slot wrist nearer pose 15 "
+                                 "than pose 16 by more than wrist_margin AND right-slot wrist nearer pose 16 than "
+                                 "pose 15 by more than wrist_margin). Distances: (dx * W / H, dy) Euclidean, "
+                                 "divided by the segment's median shoulder width |pose 11 - pose 12| measured "
+                                 "the same way. For a copy, D_left = mean of the two slot wrists' distances to "
+                                 "pose 15, D_right = the same to pose 16; keep the left slot iff D_left < D_right "
+                                 "(else the right), mark the other slot not detected; assignment_uncertain unless "
+                                 "min(D) / max(D) < assign_ratio. Otherwise keep both. Single hands are never moved.",
+                         "copy_iou": contract.COPY_IOU, "wrist_margin": contract.WRIST_MARGIN,
+                         "assign_ratio": contract.ASSIGN_RATIO,
+                         "comparisons": "strict as written: IoU >= copy_iou; margin and ratio strictly '<'"},
+        "presence": "1 where the hand was detected and kept (after the copy rule) — never re-inferred",
         "missing_hand": "presence 0; coordinates hold the nearest detection "
                         "(previous one, or the next for leading frames); 0 if never detected",
         "missing_face": "hold the previous frame (next for leading frames); 0 if never seen",

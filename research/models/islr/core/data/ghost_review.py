@@ -1,6 +1,6 @@
 """Visual review of the ghost-hand rule: raw hand slots and pose wrists drawn on the video frames.
 
-The rule (contract.resolve_ghosts) rejects one hand slot when the two hands' 2D boxes overlap.
+The rule (contract.resolve_ghosts; v3 when the labels were made, v4 now) rejects one hand slot of a frame it calls a copy.
 Statistics cannot say whether a rejected hand was a duplicate fit of one physical hand (a ghost)
 or a real second hand touching the first (PRAY, HELP). This draws, for the chosen clips, frames
 where the rule fires: left_hand slot red, right_hand slot blue (a rejected slot dashed), pose
@@ -30,7 +30,8 @@ from .audit_raw import shard_clips
 HAND_EDGES = [(0, 1), (1, 2), (2, 3), (3, 4), (0, 5), (5, 6), (6, 7), (7, 8), (5, 9), (9, 10), (10, 11),
               (11, 12), (9, 13), (13, 14), (14, 15), (15, 16), (13, 17), (17, 18), (18, 19), (19, 20), (0, 17)]
 RED, BLUE = (40, 40, 230), (230, 120, 30)  # BGR: left_hand slot, right_hand slot
-NAMES = {K.ABSENT: "-", K.KEPT: "kept", K.GHOST: "GHOST", K.AMBIGUOUS: "ambig"}
+NAMES = {K.ABSENT: "-", K.KEPT: "kept", K.GHOST: "GHOST"}
+V3_GATE_IOU = 0.2  # contract v3's overlap gate: the round-1 distance bands were sampled above it
 
 
 def frame_evidence(raw: dict, status: np.ndarray, aspect: float) -> pd.DataFrame:
@@ -126,7 +127,7 @@ def contact_sheet(video: str, raw: dict, status: np.ndarray, ev: pd.DataFrame, t
 
 
 BINS = [0.0, 0.05, 0.1, 0.2, 0.3, 0.45, 0.6, 0.8, np.inf]  # slot landmark distance / hand size (last = tail)
-LOW_IOU = 0.1  # control band: IoU in [LOW_IOU, AMBIGUOUS_IOU), any distance — bin -1
+LOW_IOU = 0.1  # control band: IoU in [LOW_IOU, V3_GATE_IOU), any distance — bin -1
 
 
 LABELS = """Label each numbered row: video crop 3 frames before | the frame | the same frame with the
@@ -179,15 +180,15 @@ def sample_strata(ev: pd.DataFrame, per_stratum: int, seed: int, exclude: set) -
 
 def sample_frames(ev: pd.DataFrame, per_bin: int, seed: int) -> pd.DataFrame:
     """One frame per recording, per_bin per band and per set. Bands: copy distance (both hands detected,
-    IoU >= AMBIGUOUS_IOU) up to an open tail, plus a control band of frames just below the overlap gate
-    (LOW_IOU <= IoU < AMBIGUOUS_IOU) — v4 decides copies only above the gate, so labels there test it. Sets are assigned by recording *content* (raw-landmark hash), not video
+    IoU >= V3_GATE_IOU) up to an open tail, plus a control band of frames just below the overlap gate
+    (LOW_IOU <= IoU < V3_GATE_IOU) — v4 decides copies only above the gate, so labels there test it. Sets are assigned by recording *content* (raw-landmark hash), not video
     id: WLASL files identical recordings under several ids, which must not land in both sets — the
     threshold is chosen on `calibration` recordings and checked on different `holdout` recordings."""
     import zlib
 
     c = ev[ev["iou"] >= LOW_IOU].copy()
     c["bin"] = pd.cut(c["slot_landmark_dist"], BINS, right=False, labels=False)
-    c.loc[c["iou"] < K.AMBIGUOUS_IOU, "bin"] = -1  # below the overlap gate: controls (a copy should not get here)
+    c.loc[c["iou"] < V3_GATE_IOU, "bin"] = -1  # below the overlap gate: controls (a copy should not get here)
     c = c[c["bin"].notna()]
     c["set"] = ["holdout" if zlib.crc32(str(v).encode()) % 2 else "calibration" for v in c["content"]]
     c = c.sample(frac=1, random_state=seed).drop_duplicates(["content", "bin"])  # one frame per recording and bin
@@ -256,7 +257,7 @@ def _clip_evidence(job: tuple):
     raw = K.raw_arrays(df)
     orig = np.nonzero(~np.isnan(raw["pose"][:, 0, 0]))[0]  # contract step 1: pose-less frames dropped
     raw = {k: v[orig] for k, v in raw.items()}
-    status, _ = K.resolve_ghosts(raw, aspect)
+    status, _, _ = K.resolve_ghosts(raw, aspect)
     ev = frame_evidence(raw, status, aspect)
     if not ev.empty:
         ev.insert(0, "video", stem)
