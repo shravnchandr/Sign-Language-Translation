@@ -7,6 +7,9 @@ the frame intervals, the duration they span, and the share of consecutive frames
 duplicates (mean absolute grey-level difference < 0.5 on a 64×64 thumbnail — a 30 fps stream padded to
 120 would show ~75 %). With ffprobe available, packet times are read too (a second source).
 A genuine 120 fps video: median interval ≈ 8.3 ms, duration ≈ frames / 120, few duplicates.
+Every frame's timestamp and duplicate flag is kept (video_timing_frames.csv). A video counts as
+decoded only if it gives >= 2 frames, at least 95 % of the header's frame count, and finite, strictly
+increasing timestamps; anything else is listed as a failure and the run exits non-zero.
 
   PYTHONPATH=research/models python -m islr.core.data.video_timing --probe <fps-popsign>/video_probe.csv \
       --video-root /kaggle/input --n 25 --out {OUT}
@@ -23,27 +26,41 @@ import numpy as np
 import pandas as pd
 
 
-def decode(src: str) -> dict:
+MIN_DECODED = 0.95  # decoded frames / header frame count below this = a truncated decode
+
+
+def decode(src: str) -> tuple[dict, list, str | None]:
+    """→ (summary, per-frame rows (frame, ts_ms, duplicate), problem or None)."""
     import cv2
 
     cap = cv2.VideoCapture(src)
-    ts, dup, prev = [], 0, None
+    if not cap.isOpened():
+        return {}, [], "could not open"
+    ts, dups, prev = [], [], None
     while True:
         ok, frame = cap.read()
         if not ok:
             break
         ts.append(cap.get(cv2.CAP_PROP_POS_MSEC))
         g = cv2.resize(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (64, 64), interpolation=cv2.INTER_AREA).astype(np.float32)
-        if prev is not None and float(np.abs(g - prev).mean()) < 0.5:
-            dup += 1
+        dups.append(prev is not None and float(np.abs(g - prev).mean()) < 0.5)
         prev = g
     out = {"header_fps": cap.get(cv2.CAP_PROP_FPS), "header_frames": cap.get(cv2.CAP_PROP_FRAME_COUNT)}
     cap.release()
-    iv = np.diff(ts) if len(ts) > 1 else np.array([np.nan])
+    frames = [{"frame": i, "ts_ms": t, "duplicate": d} for i, (t, d) in enumerate(zip(ts, dups))]
+    t = np.asarray(ts, dtype=float)
+    if len(t) < 2:
+        return out, frames, f"decoded {len(t)} frames"
+    if out["header_frames"] > 0 and len(t) < MIN_DECODED * out["header_frames"]:
+        return out, frames, f"truncated: decoded {len(t)} of {int(out['header_frames'])} header frames"
+    if not np.isfinite(t).all() or not (np.diff(t) > 0).all():
+        return out, frames, "timestamps not finite and strictly increasing"
+    iv = np.diff(t)
+    dup = int(sum(dups))
     out.update({"decoded_frames": len(ts), "median_interval_ms": float(np.median(iv)),
                 "p5_interval_ms": float(np.percentile(iv, 5)), "p95_interval_ms": float(np.percentile(iv, 95)),
                 "span_s": float((ts[-1] - ts[0]) / 1000) if len(ts) > 1 else np.nan,
-                "duplicate_share": dup / max(len(ts) - 1, 1)})
+                "duplicate_share": dup / (len(ts) - 1)})
     if shutil.which("ffprobe"):
         r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time",
                             "-of", "csv=p=0", src], capture_output=True, text=True)
@@ -51,7 +68,7 @@ def decode(src: str) -> dict:
         if len(pts) > 1:
             out.update({"ffprobe_packets": len(pts), "ffprobe_median_interval_ms": float(np.median(np.diff(pts)) * 1000),
                         "ffprobe_span_s": float(pts[-1] - pts[0])})
-    return out
+    return out, frames, None
 
 
 def main() -> None:
@@ -72,21 +89,31 @@ def main() -> None:
         for f in files:
             if f.endswith(".mp4") and Path(f).stem in want:
                 found[want[Path(f).stem]] = os.path.join(dirpath, f)
-    rows = []
+    rows, per_frame, failures = [], [], []
     for r in pick.itertuples():
-        if r.path in found:
-            rows.append({"path": r.path, "fps_class": r.fps_class, "probe_frames": r.frames, **decode(found[r.path])})
+        if r.path not in found:
+            failures.append({"path": r.path, "fps_class": r.fps_class, "problem": "video not found"})
+            continue
+        summary, frames, problem = decode(found[r.path])
+        per_frame += [{"path": r.path, "fps_class": r.fps_class, **f} for f in frames]
+        if problem:
+            failures.append({"path": r.path, "fps_class": r.fps_class, "problem": problem})
+        else:
+            rows.append({"path": r.path, "fps_class": r.fps_class, "probe_frames": r.frames, **summary})
     res = pd.DataFrame(rows)
     a.out.mkdir(parents=True, exist_ok=True)
     res.to_csv(a.out / "video_timing.csv", index=False)
+    pd.DataFrame(per_frame).to_csv(a.out / "video_timing_frames.csv", index=False)
+    pd.DataFrame(failures, columns=["path", "fps_class", "problem"]).to_csv(a.out / "video_timing_failures.csv", index=False)
     cols = [c for c in ("decoded_frames", "median_interval_ms", "p5_interval_ms", "p95_interval_ms", "span_s",
                         "duplicate_share", "ffprobe_median_interval_ms", "ffprobe_span_s") if c in res]
-    summary = {"sampled": len(pick), "decoded": len(res), "classes": probe["fps_class"].value_counts().to_dict(),
-               "per_class_median": res.groupby("fps_class")[cols].median().round(3).to_dict("index")}
+    summary = {"sampled": len(pick), "decoded": len(res), "failures": failures[:20],
+               "classes": probe["fps_class"].value_counts().to_dict(),
+               "per_class_median": res.groupby("fps_class")[cols].median().round(3).to_dict("index") if len(res) else {}}
     (a.out / "video_timing.json").write_text(json.dumps(summary, indent=1, default=str))
     print(json.dumps(summary, indent=1, default=str))
-    if len(res) < len(pick):
-        raise SystemExit(f"{len(pick) - len(res)} sampled videos not found under {a.video_root}")
+    if failures:
+        raise SystemExit(f"{len(failures)} of {len(pick)} sampled videos not decoded usably (video_timing_failures.csv)")
 
 
 if __name__ == "__main__":

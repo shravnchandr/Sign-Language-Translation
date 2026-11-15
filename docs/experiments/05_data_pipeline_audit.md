@@ -405,7 +405,16 @@ and signers (98, 93, 8) — possibly sources whose stored frame size is not thei
 neutral model does better with it, phrases05 the same. **No builder change is required by this WLASL comparison** (it does not establish equivalence for other datasets or live cameras; the frame sizes are those of the decoded frames, so the source / display mismatch is a hypothesis to inspect).
 Open question for the rebuild (not decided): the builders could use the geometric factor too (W / H is
 now recorded per clip), which matches deployment and keeps natural body-proportion variation — but the
-per-clip factor is robust to a mis-stated frame size, the geometric one is not. ASL Citizen pending.
+per-clip factor is robust to a mis-stated frame size, the geometric one is not.
+
+**Aspect, ASL Citizen (`islr-aspect-aslcitizen` at 8ba0b35, official test split, 2,085 clips, 4 without a
+hand).** k builder / browser median 1.01 (p10–p90 0.88–1.16). Shoulder drop / width: browser p1–p50–p99
+0.31–0.41–0.50 (ASL Signs 0.27–0.40–0.50; 0.7 % of clips outside its p1–p99), builder 0.40 by
+construction; hand size outside the reference 1.5 % (builder) / 1.4 % (browser); joint-angle values
+outside 1.1 % / 1.0 % (ASL Signs itself 2 %). Single-sign exact decode, builder → browser: phrases01
+59.8 → 59.9 % (+54 / −52, p = 0.92), phrases05 78.8 → 78.7 % (+8 / −9, p = 1.0) — **no detectable
+accuracy difference** (not a proof of equivalence). Both preparations stay inside what training covers;
+the builders are kept as they are.
 
 **ASL Signs (`islr-audit-aslsigns`, 94,477 clips).** Raw structure clean (0 errors, all frames
 complete, no pose-less frames, no no-hand clip); 43 clips with frame-number gaps (the audit's counter counted
