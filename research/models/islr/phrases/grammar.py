@@ -438,18 +438,11 @@ _ALL_LISTS = [FAMILY, PEOPLE, ANIMALS, FOODS, DRINKS, TOYS, CLOTHES, THINGS, VEH
 
 
 def _main():
-    import json
     from collections import Counter
-    from pathlib import Path
 
-    root = Path(__file__).resolve().parents[4]
-    for cand in ("data/asl-is-lmdb", "data/Isolated_ASL_Recognition"):
-        p = root / cand / "sign_to_prediction_index_map.json"
-        if p.exists():
-            vocab = list(json.load(open(p)))
-            break
-    else:
-        raise SystemExit("sign_to_prediction_index_map.json not found")
+    from ..core.data.vocab import canonical
+
+    vocab = list(canonical())  # the committed, hash-checked label map
     gr = PhraseGrammar(vocab)
     rng = np.random.default_rng(0)
     for _ in range(25):

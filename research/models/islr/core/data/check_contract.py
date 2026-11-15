@@ -194,7 +194,7 @@ def main() -> None:
                     help="also write every case as a browser fixture (<case>.json) and the threshold cases "
                          "as rule_vectors.json — for checking a browser port against the contract")
     args = ap.parse_args()
-    idx2sign = {v: k for k, v in json.loads(Path(args.sign_map).read_text()).items()}
+    idx2sign = {v: k for k, v in V.load_base(Path(args.sign_map)).items()}
     vectors: list = []
     rule_cases(vectors)
     if args.write_fixtures:
