@@ -254,6 +254,23 @@ ALLOWED_DIFF = {"extra_data_dir", "extra_frac", "extra_lmdb_path", "extra_kinds"
                 "frozen_spec", "allow_diff", "data_dir", "lmdb_path", "init", "vocab"}
 
 
+RUNTIME_CORE = ("torch", "numpy", "pandas", "scipy", "lmdb", "scikit-learn")
+
+
+def runtime() -> tuple[dict, dict]:
+    """(core runtime — compared strictly by --frozen-spec, every installed package — compared unless
+    --allow-diff runtime_packages). Kaggle does not pin the training image, so drift must be detected."""
+    import platform
+    from importlib import metadata
+
+    pkgs = {d.metadata["Name"].lower(): d.version for d in metadata.distributions() if d.metadata["Name"]}
+    core = {"python": platform.python_version(), "torch_cuda": torch.version.cuda,
+            "cudnn": torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else None,
+            "device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu",
+            **{k: pkgs.get(k) for k in RUNTIME_CORE}}
+    return core, dict(sorted(pkgs.items()))
+
+
 def experiment_spec(args, sign2idx: dict, train_source, val_ds, releases: list, shares: list) -> dict:
     """Everything a run depends on: code revision, contract / cache version, the validated release
     of every dataset it reads (releases: require_validated per dataset, main first) and the
@@ -267,7 +284,9 @@ def experiment_spec(args, sign2idx: dict, train_source, val_ds, releases: list, 
     paths = val_ds.source.df["path"].tolist()
     val_set = [(s[0], s[1], [paths[c] for c in s[3]], s[4]) for s in val_ds.specs]
     recipe = {k: (str(v) if isinstance(v, Path) else v) for k, v in sorted(vars(args).items())}
+    core, packages = runtime()
     return {"code": code_revision(), "contract": CONTRACT_VERSION, "cache_version": CACHE_VERSION,
+            "runtime": core, "runtime_packages": packages,
             "data": {"release": releases[0], "annotations": _annotations([sources[0], val_ds.source]),
                      "manifest": _manifest(args.data_dir)},
             "extra_data": [{"dir": d, "release": r, "annotations": _annotations([s]), "manifest": _manifest(d)}
@@ -279,8 +298,10 @@ def experiment_spec(args, sign2idx: dict, train_source, val_ds, releases: list, 
             "val_set": _sha(json.dumps(val_set).encode()), "recipe": recipe}
 
 
-def spec_differences(ref: dict, spec: dict, allowed: set) -> dict:
-    """{field: (reference, this run)} for every difference not in `allowed` (recipe keys, or "code").
+def spec_differences(ref: dict, spec: dict, allowed: set, allowed_top: set = frozenset()) -> dict:
+    """{field: (reference, this run)} for every difference not allowed: recipe keys in `allowed`,
+    top-level fields (code, vocab / init digests, runtime, …) only in `allowed_top` (--allow-diff) —
+    a path argument being free never frees the content digest of what it points to.
     Code revisions differ also when either run had modified tracked files (not reproducible). The
     extra datasets and the sampling mixture are the comparison and may differ, but an extra dataset
     of the same kind in both runs (e.g. WLASL all-gloss) must be the same release, same clips."""
@@ -294,7 +315,7 @@ def spec_differences(ref: dict, spec: dict, allowed: set) -> dict:
             diff[f"extra_data.{kind(e)[0]}"] = ((e.get("release"), e.get("annotations")), (o.get("release"), o.get("annotations")))
     if any((r or {}).get("dirty") for r in (ref.get("code"), spec.get("code"))):
         diff["code"] = (ref.get("code"), spec.get("code"))
-    diff = {k: v for k, v in diff.items() if k not in allowed}
+    diff = {k: v for k, v in diff.items() if k not in allowed_top}
     r0, r1 = ref.get("recipe", {}), spec["recipe"]
     diff.update({f"recipe.{k}": (r0.get(k), r1.get(k)) for k in sorted(set(r0) | set(r1))
                  if k not in allowed and r0.get(k) != r1.get(k)})
@@ -370,12 +391,15 @@ def train(args):
     ref = json.loads(Path(args.frozen_spec).read_text()) if args.frozen_spec else None  # read before writing
     spec = experiment_spec(args, sign2idx, train_source, val_ds, releases, shares)
     if ref is not None:  # a comparison run must share every dependency but its training data
-        diff = spec_differences(ref, spec, ALLOWED_DIFF | set(args.allow_diff))
+        diff = spec_differences(ref, spec, ALLOWED_DIFF | set(args.allow_diff), set(args.allow_diff))
         if diff:
             raise SystemExit(f"--frozen-spec {args.frozen_spec}: differs in {sorted(diff)}: {diff}")
         print(f"Spec matches {args.frozen_spec} (allowed to differ: extra data, "
               f"{', '.join(sorted(ALLOWED_DIFF | set(args.allow_diff)))})")
     (out_dir / "experiment_spec.json").write_text(json.dumps(spec, indent=1))
+    if args.spec_only:
+        print(f"--spec-only: wrote {out_dir / 'experiment_spec.json'}; not training")
+        return
 
     worker_kw = dict(num_workers=args.num_workers, collate_fn=collate_ctc,
                      multiprocessing_context=worker_context(args.num_workers),
@@ -550,7 +574,11 @@ def main():
                         "content, vocab, init checkpoint, validation phrases and the recipe are identical "
                         "(the extra training data, paths and worker count may differ)")
     p.add_argument("--allow-diff", nargs="*", default=[],
-                   help="recipe arguments this comparison run may change on purpose (e.g. epochs)")
+                   help="recipe arguments or spec fields this comparison run may change on purpose (e.g. epochs, "
+                        "runtime_packages)")
+    p.add_argument("--spec-only", action="store_true",
+                   help="validate every dataset, build the validation phrases, write experiment_spec.json and exit "
+                        "(the reference spec of a frozen comparison)")
     p.add_argument("--vocab", default="",
                    help="wider label map (first 250 = ASL Signs map), e.g. the all-gloss WLASL map")
     p.add_argument("--extra-frac", type=float, nargs="+", default=[0.15],
