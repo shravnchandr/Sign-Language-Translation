@@ -15,6 +15,8 @@ with placeholders filled in:
                    notebooks mounted with --kernel)
     {COMP_<slug>}  a competition mounted with --competition <slug> (- → _), e.g. {COMP_asl_signs}
     {INPUT}        /kaggle/input (e.g. outputs of notebooks mounted with --kernel)
+    {KERNEL_<slug>} the output folder of a notebook mounted with --kernel <user>/<slug> (- → _),
+                   e.g. {KERNEL_inventory_popsign}/inventory.csv
     {MODEL_<v>}    folder of model variation <v> mounted with --model <v> (Kaggle model <user>/islr,
                    or islr-research for research-only checkpoints), e.g. {MODEL_phrases05}/best_phrases.pth
     {OUT}          /kaggle/working/out — everything written here is the run's output
@@ -66,7 +68,7 @@ def user() -> str:
 
 
 def notebook(ref: str, commands: list[list[str]], local_copy: bool = True, models: tuple = (),
-             competitions: tuple = ()) -> dict:
+             competitions: tuple = (), kernels: tuple = ()) -> dict:
     """commands: [[module, *args], ...], run in order; the first failure stops the notebook."""
     def code(src: str) -> dict:
         return {"cell_type": "code", "metadata": {}, "execution_count": None, "outputs": [],
@@ -79,7 +81,7 @@ def notebook(ref: str, commands: list[list[str]], local_copy: bool = True, model
                         + "; ".join(f"`python -m {c[0]}`" for c in commands)]},
             code(f"""
 import glob, os, subprocess, sys
-REF, COMMANDS, LOCAL_COPY, MODELS, COMPETITIONS = {ref!r}, {commands!r}, {local_copy!r}, {list(models)!r}, {list(competitions)!r}
+REF, COMMANDS, LOCAL_COPY, MODELS, COMPETITIONS, KERNELS = {ref!r}, {commands!r}, {local_copy!r}, {list(models)!r}, {list(competitions)!r}, {[k.split("/")[-1] for k in kernels]!r}
 subprocess.run("pip install -q lmdb", shell=True, check=True)
 subprocess.run(f"git clone -q {REPO_URL} /tmp/repo && git -C /tmp/repo checkout -q {{REF}}",
                shell=True, check=True)
@@ -108,6 +110,10 @@ paths = {
 for c in COMPETITIONS:  # /kaggle/input/<slug> or /kaggle/input/competitions/<slug>
     hits = sorted(d for d in glob.glob(f"/kaggle/input/**/{c}", recursive=True) if os.path.isdir(d))
     paths["COMP_" + c.replace("-", "_")] = hits[0] if hits else ""
+for k in KERNELS:  # another notebook's output, wherever Kaggle mounts it: {KERNEL_<slug>} (- → _)
+    hits = sorted(d for d in glob.glob(f"/kaggle/input/**/{k}", recursive=True) if os.path.isdir(d))
+    assert len(hits) == 1, f"kernel output {k}: {hits}"
+    paths["KERNEL_" + k.replace("-", "_")] = hits[0]
 for v in MODELS:  # model variations mount as .../<model>/<framework>/<variation>/<version>/
     hits = sorted(d for d in glob.glob(f"/kaggle/input/**/{v}/*/", recursive=True) if os.path.isdir(d))
     paths[f"MODEL_{v}"] = hits[-1].rstrip("/") if hits else ""
@@ -180,7 +186,7 @@ def push(a: argparse.Namespace) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         nb = Path(tmp) / f"islr-{a.name}.ipynb"
         variations = [m.rsplit("/", 2)[-2] if m.count("/") >= 4 else m for m in a.model]
-        nb.write_text(json.dumps(notebook(ref, commands, not a.no_copy, variations, a.competition), indent=1))
+        nb.write_text(json.dumps(notebook(ref, commands, not a.no_copy, variations, a.competition, a.kernel), indent=1))
         meta = {"id": slug, "title": f"islr-{a.name}", "code_file": nb.name, "language": "python",
                 "kernel_type": "notebook", "is_private": True, "enable_gpu": a.gpu,
                 "enable_tpu": False, "enable_internet": True, "keywords": [],
