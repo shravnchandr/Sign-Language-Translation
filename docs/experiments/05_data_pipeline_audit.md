@@ -493,6 +493,26 @@ anything but nearly all copies); not a proof. The rule fires in 17 % of ASL Sign
 frames but 0.05 % of all frames. (An earlier sample, 0 ghosts in 27 two-hand frames of 257 clips, was
 too small to show this rate.)
 
+**ASL Signs repeated-frame check — criteria, committed before the results (`repeat_frames`, bf01452).**
+Why: 59 of the 257 excluded PopSign clips are 120 fps (= 30 fps frames repeated 4×) and match 59
+distinct ASL Signs clips of the same frame count, so ASL Signs may contain repeated-frame recordings,
+stored undecimated. ASL Signs has no videos; clip length or signer alone are not evidence, and
+MediaPipe's temporal smoothing means repeated images do not give equal coordinates. Measure: per clip,
+the phase share s_k of upper-body pose motion (share of the motion on the strongest of k phases; 1/k
+spread evenly, → 1 when all motion falls on one phase), k = 2, 4, and its 24-frame-window median.
+1. Calibration / evaluation on PopSign, split by signer (crc32(user) % 2), labels from the probed fps:
+   120 → repeated ×4, 60 → ×2, 29–31 → ordinary. Threshold on s_4 chosen on the calibration half
+   (balanced accuracy); reported on the evaluation half, overall and on held-pose controls (ordinary
+   clips in the lowest quartile of mean motion).
+2. **Separates reliably** iff on the evaluation half: recall on repeated ×4 ≥ 98 %, false positives on
+   ordinary ≤ 0.5 %, and ≤ 1 % on the held-pose controls.
+3. Only then ASL Signs: first the 59 candidates (ASL side of a 120 fps PopSign match) against the 198
+   matches of ordinary PopSign clips (negative controls), then the whole dataset.
+4. Convincing iff (2) holds and the candidates are flagged far more often than the controls; then the
+   affected clips are corrected before training (a frame step for ASL Signs clips, with the phase taken
+   from the motion — a separate, reviewed change). Otherwise the accepted release stays and this is
+   documented as a limitation.
+
 **v4 statistics per dataset** (raw audits at d19ba7c vs v3 at dd3d977, per clip; frame-level v3
 decisions are not stored, so "frames changed" is the per-clip count difference, a lower bound).
 
