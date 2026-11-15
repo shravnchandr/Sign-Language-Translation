@@ -165,13 +165,15 @@ def model_source(variation: str) -> str:
 
 
 def push(a: argparse.Namespace) -> None:
-    ref = a.ref or subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"],
-                                  capture_output=True, text=True, check=True).stdout.strip()
-    if not a.ref:
-        ahead = subprocess.run(["git", "-C", str(ROOT), "branch", "-r", "--contains", ref],
-                               capture_output=True, text=True).stdout.strip()
-        if not ahead:
-            sys.exit(f"HEAD {ref[:7]} is not pushed — the notebook clones from GitHub. Push first.")
+    got = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--verify", f"{a.ref or 'HEAD'}^{{commit}}"],
+                         capture_output=True, text=True)
+    if got.returncode:
+        sys.exit(f"--ref {a.ref!r} is not a commit in this repo")
+    ref = got.stdout.strip()  # full hash: the notebook checks out exactly this commit
+    ahead = subprocess.run(["git", "-C", str(ROOT), "branch", "-r", "--contains", ref],
+                           capture_output=True, text=True).stdout.strip()
+    if not ahead:
+        sys.exit(f"{ref[:7]} is not pushed — the notebook clones from GitHub. Push first.")
     commands, cur = [], []
     for tok in a.command + ["::"]:  # "::" separates commands run one after another
         if tok == "::":
