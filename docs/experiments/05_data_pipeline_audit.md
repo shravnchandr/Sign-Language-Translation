@@ -349,6 +349,29 @@ tie-break, which these labels cannot evaluate. Side labels follow the arm to its
 (image-left shoulder = `right`, the pose model's frame); 7 / 26 WLASL and 6 / 51 PopSign calibration
 copies have no side label (unclear).
 
+**Round 2 — holdout (evaluated once) and decision.** WLASL 23 two / 24 copy / 7 unclear; PopSign 0 / 53 / 1.
+
+| Copy rule | WLASL deleted | WLASL kept copies | PopSign kept copies | weighted sum |
+|---|---|---|---|---|
+| **B0** | 7 / 23 (w 0.087) | 2 / 24 (w 0.072) | 18 / 53 (w 0.040) | **0.199** |
+| `stacked`: copy iff hand wrists < 0.25 apart | 6 / 23 | 2 / 24 | 21 / 53 | 0.206 |
+| keep both in `stacked` | 3 / 23 | 13 / 24 | 36 / 53 | 0.432 |
+
+No candidate beats B0 → **B0 is the v4 copy rule** (criterion 1 fails for every candidate). Assignment:
+wrong confident assignments 0 / 10 (WLASL) and 1 / 19 (PopSign) = 1 / 29 (3.4 %) of confident assignments
+with a known side → **adopted** under the criterion as written (pooled); PopSign alone is 5.3 % (one
+frame, n = 19 — the criterion did not specify per-dataset, noted rather than reinterpreted).
+Uncertain share: 7 / 24 WLASL and 27 / 53 PopSign copies (fallback wrong 1 / 4 and 2 / 17 among
+side-labelled). Copies with no side label: 10 / 24 and 17 / 53.
+
+**v4 (frozen):** per frame with both slots detected — copy iff IoU ≥ 0.1 and not both slots on their own
+side by > 0.1 shoulder widths; a copy is kept in the slot on the nearer pose wrist's side (confident iff
+nearer / farther < 0.45, else flagged `assignment_uncertain`), the other slot rejected; otherwise both kept.
+Single hands are never moved; a hand never detected stays absent. Documented residuals: WLASL real hands
+lost where hands stack or cross (holdout 7 / 23 labelled pairs, ~9 % of its IoU ≥ 0.1 frames weighted);
+PopSign copies kept where the copy sits between the wrists (`both_own`, 18 / 18 on holdout, ~4 % of its
+frames). Next: implement in `contract.py` (+ the browser spec and fixtures), version bump, rebuild.
+
 **Aspect: same clips, builder vs browser preparation (`islr-aspect-wlasl`, `aspect_compare`, 824
 held-out-signer WLASL clips, 0 errors).** k builder / browser median 1.08 (p10–p90 0.99–1.23).
 
