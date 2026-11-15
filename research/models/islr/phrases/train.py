@@ -56,6 +56,7 @@ from ..core.data.build_wlasl_lmdb import signer_split
 from ..core.data.dataset import ASLDataset, BucketBatchSampler, get_data_loaders, worker_context
 from ..core.data.fingerspelling_dataset import collate_ctc
 from ..core.data.validate import require_accepted
+from ..core.data.vocab import check_map, load_base
 from .dataset import ConcatSource, phrase_datasets
 from ..core.model import GraphConformer, LandmarkConformer
 from ..pretrain.fingerspelling import _fmt_time, edit_distance, greedy_decode
@@ -312,10 +313,12 @@ def train(args):
     amp_dtype = torch.bfloat16 if use_amp and torch.cuda.get_device_capability()[0] >= 8 else torch.float16
     print(f"Device: {device}" + (f" | AMP {str(amp_dtype).replace('torch.', '')}" if use_amp else ""))
 
-    sign2idx = json.load(open(Path(args.data_dir) / "sign_to_prediction_index_map.json"))
+    sign2idx = load_base(Path(args.data_dir) / "sign_to_prediction_index_map.json")
     if args.vocab:  # wider vocabulary: the 250 ASL Signs signs first, unchanged, then extra labels
+        bad = check_map(Path(args.vocab), extended=True)
+        if bad:
+            raise SystemExit(f"--vocab {args.vocab} does not extend the canonical map: " + "; ".join(bad))
         vocab = json.load(open(args.vocab))
-        assert all(vocab.get(s) == i for s, i in sign2idx.items()), "--vocab must extend the sign map"
         print(f"Vocabulary: {len(vocab)} labels ({len(vocab) - len(sign2idx)} beyond ASL Signs)")
         sign2idx = vocab
     idx2sign = {v: k for k, v in sign2idx.items()}

@@ -42,6 +42,7 @@ from tqdm import tqdm
 from ..revision import code_revision
 from ._cache_keys import lmdb_key as _lmdb_key, lmdb_length_key as _lmdb_length_key
 from .contract import load_clip
+from .vocab import load_base
 
 # Commit to LMDB every this many successful writes to cap dirty-page memory.
 _WRITE_BATCH = 2_000
@@ -81,6 +82,7 @@ def build_lmdb(
 ) -> None:
     data_dir = Path(data_dir)
     lmdb_path = Path(lmdb_path)
+    load_base(data_dir / "sign_to_prediction_index_map.json")  # the release's labels: the canonical map
     flat = lmdb_path.suffix == ".mdb"  # one file (is.lmdb.mdb, the released layout) or a directory
     (lmdb_path.parent if flat else lmdb_path).mkdir(parents=True, exist_ok=True)
 

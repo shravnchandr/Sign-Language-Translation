@@ -25,6 +25,7 @@ import torch
 
 from ..config import SELECTED_FACE_INDICES
 from . import contract as K
+from . import vocab as V
 from .build_wlasl_lmdb import write_clips
 from .dataset import ASLDataset
 
@@ -159,9 +160,35 @@ def rule_cases(vectors: list | None = None) -> None:
     print("ok  copy rule at its thresholds (IoU, own-side margin, assignment ratio, exact tie)")
 
 
+def vocab_cases(tmp: Path) -> None:
+    """The canonical label map: exact for a base vocabulary; an extension keeps its 250 and adds from 250."""
+    c = V.canonical()
+    a, b = sorted(c, key=c.get)[:2]
+    swapped = {**c, a: c[b], b: c[a]}  # still a bijection onto 0..249
+    extra = {**c, "zzz_one": 250, "zzz_two": 251}
+    cases = [("canonical", c, False, True), ("canonical as extension", c, True, True),
+             ("two base indices swapped", swapped, False, False), ("swapped, as extension", swapped, True, False),
+             ("valid extra classes appended", extra, True, True), ("extras as a base vocabulary", extra, False, False),
+             ("extras not from 250", {**c, "zzz_one": 251}, True, False),
+             ("two signs on one class", {**{k: v for k, v in c.items() if k != b}, b: c[a]}, False, False)]
+    for name, m, ext, want in cases:
+        f = tmp / "map.json"
+        f.write_text(json.dumps(m))
+        got = V.check_map(f, ext)
+        if (not got) != want:
+            fail(f"vocab: {name} {'accepted' if not got else 'refused: ' + '; '.join(got)}, want {'accept' if want else 'refuse'}")
+    try:
+        f.write_text(json.dumps(swapped))
+        V.load_base(f)
+        fail("vocab: a builder accepted a swapped map")
+    except SystemExit:
+        pass
+    print(f"ok  label map: canonical and appended extras accepted; swapped / shared / misnumbered refused ({len(cases)} cases)")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--sign-map", default="data/asl-is-lmdb/sign_to_prediction_index_map.json",
+    ap.add_argument("--sign-map", default=str(V.CANONICAL_PATH),
                     help="the 250 ASL Signs labels (the phrase grammar needs the real names)")
     ap.add_argument("--write-fixtures", type=Path,
                     help="also write every case as a browser fixture (<case>.json) and the threshold cases "
@@ -176,6 +203,7 @@ def main() -> None:
             {"contract_version": K.CONTRACT_VERSION, "cases": vectors}, indent=1))
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
+        vocab_cases(tmp)
         (tmp / "train_landmark_files").mkdir()
         rows, raw = [], {}
         for k, (name, (T, kw)) in enumerate(CASES.items()):

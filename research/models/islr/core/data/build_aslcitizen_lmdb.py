@@ -36,6 +36,7 @@ from pathlib import Path
 import lmdb
 import pandas as pd
 
+from .vocab import load_base
 from .build_wlasl_lmdb import TARGET_RATIO, exclude_duplicates, finish_build, load_shards, write_clips
 
 _GLOSS_MAP = Path(__file__).with_name("aslcitizen_gloss_map.json")
@@ -73,7 +74,7 @@ def main() -> None:
     p.add_argument("--allow-missing", type=int, default=0, help="selected videos that may be absent from the shard lists")
     args = p.parse_args()
 
-    sign2idx = json.loads(args.sign_map.read_text())
+    sign2idx = load_base(args.sign_map)
     gmap = {k: v for k, v in json.loads(_GLOSS_MAP.read_text()).items() if not k.startswith("_")}
 
     df, manifest = load_shards(args.input_root, "aslcitizen", args.expect_shards, args.inventory, args.allow_missing)

@@ -50,6 +50,7 @@ from tqdm import tqdm
 
 from ..revision import code_revision
 from ._cache_keys import CACHE_VERSION, lmdb_key, lmdb_length_key
+from .vocab import load_base
 
 _GLOSS_MAP = Path(__file__).with_name("wlasl_gloss_map.json")
 TARGET_RATIO = 0.40  # ASL Signs median shoulder drop / shoulder width
@@ -339,7 +340,7 @@ def main() -> None:
     p.add_argument("--allow-missing", type=int, default=0, help="selected videos that may be absent from the shard lists")
     args = p.parse_args()
 
-    sign2idx = json.loads(args.sign_map.read_text())
+    sign2idx = load_base(args.sign_map)  # wlasl_gloss_map.json holds canonical indices
     idx2sign = {v: k for k, v in sign2idx.items()}
     gmap = json.loads(_GLOSS_MAP.read_text())
 

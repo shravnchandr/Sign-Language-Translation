@@ -36,6 +36,7 @@ from pathlib import Path
 import lmdb
 import pandas as pd
 
+from .vocab import load_base
 from .build_wlasl_lmdb import exclude_duplicates, finish_build, load_shards, write_clips
 
 _SIGNER_OFFSET = 700_000  # apart from ASL Signs ids, ASL Citizen (800000 + n) and WLASL (900000 + n)
@@ -68,7 +69,7 @@ def main() -> None:
     p.add_argument("--allow-missing", type=int, default=0, help="selected videos that may be absent from the shard lists")
     args = p.parse_args()
 
-    sign2idx = json.loads(args.sign_map.read_text())
+    sign2idx = load_base(args.sign_map)
     by_lower = {s.lower(): s for s in sign2idx}
 
     df, manifest = load_shards(args.input_root, "popsign", args.expect_shards, args.inventory, args.allow_missing)

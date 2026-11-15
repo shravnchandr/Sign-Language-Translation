@@ -30,6 +30,7 @@ import torch.nn as nn
 from ..core import config as C
 from ..core.data._cache_keys import lmdb_key
 from ..core.data import contract
+from ..core.data.vocab import load_base
 from ..core.model import GraphConformer, LandmarkConformer
 
 
@@ -165,7 +166,7 @@ def main() -> None:
     if meta.get("research_only"):
         raise SystemExit("this checkpoint was trained on research-only data (ASL Citizen) and must "
                          "not be exported for the app")
-    sign2idx = json.loads(Path(args.vocab).read_text())
+    sign2idx = load_base(Path(args.vocab))  # the app's labels: exactly the canonical 250
     labels = [s for s, _ in sorted(sign2idx.items(), key=lambda kv: kv[1])]
     model = load_ctc_model(args.checkpoint, meta, len(labels))
     wrapped = _AllValid(model).eval()

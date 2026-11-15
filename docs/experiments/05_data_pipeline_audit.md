@@ -439,7 +439,19 @@ up there first.
 | `browser_fixtures.verify` did not compare `subsample` | compared with the other fields | final-frame indices in `long_clip`'s subsample: "['subsample'] not reproducible" |
 | Spec said "the segment's median shoulder width"; the code uses every pose frame of the whole clip before trimming | `preprocess.json` wording | — |
 
-The acceptance suite re-run under policy 4: every earlier refusal unchanged (checked on full messages).
+**Canonical label map (policy 5).** `core/data/asl_signs_vocab.json` is a byte copy of the competition's
+`sign_to_prediction_index_map.json` (re-downloaded from Kaggle `asl-signs` 2026-11-14: sha256 1fe747c2…,
+identical to every local copy; the app's label order matches). Its 250 assignments are immutable;
+`vocab.py` pins the hash. Enforced: every builder checks its `--sign-map` (ASL Signs: the data dir's map)
+is exactly canonical **before** any gloss is remapped (`wlasl_gloss_map.json` holds canonical indices, in
+the shared-sign build too); `validate` requires the release map to be exactly canonical, or — WLASL all
+glosses only — the canonical 250 unchanged with extra classes numbered from 250; `phrases.train` the same
+for the data dir and `--vocab`; `export_onnx` exactly canonical. Tests (`check_contract`, 8 cases + a
+release): two base indices swapped (still a bijection) refused by the builder, by `validate` and as an
+extension; valid extras appended accepted; extras as a base vocabulary, extras not from 250 and two signs on
+one class refused; the existing 2,017-label WLASL-all map passes as an extension.
+
+The acceptance suite re-run under policies 4 and 5: every earlier refusal unchanged (checked on full messages).
 None of these showed the existing data wrong; the digests change, so every release is built and
 validated anew anyway.
 
@@ -453,7 +465,7 @@ validated anew anyway.
    both ways and compare the resulting geometry (shoulder drop / width, hand size relative to the
    shoulders, joint-angle features) and a frozen checkpoint's predictions on each; change the
    builders only if the browser-style preparation lands outside what training covers.
-3. Build every release, validate under the current policy (4; `--raw-root`).
+3. Build every release, validate under the current policy (5; `--raw-root`).
 4. Freeze the code revision and the shared dependencies (init checkpoint, vocabulary, validation
    phrases, releases) in the reference spec.
 5. Only then the GPU runs (re-score, then phrases05 / phrases07 under one `--frozen-spec`) — even

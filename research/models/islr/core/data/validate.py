@@ -11,7 +11,8 @@ Hard checks:
     the allowance recorded at build time; dataset type = the train.csv schema; content digest
     recomputed from the LMDB = the manifest's (every stored field with its dtype and shape, and the
     length key); train.csv digest = the manifest's (annotations); sign map digest = the manifest's
-  - sign map: distinct names onto exactly the integers 0..N-1 (no shared or missing class index)
+  - sign map: distinct names onto exactly the integers 0..N-1, equal to the canonical ASL Signs map
+    (vocab.py; WLASL all glosses: the canonical 250 unchanged, extra classes from 250)
   - coverage: selected = listed + missing (missing within the build's allowance; the selection
     recorded by the extraction or re-run by scripts/extraction_inventory.py), listed = filtered +
     build errors + excluded duplicates + written, written = train.csv rows
@@ -47,29 +48,12 @@ from ..config import COORD_FEAT, COORDS_PER_LM, LH_START, N_LH, RH_START
 from . import contract as K
 from ._cache_keys import CACHE_VERSION, lmdb_key, lmdb_length_key
 from .build_wlasl_lmdb import _process, signer_split
+from .vocab import check_map
 
 
 # Bump whenever a check is added or tightened: reports written under an older policy no longer
 # admit a dataset (it must be validated again), so a release cannot pass on yesterday's checks.
-VALIDATION_POLICY = 4  # 1: 33b6971 (no coverage / prep_aspect checks); 2: e765dd4+ (coverage, prep_aspect, no-hand report); 3: contract v4 (copy rule, assignment_uncertain); 4: sign map = bijection onto 0..N-1 + fingerprinted, stored dtypes, digest over dtype / shape / length key
-
-
-def sign_map_problems(path: Path) -> list[str]:
-    """The label map must be a bijection from distinct sign names onto the integers 0..N-1."""
-    pairs = json.loads(path.read_text(), object_pairs_hook=lambda kv: kv)
-    if not isinstance(pairs, list):
-        return ["not a JSON object"]
-    names, idx = [k for k, _ in pairs], [v for _, v in pairs]
-    out = []
-    if len(set(names)) != len(names):
-        out.append(f"repeated sign names {sorted({n for n in names if names.count(n) > 1})[:5]}")
-    if not all(type(v) is int for v in idx):
-        out.append(f"non-integer indices, e.g. {next(v for v in idx if type(v) is not int)!r}")
-    elif sorted(idx) != list(range(len(idx))):
-        dup = sorted({v for v in idx if idx.count(v) > 1})
-        out.append(f"indices not exactly 0..{len(idx) - 1} (repeated {dup[:5]}, "
-                   f"missing {sorted(set(range(len(idx))) - set(idx))[:5]})")
-    return out
+VALIDATION_POLICY = 5  # 1: 33b6971 (no coverage / prep_aspect checks); 2: e765dd4+ (coverage, prep_aspect, no-hand report); 3: contract v4 (copy rule, assignment_uncertain); 4: sign map = bijection onto 0..N-1 + fingerprinted, stored dtypes, digest over dtype / shape / length key; 5: sign map = the canonical 250 (WLASL all glosses: canonical 250 first, extras from 250)
 
 
 def require_accepted(data_dir, lmdb_path) -> dict:
@@ -154,8 +138,9 @@ def main() -> None:
     map_path = a.data_dir / "sign_to_prediction_index_map.json"
     map_digest = hashlib.sha256(map_path.read_bytes()).hexdigest()[:16]
     check(map_digest == man.get("sign_map_digest"), f"sign map digest {map_digest} = manifest {man.get('sign_map_digest')}")
-    bad_map = sign_map_problems(map_path)
-    check(not bad_map, f"sign map is a bijection onto 0..N-1 ({'; '.join(bad_map) or 'ok'})")
+    extended = "wlasl_half" in df and "wlasl_gloss" in df  # WLASL --all-glosses: extra labels after the 250
+    bad_map = check_map(map_path, extended)
+    check(not bad_map, f"sign map = the canonical {'250 + extras from 250' if extended else '250'} ({'; '.join(bad_map) or 'ok'})")
     sign_map = json.loads(map_path.read_text())
     check(df["sign"].isin(sign_map).all(), f"labels in the sign map ({int((~df['sign'].isin(sign_map)).sum())} not)")
     pid = pd.to_numeric(df["participant_id"], errors="coerce")
