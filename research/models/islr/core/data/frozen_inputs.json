@@ -1,0 +1,140 @@
+{
+ "frozen_on": "2026-11-15",
+ "note": "Inputs of the phrases05 / phrases06 / phrases07 comparison. The code revision and the runtime are recorded by the reference spec (phrases05 recipe, --spec-only, Kaggle GPU) and checked by --frozen-spec in every comparison run.",
+ "releases": {
+  "aslsigns": {
+   "kaggle_notebook": "schandranyc/islr-accepted-aslsigns",
+   "lmdb": "is.lmdb.mdb",
+   "clips": 94477,
+   "content_digest": "52c989b403442993",
+   "csv_digest": "06cbf68cbdfe4b02",
+   "sign_map_digest": "1fe747c2f44c68db",
+   "validation_policy": 7,
+   "contract": "v4",
+   "cache_version": "1b7b9fed",
+   "raw_resampled": 200,
+   "frame_steps": {
+    "1": 94477
+   },
+   "built_at": "8ba0b350bae1847134a43eefbac0b400f7619242",
+   "validated_at": "0b4a6080ce64ba2d20abd5729460c9e496dfb19f",
+   "report_sha256": "2f16f8b3c9a49b8e8327346bb64b8f67018c68947b4a352c9bac6f37e7f1c3f7",
+   "manifest_sha256": "bf8c814c4f66504f40e9c3107580fb2f65c929c31e13ea9e267804a8e755c1bb"
+  },
+  "wlasl": {
+   "kaggle_notebook": "schandranyc/islr-accepted-wlasl",
+   "lmdb": "wlasl.lmdb.mdb",
+   "clips": 1605,
+   "content_digest": "4663393f7ef791df",
+   "csv_digest": "2a192f0a7713f1f5",
+   "sign_map_digest": "1fe747c2f44c68db",
+   "validation_policy": 7,
+   "contract": "v4",
+   "cache_version": "1b7b9fed",
+   "raw_resampled": 200,
+   "frame_steps": {
+    "1": 1605
+   },
+   "built_at": "8ba0b350bae1847134a43eefbac0b400f7619242",
+   "validated_at": "0b4a6080ce64ba2d20abd5729460c9e496dfb19f",
+   "report_sha256": "509997426ca99aac29fbe6d7f151372d8d67046abc970362e147903f631e87b3",
+   "manifest_sha256": "36521747f3321448b055f6ee1e5e264857412bad289cdc974e4610412f6d8ace"
+  },
+  "wlasl-all": {
+   "kaggle_notebook": "schandranyc/islr-accepted-wlasl-all",
+   "lmdb": "wlasl_all.lmdb.mdb",
+   "clips": 10162,
+   "content_digest": "6bbd6d4a64c37e02",
+   "csv_digest": "0892cc09ae77e875",
+   "sign_map_digest": "df82f8721e33acf3",
+   "validation_policy": 7,
+   "contract": "v4",
+   "cache_version": "1b7b9fed",
+   "raw_resampled": 200,
+   "frame_steps": {
+    "1": 10162
+   },
+   "built_at": "8ba0b350bae1847134a43eefbac0b400f7619242",
+   "validated_at": "0b4a6080ce64ba2d20abd5729460c9e496dfb19f",
+   "report_sha256": "ce145ac0f17a2148f15e6cbf848f1ea35958909fdfae4bce29df2fbcb55dfece",
+   "manifest_sha256": "de58126107a3b22d115068bdd0ad589727bab8fc49e71aad03fed79cbec77a21"
+  },
+  "aslcitizen": {
+   "kaggle_notebook": "schandranyc/islr-accepted-aslcitizen",
+   "lmdb": "aslcitizen.lmdb.mdb",
+   "clips": 8557,
+   "content_digest": "696fd5a2610fe01b",
+   "csv_digest": "27255f982a4d48b9",
+   "sign_map_digest": "1fe747c2f44c68db",
+   "validation_policy": 7,
+   "contract": "v4",
+   "cache_version": "1b7b9fed",
+   "raw_resampled": 200,
+   "frame_steps": {
+    "1": 8557
+   },
+   "built_at": "8ba0b350bae1847134a43eefbac0b400f7619242",
+   "validated_at": "0b4a6080ce64ba2d20abd5729460c9e496dfb19f",
+   "report_sha256": "ec36a3ba8f68d3239bc41f07296ac8e91dc10e4f239fad350eb9b57b8655da14",
+   "manifest_sha256": "dd2a55d13708aff4647f1147236c9ea407b3e9788b2ce853b2db328185452b73",
+   "research_only": true
+  },
+  "popsign": {
+   "kaggle_notebook": "schandranyc/islr-accepted-popsign",
+   "lmdb": "popsign.lmdb.mdb",
+   "clips": 26021,
+   "content_digest": "81ed6e98b3858883",
+   "csv_digest": "d1a3bbdc3e61d909",
+   "sign_map_digest": "1fe747c2f44c68db",
+   "validation_policy": 7,
+   "contract": "v4",
+   "cache_version": "1b7b9fed",
+   "raw_resampled": 200,
+   "frame_steps": {
+    "1": 19582,
+    "4": 6417,
+    "2": 22
+   },
+   "built_at": "8ba0b350bae1847134a43eefbac0b400f7619242",
+   "validated_at": "0b4a6080ce64ba2d20abd5729460c9e496dfb19f",
+   "report_sha256": "a99728bca4c56f8c21c3d651ee6827352d6c2ede9d7fcc8397edf64718a43ae0",
+   "manifest_sha256": "4aa5d45ee5669f33f6959fab8845ac75877d2d33ab1fafe81e9e2701e19eea2c"
+  }
+ },
+ "vocabulary": {
+  "canonical": {
+   "file": "research/models/islr/core/data/asl_signs_vocab.json",
+   "sha256": "1fe747c2f44c68dbb396947e35193c96d363f3dede0be8defa5e08546400bf5d"
+  },
+  "wlasl_all_map_sha256": "df82f8721e33acf387d5d03952e2c6bc46f90c0c0dfd3092f7d9791a107ca78f"
+ },
+ "splits": {
+  "asl_signs_folds": {
+   "file": "research/models/islr/core/data/asl_signs_folds.json",
+   "sha256": "ca6158f3e2eab1a5e2d93e28133c536b6dd6b052cd8ab8f1aa1c2d10a9689cdb",
+   "val_fold": 0
+  },
+  "wlasl_halves": {
+   "file": "research/models/islr/core/data/wlasl_signer_split.json",
+   "sha256": "74716afc7de34d1d164e986726cfa5135ecf83f62d307e72850d80b37aec03d9"
+  },
+  "aslcitizen": "official split column (in the release train.csv, csv_digest)"
+ },
+ "init": {
+  "kaggle_model": "schandranyc/islr/pyTorch/fold0-graph/1",
+  "file": "best_phase1.pth",
+  "sha256": "03d6fb7a72fad0c7a0a0d77cbca461bca6d71afb4574a9d5b5bb844d2bef3797",
+  "note": "trained on the legacy (pre-contract) pipeline; frozen as the common starting point"
+ },
+ "seeds": {
+  "seed": 42,
+  "val_phrases": 3000,
+  "validation phrases": "digest in the reference spec (val_set)"
+ },
+ "recipes": {
+  "common": "islr.phrases.train --data-dir {IS_LMDB_DIR} --lmdb-path {IS_LMDB_DIR}/is.lmdb.mdb --val-fold 0 --arch graph --init {MODEL_fold0-graph}/best_phase1.pth --num-workers 4 --aug-rotate 20 --aug-shear 0.15 --aug-scale 0.3 --aug-affine-prob 0.8 --vocab {WLASL_ALL_DIR}/sign_to_prediction_index_map.json",
+  "phrases05": "--extra-data-dir {WLASL_ALL_DIR} --extra-lmdb-path {WLASL_ALL_DIR}/wlasl_all.lmdb.mdb --extra-frac 0.3",
+  "phrases06 (research only)": "--extra-data-dir {WLASL_ALL_DIR} {ASLC_DIR} --extra-lmdb-path {WLASL_ALL_DIR}/wlasl_all.lmdb.mdb {ASLC_DIR}/aslcitizen.lmdb.mdb --extra-frac 0.3 0.15 --extra-kinds identical variant",
+  "phrases07": "--extra-data-dir {WLASL_ALL_DIR} {POPSIGN_DIR} --extra-lmdb-path {WLASL_ALL_DIR}/wlasl_all.lmdb.mdb {POPSIGN_DIR}/popsign.lmdb.mdb --extra-frac 0.3 0.2"
+ }
+}
