@@ -13,6 +13,7 @@ Usage (from the repo root):
   python scripts/extraction_inventory.py push aslcitizen --ref 07f23b7 --shards 3
   python scripts/extraction_inventory.py push wlasl --ref eb9fea3 --shards 4
   python scripts/extraction_inventory.py status popsign
+  python scripts/extraction_inventory.py push popsign --ref 07f23b7 --shards 12 --probe-all --name fps-popsign
   then mount `<user>/inventory-<extractor>` and pass --inventory <mount>/inventory.csv
 """
 
@@ -58,22 +59,27 @@ json.dump({"extractor": EXTRACTOR, "ref": REF, "cells_digest": DIGEST, "shards":
           open("/kaggle/working/inventory.json", "w"), indent=1, default=str)
 print(f"{len(inv)} videos selected over {SHARDS} shards: {inv.groupby('shard').size().to_dict()}")
 
-# frame rate and size of a sample of the selected videos (the shards do not record fps)
+# frame rate and size of the selected videos (the shards do not record fps): a 300-video sample, or
+# every video with --probe-all (PROBE = 0); header reads only, nothing decoded
 import cv2
-probe = []
-for src in inv["src"].sample(min(300, len(inv)), random_state=0):
-    cap = cv2.VideoCapture(src)
-    probe.append({"fps": cap.get(cv2.CAP_PROP_FPS), "frames": cap.get(cv2.CAP_PROP_FRAME_COUNT),
-                  "width": cap.get(cv2.CAP_PROP_FRAME_WIDTH), "height": cap.get(cv2.CAP_PROP_FRAME_HEIGHT)})
+from concurrent.futures import ThreadPoolExecutor
+def _probe(row):
+    cap = cv2.VideoCapture(row[1])
+    out = {"path": row[0], "fps": cap.get(cv2.CAP_PROP_FPS), "frames": cap.get(cv2.CAP_PROP_FRAME_COUNT),
+           "width": cap.get(cv2.CAP_PROP_FRAME_WIDTH), "height": cap.get(cv2.CAP_PROP_FRAME_HEIGHT)}
     cap.release()
-probe = pd.DataFrame(probe)
+    return out
+picked = inv if PROBE == 0 else inv.sample(min(PROBE, len(inv)), random_state=0)
+with ThreadPoolExecutor(16) as ex:
+    probe = pd.DataFrame(list(ex.map(_probe, zip(picked["path"], picked["src"]))))
+print(f"probed {len(probe)} videos ({int((probe['fps'] <= 0).sum())} without a frame rate)")
 probe.to_csv("/kaggle/working/video_probe.csv", index=False)
 print("fps:", probe["fps"].round(2).value_counts().head(8).to_dict(), "| sizes:",
       (probe["width"].astype(int).astype(str) + "x" + probe["height"].astype(int).astype(str)).value_counts().head(5).to_dict())
 """
 
 
-def notebook(extractor: str, ref: str, shards: int) -> dict:
+def notebook(extractor: str, ref: str, shards: int, probe: int = 300) -> dict:
     script, _, sel = EXTRACTORS[extractor]
     select = cells_at(ref, script, ("CELL_SELECT",))["CELL_SELECT"]
 
@@ -81,7 +87,7 @@ def notebook(extractor: str, ref: str, shards: int) -> dict:
         return {"cell_type": "code", "metadata": {}, "execution_count": None, "outputs": [],
                 "source": src.strip("\n").splitlines(True)}
 
-    head = (f"REF, SHARDS, LIMIT, REPO_URL, EXTRACTOR = {ref!r}, {shards}, 0, {REPO_URL!r}, {extractor!r}\n"
+    head = (f"REF, SHARDS, LIMIT, REPO_URL, EXTRACTOR, PROBE = {ref!r}, {shards}, 0, {REPO_URL!r}, {extractor!r}, {probe}\n"
             f"SEL = {sel!r}\nglobals().update(SEL)\nSELECT = {select!r}\nDIGEST = {cells_digest(select)!r}\n")
     return {
         "cells": [
@@ -102,8 +108,10 @@ def main() -> None:
     p.add_argument("extractor", choices=sorted(EXTRACTORS))
     p.add_argument("--ref", help="the commit the extraction notebooks were pinned to (required for push)")
     p.add_argument("--shards", type=int)
+    p.add_argument("--probe-all", action="store_true", help="probe fps / size of every selected video (default: 300)")
+    p.add_argument("--name", help="notebook name (default inventory-<extractor>)")
     a = p.parse_args()
-    name = f"inventory-{a.extractor}"
+    name = a.name or f"inventory-{a.extractor}"
     if a.action == "status":
         print(kaggle("kernels", "status", f"{user()}/{name}", check=False).strip())
         return
@@ -112,7 +120,7 @@ def main() -> None:
     ref = subprocess.run(["git", "-C", str(ROOT), "rev-parse", a.ref], capture_output=True, text=True,
                          check=True).stdout.strip()
     with tempfile.TemporaryDirectory() as tmp:
-        (Path(tmp) / f"{name}.ipynb").write_text(json.dumps(notebook(a.extractor, ref, a.shards), indent=1))
+        (Path(tmp) / f"{name}.ipynb").write_text(json.dumps(notebook(a.extractor, ref, a.shards, 0 if a.probe_all else 300), indent=1))
         meta = {"id": f"{user()}/{name}", "title": name, "code_file": f"{name}.ipynb",
                 "language": "python", "kernel_type": "notebook", "is_private": True,
                 "enable_gpu": False, "enable_tpu": False, "enable_internet": True, "keywords": [],
