@@ -99,7 +99,9 @@ def main() -> None:
     lmdb_path = args.out_dir / args.lmdb_name
     env = lmdb.open(str(lmdb_path), subdir=False, map_size=1 << 36)
     aspect = (df["width"] / df["height"]) if {"width", "height"} <= set(df) else pd.Series(float("nan"), df.index)
-    jobs = list(zip(df["path"], df["full_path"], [True] * len(df), aspect))
+    if "frame_step" not in df:
+        df["frame_step"] = 1
+    jobs = list(zip(df["path"], df["full_path"], [True] * len(df), aspect, df["frame_step"]))
     stats, errors = write_clips(env, jobs, args.workers)
     env.close()
 
@@ -108,7 +110,7 @@ def main() -> None:
     df["aspect_k"], df["ratio_raw"], df["both_hands"], df["n_frames"], df["prep_aspect"] = zip(
         *((stats[p_]["k"], stats[p_]["raw"], stats[p_]["both"], stats[p_]["n"], stats[p_]["prep_aspect"]) for p_ in df["path"]))
     cols = ["path", "participant_id", "sequence_id", "sign", "aslc_gloss", "kind", "synonym", "fps",
-            "source", "split", "aspect_k", "ratio_raw", "both_hands", "n_frames", "prep_aspect"]
+            "source", "split", "aspect_k", "ratio_raw", "both_hands", "n_frames", "prep_aspect", "frame_step"]
     cols += [c for c in ("width", "height") if c in df]  # frame size: validation re-prepares with it
     df[cols].to_csv(args.out_dir / "train.csv", index=False)
     (args.out_dir / "sign_to_prediction_index_map.json").write_text(json.dumps(sign2idx))

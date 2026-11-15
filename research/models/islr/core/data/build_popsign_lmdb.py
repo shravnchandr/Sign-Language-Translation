@@ -15,19 +15,26 @@ portrait 1944×2592 phone video from the same game as ASL Signs, which is stored
 
 PopSign comes from the same game as the Google ASL Signs data, so some signers likely overlap:
 ASL Signs held-out scores are not clean for a model trained on it (use ASL Citizen / WLASL).
+Clips whose pose track matches an ASL Signs clip (`audit-popsign`: same sign and frame count,
+<= 0.095 frame-wise — the same recording, or the same person in the same posture) are left out
+(`popsign_asl_signs_matches.csv`, --exclude-csv; listed in excluded_listed.csv, counted as filtered).
+Frame rate: ~19 % of the videos are 120 fps; --fps-csv (every video probed) gives each clip's fps
+and frame_step = round(fps / 30) raw frames per kept frame (contract step 0), both in train.csv.
 
 Writes to --out-dir: `popsign.lmdb.mdb` (same keys as `is.lmdb.mdb`), `train.csv` (path,
 participant_id = 700000 + the number after the last '.' of the PopSign user id, sequence_id,
 sign, popsign_gloss, popsign_user, synonym (False), fps, source, split, aspect_k (1), ratio_raw,
-both_hands, n_frames, width, height) and a copy of the ASL Signs sign map.
+both_hands, n_frames (after the frame step), prep_aspect, frame_step, width, height) and a copy of the
+ASL Signs sign map.
 
 Usage (inside `scripts/kaggle_run.py push ... --kernel <user>/extract-popsign-s0 ...`):
   PYTHONPATH=research/models python -m islr.core.data.build_popsign_lmdb \
     --input-root {INPUT} --sign-map {IS_LMDB_DIR}/sign_to_prediction_index_map.json \
-    --out-dir /tmp/popsign
+    --out-dir /tmp/popsign --expect-shards 12 --fps-csv {INPUT}/fps-popsign/video_probe.csv
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -36,9 +43,11 @@ from pathlib import Path
 import lmdb
 import pandas as pd
 
+from .contract import frame_step_for
 from .vocab import load_base
 from .build_wlasl_lmdb import exclude_duplicates, finish_build, load_shards, write_clips
 
+_MATCHES = Path(__file__).with_name("popsign_asl_signs_matches.csv")  # audit-popsign: same recording as an ASL Signs clip
 _SIGNER_OFFSET = 700_000  # apart from ASL Signs ids, ASL Citizen (800000 + n) and WLASL (900000 + n)
 
 
@@ -67,6 +76,11 @@ def main() -> None:
     p.add_argument("--inventory", type=Path, help="selection inventory (scripts/extraction_inventory.py) for shards "
                    "without their own selected_<k>.csv")
     p.add_argument("--allow-missing", type=int, default=0, help="selected videos that may be absent from the shard lists")
+    p.add_argument("--fps-csv", type=Path, required=True,
+                   help="video_probe.csv of `extraction_inventory.py push popsign --probe-all` (path, fps for every "
+                        "selected video): ~19 %% of PopSign is 120 fps, kept every round(fps / 30)-th frame")
+    p.add_argument("--exclude-csv", type=Path, default=_MATCHES,
+                   help="clips to leave out (column path): default the PopSign clips matching an ASL Signs recording")
     args = p.parse_args()
 
     sign2idx = load_base(args.sign_map)
@@ -87,7 +101,23 @@ def main() -> None:
     if (clash > 1).any():
         raise SystemExit(f"PopSign user ids collide after numbering: {clash[clash > 1].index.tolist()}")
     df["sequence_id"] = df["video"].map(lambda v: os.path.splitext(str(v))[0])
-    df["fps"], df["source"] = float("nan"), "popsign"
+    df["source"] = "popsign"
+    probe = pd.read_csv(args.fps_csv).drop_duplicates("path").set_index("path")["fps"]
+    df["fps"] = df["path"].map(probe)  # the video's own frame rate (probed)
+    if df["fps"].isna().any() or (df["fps"] <= 0).any():
+        bad = df.loc[df["fps"].isna() | (df["fps"] <= 0), "path"].tolist()
+        raise SystemExit(f"{len(bad)} clips without a probed frame rate in {args.fps_csv}, e.g. {bad[:3]}")
+    df["frame_step"] = [frame_step_for(f) for f in df["fps"]]
+    print(f"frame steps (raw frames per kept frame): {df['frame_step'].value_counts().sort_index().to_dict()}")
+    excl = pd.read_csv(args.exclude_csv)
+    hit = df["path"].isin(set(excl["path"]))
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    excl[excl["path"].isin(set(df["path"]))].to_csv(args.out_dir / "excluded_listed.csv", index=False)
+    print(f"excluded before preparation ({args.exclude_csv.name}): {int(hit.sum())} of {len(excl)} listed clips")
+    manifest["excluded_listed"] = {"file": args.exclude_csv.name, "sha256": hashlib.sha256(args.exclude_csv.read_bytes()).hexdigest()[:16],
+                                   "listed": len(excl), "excluded": int(hit.sum())}
+    manifest["fps_probe"] = {"file": str(args.fps_csv), "frame_steps": {int(k): int(v) for k, v in df["frame_step"].value_counts().items()}}
+    df = df[~hit].copy()
     if args.limit:
         df = df.head(args.limit)
     mirrored = int((df["lr_dx"] <= 0).sum()) if "lr_dx" in df else 0
@@ -100,7 +130,9 @@ def main() -> None:
     lmdb_path = args.out_dir / args.lmdb_name
     env = lmdb.open(str(lmdb_path), subdir=False, map_size=1 << 37)
     aspect = (df["width"] / df["height"]) if {"width", "height"} <= set(df) else pd.Series(float("nan"), df.index)
-    jobs = list(zip(df["path"], df["full_path"], [False] * len(df), aspect))
+    if "frame_step" not in df:
+        df["frame_step"] = 1
+    jobs = list(zip(df["path"], df["full_path"], [False] * len(df), aspect, df["frame_step"]))
     stats, errors = write_clips(env, jobs, args.workers)
     env.close()
 
@@ -109,7 +141,7 @@ def main() -> None:
     df["aspect_k"], df["ratio_raw"], df["both_hands"], df["n_frames"], df["prep_aspect"] = zip(
         *((stats[p_]["k"], stats[p_]["raw"], stats[p_]["both"], stats[p_]["n"], stats[p_]["prep_aspect"]) for p_ in df["path"]))
     cols = ["path", "participant_id", "sequence_id", "sign", "popsign_gloss", "popsign_user", "synonym",
-            "fps", "source", "split", "aspect_k", "ratio_raw", "both_hands", "n_frames", "prep_aspect"]
+            "fps", "source", "split", "aspect_k", "ratio_raw", "both_hands", "n_frames", "prep_aspect", "frame_step"]
     cols += [c for c in ("width", "height") if c in df]  # frame size (some clips are 9:16, most 3:4)
     df[cols].to_csv(args.out_dir / "train.csv", index=False)
     (args.out_dir / "sign_to_prediction_index_map.json").write_text(json.dumps(sign2idx))

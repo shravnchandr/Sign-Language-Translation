@@ -160,6 +160,33 @@ def rule_cases(vectors: list | None = None) -> None:
     print("ok  copy rule at its thresholds (IoU, own-side margin, assignment ratio, exact tie)")
 
 
+def frame_step_cases() -> None:
+    """Step 0: frame_step k keeps positions 0, k, 2k, … — the same clip as if recorded at fps / k."""
+    want = {120: 4, 119.88: 4, 60: 2, 50: 2, 31: 1, 29.92: 1, 24: 1, 17: 1}
+    got = {f: K.frame_step_for(f) for f in want}
+    if got != want:
+        fail(f"frame_step_for {got}, want {want}")
+    for bad in (0, -30, float("nan")):
+        try:
+            K.frame_step_for(bad)
+            fail(f"frame_step_for accepted fps {bad}")
+        except ValueError:
+            pass
+    df = clip(61, seed=7)
+    frames = np.sort(df["frame"].unique())
+    for k in (2, 4):
+        a, b = K.prepare(df, 0.75, k), K.prepare(df[df["frame"].isin(frames[::k])])
+        if not all(np.array_equal(a[x], b[x]) for x in K.RECORD_KEYS) or len(a["coords"]) != len(frames[::k]):
+            fail(f"frame_step {k} differs from preparing every {k}-th frame")
+    for bad in (0, 2.0, "4"):
+        try:
+            K.prepare(df, 0.75, bad)
+            fail(f"prepare accepted frame_step {bad!r}")
+        except ValueError:
+            pass
+    print("ok  frame step: 120 → 4, 60 / 50 → 2, ≤ 44 → 1; step k = every k-th raw frame, bit-exact; bad steps refused")
+
+
 def vocab_cases(tmp: Path) -> None:
     """The canonical label map: exact for a base vocabulary; an extension keeps its 250 and adds from 250."""
     c = V.canonical()
@@ -204,6 +231,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         vocab_cases(tmp)
+        frame_step_cases()
         (tmp / "train_landmark_files").mkdir()
         rows, raw = [], {}
         for k, (name, (T, kw)) in enumerate(CASES.items()):

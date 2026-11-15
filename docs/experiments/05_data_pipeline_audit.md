@@ -418,6 +418,42 @@ it **proves nothing**; with 0 exact duplicates (one extraction pipeline) a true 
 unlikely. Face-mesh shape can triage the flagged pairs, but only after its separation is measured on
 known same-recording and different-recording controls; similarity alone does not establish a copy.
 
+**PopSign (`islr-audit-popsign` at dd3d977, 26,278 clips; `inventory-popsign` at 07f23b7).** Coverage:
+26,278 selected = 26,278 extracted (2,190 / 2,189 per shard). Raw structure clean: 0 read / structure
+errors, 0 frame gaps, 0 exact duplicates, 0 mirrored clips; 295 clips with some pose-less frames (dropped
+by the contract), 22 no-hand clips; single hands in the other side's slot 2,862 of 1.33 M hand-frames
+(0.2 %). 250 glosses, 31 signers, all `train`. Its copy counts are v3 (pushed before v4; v4 re-run
+below). Three findings:
+
+1. **Frame rate.** The probe (300 videos) has 56 at 120 fps (+ 1 at 60): 120 fps clips hold ≈ 233
+   frames for a ≈ 1.9 s sign vs ≈ 63 at 30 fps — about a fifth of PopSign was 4× slow motion against
+   the ≈ 30 fps training and browser rate (phrases07 trained on it). Per clip, not per signer (signers
+   with 0–58 % clips over 150 frames), so no signer-level fix. ASL Citizen (17–31 fps, 267 / 300 at 30)
+   and WLASL (24–30, one 50) have no such mode. **Decision (user, 2026-11-15): decimate.** Contract
+   step 0: frame_step k = round(fps / 30) (120 → 4, 60 / 50 → 2, ≤ 44 → 1), positions 0, k, 2k, … of the
+   raw frames, recorded per clip (train.csv `fps` = the probed video rate, `frame_step`); validate
+   (policy 6) requires it for every clip and the re-prepare uses it. Fps of every PopSign video:
+   `extraction_inventory.py push popsign --probe-all --name fps-popsign`; the builder requires it
+   (`--fps-csv`) and exits on any clip without one. The tracker ran at 120 fps, so a decimated clip is
+   close to, not identical with, a 30 fps recording. Tests: `check_contract` (step → every k-th frame
+   bit-exact, bad steps refused); end to end, 120 / 119.88 fps clips 30 → 8 frames, 60 → 15, policy 6
+   re-prepare = stored, an edited `frame_step` fails train.csv digest and re-prepare, a clip without
+   fps stops the build.
+2. **Same recordings as ASL Signs.** 257 of the 13,271 clips with an ASL Signs clip of the same sign
+   and frame count lie within the same-video distance (≤ 0.095; 1 % quantile of best distances 0.077,
+   median 0.190), from 21 PopSign signers, matching 17 ASL Signs signers — including fold-0
+   validation signers 49445 (48) and 62590 (2) and fold-0's 53618 / 2044 elsewhere. Same recording or
+   the same person in the same posture: either way not independent. **Decision (user): exclude.**
+   `core/data/popsign_asl_signs_matches.csv` (the 257, with their ASL Signs match and distance) is the
+   builder's default `--exclude-csv`: left out before preparation, listed in `excluded_listed.csv`,
+   counted as `filtered`, the list's digest in the manifest. Copies trimmed or with dropped frames stay
+   undetectable, so the policy above (PopSign-trained models: ASL Signs scores not independent) stands.
+3. **9:16 clips.** 1,332 clips (5 %, signers 4a.8902 all, gtsignstudy4a.8040 348 of 810) are
+   1080×1920, the rest 1944×2592 (3:4). The builder applies no aspect correction; their raw shoulder
+   ratio is lower (8040: 0.355 vs 0.416 at 3:4 — a factor 1.17, not the 1.33 a pure width change would
+   give, so not simply a different crop; unverified without the videos), inside ASL Signs' p1–p99
+   (0.27–0.50). Recorded (width / height, prep_aspect per clip); no change.
+
 ### Review of ce3c929 (three more, fixed)
 
 | Finding | Fix | Reproduction now |
@@ -469,7 +505,7 @@ validated anew anyway.
    both ways and compare the resulting geometry (shoulder drop / width, hand size relative to the
    shoulders, joint-angle features) and a frozen checkpoint's predictions on each; change the
    builders only if the browser-style preparation lands outside what training covers.
-3. Build every release, validate under the current policy (5; `--raw-root`).
+3. Build every release, validate under the current policy (6; `--raw-root`).
 4. Freeze the code revision and the shared dependencies (init checkpoint, vocabulary, validation
    phrases, releases) in the reference spec.
 5. Only then the GPU runs (re-score, then phrases05 / phrases07 under one `--frozen-spec`) — even

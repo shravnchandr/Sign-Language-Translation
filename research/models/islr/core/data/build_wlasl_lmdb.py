@@ -111,7 +111,7 @@ def _dealt_split(df: pd.DataFrame) -> dict:
 
 
 def _process(args: tuple) -> tuple:
-    """Worker: (path, full path[, correct=True[, aspect=0.75]]) → (path, stored value, info, error).
+    """Worker: (path, full path[, correct=True[, aspect=0.75[, frame_step=1]]]) → (path, stored value, info, error).
 
     The parquet goes through the data contract (contract.prepare: pose-less frames dropped, ghost
     hands resolved, explicit presence), then optionally the aspect correction. aspect = frame
@@ -126,8 +126,9 @@ def _process(args: tuple) -> tuple:
     path, full_path, *opt = args
     correct = opt[0] if opt else True
     aspect = opt[1] if len(opt) > 1 and opt[1] == opt[1] else 0.75  # NaN → default
+    step = int(opt[2]) if len(opt) > 2 else 1
     try:
-        clip = prepare(pd.read_parquet(full_path), aspect)
+        clip = prepare(pd.read_parquet(full_path), aspect, step)
         coords = clip["coords"]
         if coords.ndim != 2 or coords.shape[1] != C.COORD_FEAT or len(coords) == 0:
             raise ValueError(f"coords shape {coords.shape}, expected (T > 0, {C.COORD_FEAT})")
@@ -143,7 +144,7 @@ def _process(args: tuple) -> tuple:
         coords[:, 2::3] *= k  # z
         pres = clip["presence"].astype(bool)
         info = {"n": len(coords), "k": k, "raw": raw, "both": float((pres[:, 0] & pres[:, 1]).mean()),
-                "content": content, "prep_aspect": float(aspect), **clip["stats"]}
+                "content": content, "prep_aspect": float(aspect), "frame_step": step, **clip["stats"]}
         return path, dump_clip(clip), info, None
     except Exception as e:  # noqa: BLE001 — reported per clip
         return path, None, None, str(e)
@@ -424,7 +425,9 @@ def main() -> None:
     lmdb_path = args.out_dir / args.lmdb_name
     env = lmdb.open(str(lmdb_path), subdir=False, map_size=1 << 36)
     aspect = (df["width"] / df["height"]) if {"width", "height"} <= set(df) else pd.Series(float("nan"), df.index)
-    jobs = list(zip(df["path"], df["full_path"], [True] * len(df), aspect))
+    if "frame_step" not in df:
+        df["frame_step"] = 1
+    jobs = list(zip(df["path"], df["full_path"], [True] * len(df), aspect, df["frame_step"]))
     stats, errors = write_clips(env, jobs, args.workers)
     env.close()
 
@@ -433,7 +436,7 @@ def main() -> None:
     df["aspect_k"], df["ratio_raw"], df["both_hands"], df["n_frames"], df["prep_aspect"] = zip(
         *((stats[p_]["k"], stats[p_]["raw"], stats[p_]["both"], stats[p_]["n"], stats[p_]["prep_aspect"]) for p_ in df["path"]))
     cols = ["path", "participant_id", "sequence_id", "sign", "wlasl_gloss", "synonym", "fps",
-            "source", "split", "aspect_k", "ratio_raw", "both_hands", "n_frames", "prep_aspect"]
+            "source", "split", "aspect_k", "ratio_raw", "both_hands", "n_frames", "prep_aspect", "frame_step"]
     cols += [c for c in ("width", "height") if c in df]  # frame size: validation re-prepares with it
     if args.all_glosses:
         test = set(signer_split(df)["test"])

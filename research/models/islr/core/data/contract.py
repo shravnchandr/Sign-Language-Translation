@@ -6,7 +6,10 @@ docs/experiments/05_data_pipeline_audit.md).
 
 Raw → stored (`prepare`, run once at LMDB build time):
   0. Raw rows are checked (check_raw): known part types, integral frame ids, landmark indices
-     inside their part, no repeated (frame, type, landmark_index) record.
+     inside their part, no repeated (frame, type, landmark_index) record. With frame_step k > 1
+     (video recorded above ~30 fps: k = frame_step_for(fps) = round(fps / TARGET_FPS), recorded per
+     clip), only the frames at positions 0, k, 2k, … of the sorted frame ids are kept — what a
+     ~30 fps camera samples; everything below runs on those frames.
   1. Frames without a pose are dropped (no body origin; the browser drops them too).
   2. Copied hands (contract v4, chosen on visually labelled frames — docs/experiments/
      05_data_pipeline_audit.md, "Ghost rule v4"): MediaPipe Holistic sometimes fits ONE physical
@@ -43,6 +46,14 @@ from ..config import COORDS_PER_LM, N_LH, N_POSE, SELECTED_FACE_INDICES
 CONTRACT_VERSION = "v4"  # part of the LMDB key (_cache_keys): old LMDBs fail loudly instead of mixing
 ABSENT, KEPT, GHOST = 0, 1, 2
 COPY_IOU, WRIST_MARGIN, ASSIGN_RATIO = 0.1, 0.1, 0.45  # step 2 (frozen: audit doc, round 2)
+TARGET_FPS = 30  # training video and the browser's processing rate (step 0)
+
+
+def frame_step_for(fps: float) -> int:
+    """Raw frames per kept frame for a video recorded at fps: 120 → 4, 60 → 2, 24–44 → 1."""
+    if not fps == fps or fps <= 0:
+        raise ValueError(f"no frame rate ({fps})")
+    return max(1, int(round(fps / TARGET_FPS)))
 
 # Stored layout = config.ALL_COLUMNS: left hand, pose, right hand, selected face; x, y, z per landmark.
 _PARTS = (("left_hand", N_LH), ("pose", N_POSE), ("right_hand", N_LH), ("face", len(SELECTED_FACE_INDICES)))
@@ -156,11 +167,15 @@ def _hold_fill(a: np.ndarray, present: np.ndarray) -> np.ndarray:
     return a[src]
 
 
-def prepare(df: pd.DataFrame, aspect: float = 0.75) -> dict:
+def prepare(df: pd.DataFrame, aspect: float = 0.75, frame_step: int = 1) -> dict:
     """Steps 1–5: raw rows → {"coords": (T, COORD_FEAT) float32, "presence": (T, 2) uint8,
     "status": (T, 2) int8, "assignment_uncertain": (T,) uint8, "frames": kept frame ids, "stats": counts}.
     T can be 0 (no pose)."""
     raw = raw_arrays(df)
+    if frame_step != 1:
+        if type(frame_step) is not int or frame_step < 1:
+            raise ValueError(f"frame_step {frame_step!r} is not a positive integer")
+        raw = {k: v[::frame_step] for k, v in raw.items()}  # step 0: positions 0, k, 2k, …
     inf = {part: int(np.isinf(raw[part]).sum()) for part, _ in _PARTS}
     if any(inf.values()):  # NaN means "not detected"; an infinity is corrupt data, never a value
         raise ValueError(f"infinite raw coordinates: { {k: v for k, v in inf.items() if v} }")

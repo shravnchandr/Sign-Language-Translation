@@ -16,7 +16,8 @@ Hard checks:
   - coverage: selected = listed + missing (missing within the build's allowance; the selection
     recorded by the extraction or re-run by scripts/extraction_inventory.py), listed = filtered +
     build errors + excluded duplicates + written, written = train.csv rows
-  - preparation parameters recorded: prep_aspect per clip (ASL Signs: the manifest's fixed 0.75)
+  - preparation parameters recorded: prep_aspect and frame_step per clip (ASL Signs: the manifest's
+    fixed 0.75 and 1)
   - every train.csv path has a data + length key; stored length = clip length = n_frames
   - every clip: the current record layout (contract.RECORD_KEYS, contract.RECORD_DTYPES); finite, (T > 0, COORD_FEAT);
     presence binary and = status KEPT; status codes valid; assignment_uncertain binary (T,) and set
@@ -53,7 +54,7 @@ from .vocab import check_map
 
 # Bump whenever a check is added or tightened: reports written under an older policy no longer
 # admit a dataset (it must be validated again), so a release cannot pass on yesterday's checks.
-VALIDATION_POLICY = 5  # 1: 33b6971 (no coverage / prep_aspect checks); 2: e765dd4+ (coverage, prep_aspect, no-hand report); 3: contract v4 (copy rule, assignment_uncertain); 4: sign map = bijection onto 0..N-1 + fingerprinted, stored dtypes, digest over dtype / shape / length key; 5: sign map = the canonical 250 (WLASL all glosses: canonical 250 first, extras from 250)
+VALIDATION_POLICY = 6  # 1: 33b6971 (no coverage / prep_aspect checks); 2: e765dd4+ (coverage, prep_aspect, no-hand report); 3: contract v4 (copy rule, assignment_uncertain); 4: sign map = bijection onto 0..N-1 + fingerprinted, stored dtypes, digest over dtype / shape / length key; 5: sign map = the canonical 250 (WLASL all glosses: canonical 250 first, extras from 250); 6: frame_step recorded per clip (contract step 0) and used by the re-prepare
 
 
 def require_accepted(data_dir, lmdb_path) -> dict:
@@ -158,6 +159,14 @@ def main() -> None:
         prep_aspect = pd.to_numeric(df.get("prep_aspect", pd.Series(np.nan, index=df.index)), errors="coerce")
     check(bool(prep_aspect.notna().all() and (prep_aspect > 0).all()),
           f"preparation aspect recorded for every clip ({int(prep_aspect.isna().sum())} missing)")
+    if dataset == "aslsigns":
+        frame_step = pd.Series(man.get("frame_step", np.nan), index=df.index, dtype=float)
+    else:
+        frame_step = pd.to_numeric(df.get("frame_step", pd.Series(np.nan, index=df.index)), errors="coerce")
+    step_ok = frame_step.notna() & (frame_step >= 1) & (frame_step == frame_step.round())
+    check(bool(step_ok.all()), f"frame step (contract step 0) recorded for every clip as an integer >= 1 "
+                               f"({int((~step_ok).sum())} not; steps {frame_step.value_counts().to_dict()})")
+    report["frame_steps"] = {int(k): int(v) for k, v in frame_step[step_ok].value_counts().items()}
 
     if "wlasl_gloss" in df:  # WLASL: halves must equal the frozen split
         sp = signer_split(df)
@@ -248,7 +257,8 @@ def main() -> None:
                 if not os.path.exists(full):
                     unfound += 1
                     continue
-                _, value, _, err = _process((r.path, full, correct, float(prep_aspect[r.Index])))
+                _, value, _, err = _process((r.path, full, correct, float(prep_aspect[r.Index]),
+                                             int(frame_step[r.Index]) if step_ok[r.Index] else 1))
                 stored = K.load_record(txn.get(lmdb_key(r.path)))
                 if err or not all(torch.equal(K.load_record(value)[k], stored[k]) for k in K.RECORD_KEYS):
                     mism.append(r.path)

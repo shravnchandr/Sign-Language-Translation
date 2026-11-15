@@ -186,7 +186,7 @@ def build_lmdb(
                 # the competition's train.csv is the selection; every listed clip is attempted
                 "coverage": {"selected": n, "listed": n, "missing": 0, "filtered": 0, "build_errors": errors,
                              "excluded_duplicates": 0, "written": written + skipped},
-                "prep_aspect": 0.75,  # contract.prepare default: portrait 3:4 phone video (frame size not recorded)
+                "prep_aspect": 0.75, "frame_step": 1,  # competition parquets: every frame kept  # contract.prepare default: portrait 3:4 phone video (frame size not recorded)
                 "code": code_revision()}
     (lmdb_path.parent / "build_manifest.json").write_text(json.dumps(manifest, indent=1))
     print(
