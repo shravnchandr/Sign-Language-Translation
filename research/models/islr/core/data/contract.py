@@ -172,13 +172,13 @@ def prepare(df: pd.DataFrame, aspect: float = 0.75, frame_step: int = 1) -> dict
     "status": (T, 2) int8, "assignment_uncertain": (T,) uint8, "frames": kept frame ids, "stats": counts}.
     T can be 0 (no pose)."""
     raw = raw_arrays(df)
+    inf = {part: int(np.isinf(raw[part]).sum()) for part, _ in _PARTS}  # every raw frame, before step 0
+    if any(inf.values()):  # NaN means "not detected"; an infinity is corrupt data, never a value
+        raise ValueError(f"infinite raw coordinates: { {k: v for k, v in inf.items() if v} }")
     if frame_step != 1:
         if type(frame_step) is not int or frame_step < 1:
             raise ValueError(f"frame_step {frame_step!r} is not a positive integer")
         raw = {k: v[::frame_step] for k, v in raw.items()}  # step 0: positions 0, k, 2k, …
-    inf = {part: int(np.isinf(raw[part]).sum()) for part, _ in _PARTS}
-    if any(inf.values()):  # NaN means "not detected"; an infinity is corrupt data, never a value
-        raise ValueError(f"infinite raw coordinates: { {k: v for k, v in inf.items() if v} }")
     posed = ~np.isnan(raw["pose"]).all((1, 2))
     stats = {"frames_raw": int(len(posed)), "frames_no_pose": int((~posed).sum())}
     raw = {k: v[posed] for k, v in raw.items()}

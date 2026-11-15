@@ -17,7 +17,8 @@ Hard checks:
     recorded by the extraction or re-run by scripts/extraction_inventory.py), listed = filtered +
     build errors + excluded duplicates + written, written = train.csv rows
   - preparation parameters recorded: prep_aspect and frame_step per clip (ASL Signs: the manifest's
-    fixed 0.75 and 1)
+    fixed 0.75 and 1); PopSign: frame_step = frame_step_for(probed fps), no clip of the frozen ASL Signs
+    match list (popsign_asl_signs_matches.csv); other datasets: frame_step 1
   - every train.csv path has a data + length key; stored length = clip length = n_frames
   - every clip: the current record layout (contract.RECORD_KEYS, contract.RECORD_DTYPES); finite, (T > 0, COORD_FEAT);
     presence binary and = status KEPT; status codes valid; assignment_uncertain binary (T,) and set
@@ -49,12 +50,13 @@ from ..config import COORD_FEAT, COORDS_PER_LM, LH_START, N_LH, RH_START
 from . import contract as K
 from ._cache_keys import CACHE_VERSION, lmdb_key, lmdb_length_key
 from .build_wlasl_lmdb import _process, signer_split
+from .build_popsign_lmdb import _MATCHES as POPSIGN_EXCLUDED
 from .vocab import check_map
 
 
 # Bump whenever a check is added or tightened: reports written under an older policy no longer
 # admit a dataset (it must be validated again), so a release cannot pass on yesterday's checks.
-VALIDATION_POLICY = 6  # 1: 33b6971 (no coverage / prep_aspect checks); 2: e765dd4+ (coverage, prep_aspect, no-hand report); 3: contract v4 (copy rule, assignment_uncertain); 4: sign map = bijection onto 0..N-1 + fingerprinted, stored dtypes, digest over dtype / shape / length key; 5: sign map = the canonical 250 (WLASL all glosses: canonical 250 first, extras from 250); 6: frame_step recorded per clip (contract step 0) and used by the re-prepare
+VALIDATION_POLICY = 7  # 1: 33b6971 (no coverage / prep_aspect checks); 2: e765dd4+ (coverage, prep_aspect, no-hand report); 3: contract v4 (copy rule, assignment_uncertain); 4: sign map = bijection onto 0..N-1 + fingerprinted, stored dtypes, digest over dtype / shape / length key; 5: sign map = the canonical 250 (WLASL all glosses: canonical 250 first, extras from 250); 6: frame_step recorded per clip (contract step 0) and used by the re-prepare; 7: frame_step = frame_step_for(probed fps) (PopSign; others 1), PopSign paths disjoint from the frozen ASL Signs match list
 
 
 def require_accepted(data_dir, lmdb_path) -> dict:
@@ -167,6 +169,18 @@ def main() -> None:
     check(bool(step_ok.all()), f"frame step (contract step 0) recorded for every clip as an integer >= 1 "
                                f"({int((~step_ok).sum())} not; steps {frame_step.value_counts().to_dict()})")
     report["frame_steps"] = {int(k): int(v) for k, v in frame_step[step_ok].value_counts().items()}
+    if dataset == "popsign":  # the step follows the probed video rate; the frozen exclusions stay out
+        fps = pd.to_numeric(df.get("fps", pd.Series(np.nan, index=df.index)), errors="coerce")
+        want = fps.map(lambda f: K.frame_step_for(f) if f == f and f > 0 else np.nan)
+        wrong = want.isna() | (frame_step != want)
+        check(not wrong.any(), f"frame_step = round(fps / {K.TARGET_FPS}) for every clip, fps probed "
+                               f"({int(wrong.sum())} not, e.g. {df.loc[wrong, ['path']].assign(fps=fps[wrong], frame_step=frame_step[wrong]).head(2).to_dict('records')})")
+        frozen = set(pd.read_csv(POPSIGN_EXCLUDED)["path"])
+        kept = sorted(set(df["path"]) & frozen)
+        check(not kept, f"no clip from {POPSIGN_EXCLUDED.name} ({len(frozen)} frozen exclusions) released "
+                        f"({len(kept)} are{', e.g. ' + kept[0] if kept else ''})")
+    else:  # no frame-rate probe for the other datasets: every frame kept
+        check(bool((frame_step[step_ok] == 1).all()), f"frame_step 1 for every clip ({dataset}: no fps probe)")
 
     if "wlasl_gloss" in df:  # WLASL: halves must equal the frozen split
         sp = signer_split(df)

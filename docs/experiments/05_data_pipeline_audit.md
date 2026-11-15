@@ -439,6 +439,12 @@ below). Three findings:
    bit-exact, bad steps refused); end to end, 120 / 119.88 fps clips 30 → 8 frames, 60 → 15, policy 6
    re-prepare = stored, an edited `frame_step` fails train.csv digest and re-prepare, a clip without
    fps stops the build.
+   Review of f31f837 (policy 7): validate now requires frame_step = frame_step_for(probed fps) for
+   PopSign (1 elsewhere) and no PopSign clip from the frozen match list; the infinity check runs on
+   every raw frame before step 0. Consistent-but-wrong releases (fps 120 / step 1 with digests
+   rewritten; a frozen path built in with an empty --exclude-csv) fail only the new checks; an infinity
+   in a frame step 4 discards is refused. The fps probe reads headers only: `video_timing` decodes
+   samples of each class (timestamps + duplicate-frame share).
 2. **Same recordings as ASL Signs.** 257 of the 13,271 clips with an ASL Signs clip of the same sign
    and frame count lie within the same-video distance (≤ 0.095; 1 % quantile of best distances 0.077,
    median 0.190), from 21 PopSign signers, matching 17 ASL Signs signers — including fold-0

@@ -184,7 +184,15 @@ def frame_step_cases() -> None:
             fail(f"prepare accepted frame_step {bad!r}")
         except ValueError:
             pass
-    print("ok  frame step: 120 → 4, 60 / 50 → 2, ≤ 44 → 1; step k = every k-th raw frame, bit-exact; bad steps refused")
+    corrupt = df.copy()  # an infinity in a frame step 4 discards (position 1) is still corrupt data
+    corrupt.loc[(corrupt["frame"] == frames[1]) & (corrupt["type"] == "pose"), "x"] = np.inf
+    for k in (1, 4):
+        try:
+            K.prepare(corrupt, 0.75, k)
+            fail(f"frame_step {k}: an infinite coordinate in a discarded frame was accepted")
+        except ValueError:
+            pass
+    print("ok  frame step: 120 → 4, 60 / 50 → 2, ≤ 44 → 1; step k = every k-th raw frame, bit-exact; bad steps and an infinity in a discarded frame refused")
 
 
 def vocab_cases(tmp: Path) -> None:
