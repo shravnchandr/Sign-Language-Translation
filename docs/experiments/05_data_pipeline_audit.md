@@ -617,7 +617,9 @@ phrases07 checkpoint, frozen phrases07 shows no detectable difference on either 
 p = 0.89; ASL Citizen +129 / −140, p = 0.54). The val WER drop (0.2826 → 0.2326) is not independent
 evidence: PopSign is likely to share signers with ASL Signs (same game), and the validation phrases are
 built from ASL Signs fold-0 signers, so some of it may be the val signers' own PopSign clips; the
-WLASL and ASL Citizen tests share no signers with any training source.
+WLASL test half and ASL Citizen test split are signer-disjoint from their own datasets' training
+signals, and no shared signers with ASL Signs or PopSign are known (only WLASL vs ASL Signs was
+screened, `signer_overlap`, and a screen is not proof).
 
 **Browser / export review (2026-11-15; ASL-App issues are the app owner's to fix, this repo supplies the
 reference).**
