@@ -1,0 +1,28 @@
+{
+ "threshold": 0.3371164028481133,
+ "recall_x4": 0.8387203166226913,
+ "fp_ordinary": 0.09461604199731413,
+ "balanced_accuracy": 0.8720521373126886,
+ "calibration_signers": [
+  "4a.7003",
+  "4a.8008",
+  "4a.8014",
+  "4a.8017",
+  "4a.8020",
+  "4a.8021",
+  "4a.8022",
+  "4a.8028",
+  "4a.8054",
+  "gtsignstudy4a.8044",
+  "gtsignstudy4a.8045",
+  "gtsignstudy4a.8046",
+  "gtsignstudy4a.8050"
+ ],
+ "n_x4": 3032,
+ "n_ordinary": 8191,
+ "unscorable": {
+  "x4": 0,
+  "ordinary": 0
+ },
+ "scores": "results/kaggle/repeat-frames/out/repeat_frames.csv"
+}
