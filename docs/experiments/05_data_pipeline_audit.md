@@ -528,6 +528,20 @@ spread evenly, → 1 when all motion falls on one phase), k = 2, 4, and its 24-f
    `core/data/repeat_frames_threshold.json`, committed before `repeat_check evaluate` runs; `evaluate`
    never refits and refuses a different calibration signer set.
 
+**Result (repeat-frames at bf01452; `repeat_check` at 8fded24; threshold frozen in 00df7a2): gate 2 fails —
+the detector does not separate, ASL Signs was not examined, the accepted ASL Signs release stays.**
+Coverage complete (26,278 PopSign, 94,477 ASL Signs clips; 0 read errors; 15,676 ASL Signs clips
+unscorable, never looked at further). Calibration signers (13): best threshold s_4 ≥ 0.337, recall ×4
+83.9 % (3,032 clips), false positives 9.5 % (8,191 ordinary). Evaluation signers (18), frozen threshold:
+recall 94.2 % (3,243 / 3,444; needed ≥ 98 %), false positives 9.9 % (1,144 / 11,589; needed ≤ 0.5 %),
+held-pose 9.4 % (273 / 2,898; needed ≤ 1 %). ×2 (outside the decision): 18 of 22 flagged, s_2 median 0.69.
+Why (PopSign only): s_4 median 0.44 on ×4 clips (p5–p95 0.32–0.57) against 0.29 on ordinary ones
+(0.26–0.35) — exact repeats would give ≈ 1. MediaPipe's temporal smoothing spreads the step onto each
+new image over the repeats, so landmarks move on nearly every frame and the period-4 signature is weak
+and overlapping. **Limitation (documented, not corrected):** ASL Signs may contain recordings of ~30 fps
+frames repeated 4× stored undecimated (indicated by 59 high-fps PopSign matches, proxy labels only);
+their number is unknown. A different detector would need a new, separately committed round.
+
 **v4 statistics per dataset** (raw audits at d19ba7c vs v3 at dd3d977, per clip; frame-level v3
 decisions are not stored, so "frames changed" is the per-clip count difference, a lower bound).
 
