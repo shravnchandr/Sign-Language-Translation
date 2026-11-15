@@ -87,10 +87,13 @@ def verify(fx: dict, max_frames: int) -> None:
     clip = contract.prepare(frames_to_rows(fx["frames"]))
     coords, presence = torch.from_numpy(clip["coords"]), torch.from_numpy(clip["presence"]).float()
     seg = contract.segment(presence)
+    T = seg.stop - seg.start
     feats = contract.clip_input(coords, presence, max_frames, trim=True).numpy()
     got = {"kept_frames": [int(f) for f in clip["frames"]], "hand_status": clip["status"].tolist(),
            "assignment_uncertain": clip["assignment_uncertain"].tolist(),
-           "segment": list(range(seg.start, seg.stop)), "features": _exact(feats)}
+           "segment": list(range(seg.start, seg.stop)),
+           "subsample": contract.subsample_index(T, max_frames).tolist() if T > max_frames else None,
+           "features": _exact(feats)}
     bad = [k for k, v in got.items() if v != fx[k]]
     if bad:
         raise SystemExit(f"fixture {fx['name']}: {bad} not reproducible from its serialized frames")

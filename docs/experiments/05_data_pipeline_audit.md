@@ -380,6 +380,11 @@ and the `--raw-root` re-prepare comparison, `browser_fixtures` (written and veri
 cases (copy / two / boundary: IoU exactly 0.1, margin exactly 0.1, ratio exactly 0.45; ties);
 `CONTRACT_VERSION`, `CACHE_VERSION` and `VALIDATION_POLICY` bumped; the preprocess spec *and* the
 ASL-App preprocessing updated, with Python / browser parity checked on the fixtures; then the rebuild.
+**Done in d9741ac** except the ASL-App port (separate repo, the user's): contract = evaluated formula on
+663 real two-hand frames × 3 aspects (0 differ); every threshold tested 1e-6 either side and the exact
+tie; an end-to-end build validates with copies; a flipped `assignment_uncertain` fails schema, digest
+and re-prepare. `check_contract --write-fixtures DIR` writes the cases as browser fixtures plus
+`rule_vectors.json` (threshold / tie inputs and expected outputs) for the app's parity test.
 
 **Aspect: same clips, builder vs browser preparation (`islr-aspect-wlasl`, `aspect_compare`, 824
 held-out-signer WLASL clips, 0 errors).** k builder / browser median 1.08 (p10–p90 0.99–1.23).
@@ -425,6 +430,19 @@ Every release must therefore be validated with the current code after it is buil
 notebooks report example signer ids per dataset before any build, so an unexpected id format shows
 up there first.
 
+### Review of d9741ac (four, fixed — policy 4)
+
+| Finding | Fix | Reproduction now |
+|---|---|---|
+| A sign map with two signs on one class (`boat`, `bye` → 0) passed validation and acceptance | `validate.sign_map_problems`: distinct names onto exactly 0..N-1 (integers, duplicate JSON keys detected); the map's digest in the build manifest, the validation report and the release `require_accepted` returns (so in the experiment spec) | validate: "indices not exactly 0..249 (repeated [0], missing [27, 33])" + manifest digest mismatch; acceptance: "sign map changed since validation" |
+| Coordinates reinterpreted float32 → int32 kept the digest; a length key 30 → 2 passed acceptance (bucketing read 2 frames) | `contract.RECORD_DTYPES` enforced by `load_record` (every consumer); `content_digest` now hashes each field's dtype and shape and the stored length key | int32: refused at load ("stored dtypes {'coords': 'torch.int32'}"), validate + acceptance fail; length: validate "length 2 / n_frames 30 / T 30" + digest, acceptance digest mismatch |
+| `browser_fixtures.verify` did not compare `subsample` | compared with the other fields | final-frame indices in `long_clip`'s subsample: "['subsample'] not reproducible" |
+| Spec said "the segment's median shoulder width"; the code uses every pose frame of the whole clip before trimming | `preprocess.json` wording | — |
+
+The acceptance suite re-run under policy 4: every earlier refusal unchanged (checked on full messages).
+None of these showed the existing data wrong; the digests change, so every release is built and
+validated anew anyway.
+
 ### Order of work (agreed 2026-11-14)
 
 1. All four full-data audit reports reviewed, every finding resolved (CPU only; times provisional
@@ -435,7 +453,7 @@ up there first.
    both ways and compare the resulting geometry (shoulder drop / width, hand size relative to the
    shoulders, joint-angle features) and a frozen checkpoint's predictions on each; change the
    builders only if the browser-style preparation lands outside what training covers.
-3. Build every release, validate under policy 2 (`--raw-root`).
+3. Build every release, validate under the current policy (4; `--raw-root`).
 4. Freeze the code revision and the shared dependencies (init checkpoint, vocabulary, validation
    phrases, releases) in the reference spec.
 5. Only then the GPU runs (re-score, then phrases05 / phrases07 under one `--frozen-spec`) — even

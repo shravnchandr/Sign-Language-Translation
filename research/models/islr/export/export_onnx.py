@@ -123,8 +123,9 @@ def preprocess_spec(max_frames: int) -> dict:
                                  "boxes (normalised x, y) >= copy_iou AND NOT (left-slot wrist nearer pose 15 "
                                  "than pose 16 by more than wrist_margin AND right-slot wrist nearer pose 16 than "
                                  "pose 15 by more than wrist_margin). Distances: (dx * W / H, dy) Euclidean, "
-                                 "divided by the segment's median shoulder width |pose 11 - pose 12| measured "
-                                 "the same way. For a copy, D_left = mean of the two slot wrists' distances to "
+                                 "divided by the median shoulder width |pose 11 - pose 12| (measured the same "
+                                 "way) over every frame of the whole clip that has a pose — before the "
+                                 "segment trim, so frames without a hand count too. For a copy, D_left = mean of the two slot wrists' distances to "
                                  "pose 15, D_right = the same to pose 16; keep the left slot iff D_left < D_right "
                                  "(else the right), mark the other slot not detected; assignment_uncertain unless "
                                  "min(D) / max(D) < assign_ratio. Otherwise keep both. Single hands are never moved.",

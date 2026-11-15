@@ -5,17 +5,19 @@
 
 Exits non-zero when any hard check fails; writes validation_report.json into --data-dir. Training
 (`islr.phrases.train`) refuses a dataset without a passing report whose digests match the data it
-opens, and one validated without --raw-root.
+opens (LMDB content, train.csv, sign map), and one validated without --raw-root.
 Hard checks:
   - build_manifest.json present, built with this contract and cache version; build errors within
     the allowance recorded at build time; dataset type = the train.csv schema; content digest
-    recomputed from the LMDB = the manifest's; train.csv digest = the manifest's (annotations)
+    recomputed from the LMDB = the manifest's (every stored field with its dtype and shape, and the
+    length key); train.csv digest = the manifest's (annotations); sign map digest = the manifest's
+  - sign map: distinct names onto exactly the integers 0..N-1 (no shared or missing class index)
   - coverage: selected = listed + missing (missing within the build's allowance; the selection
     recorded by the extraction or re-run by scripts/extraction_inventory.py), listed = filtered +
     build errors + excluded duplicates + written, written = train.csv rows
   - preparation parameters recorded: prep_aspect per clip (ASL Signs: the manifest's fixed 0.75)
   - every train.csv path has a data + length key; stored length = clip length = n_frames
-  - every clip: the current record layout (contract.RECORD_KEYS); finite, (T > 0, COORD_FEAT);
+  - every clip: the current record layout (contract.RECORD_KEYS, contract.RECORD_DTYPES); finite, (T > 0, COORD_FEAT);
     presence binary and = status KEPT; status codes valid; assignment_uncertain binary (T,) and set
     only in copy frames (one slot KEPT, the other GHOST); a hand never present has an all-zero block
   - labels in the sign map; participant ids resolved (no NaN / -1)
@@ -49,7 +51,25 @@ from .build_wlasl_lmdb import _process, signer_split
 
 # Bump whenever a check is added or tightened: reports written under an older policy no longer
 # admit a dataset (it must be validated again), so a release cannot pass on yesterday's checks.
-VALIDATION_POLICY = 3  # 1: 33b6971 (no coverage / prep_aspect checks); 2: e765dd4+ (coverage, prep_aspect, no-hand report); 3: contract v4 (copy rule, assignment_uncertain)
+VALIDATION_POLICY = 4  # 1: 33b6971 (no coverage / prep_aspect checks); 2: e765dd4+ (coverage, prep_aspect, no-hand report); 3: contract v4 (copy rule, assignment_uncertain); 4: sign map = bijection onto 0..N-1 + fingerprinted, stored dtypes, digest over dtype / shape / length key
+
+
+def sign_map_problems(path: Path) -> list[str]:
+    """The label map must be a bijection from distinct sign names onto the integers 0..N-1."""
+    pairs = json.loads(path.read_text(), object_pairs_hook=lambda kv: kv)
+    if not isinstance(pairs, list):
+        return ["not a JSON object"]
+    names, idx = [k for k, _ in pairs], [v for _, v in pairs]
+    out = []
+    if len(set(names)) != len(names):
+        out.append(f"repeated sign names {sorted({n for n in names if names.count(n) > 1})[:5]}")
+    if not all(type(v) is int for v in idx):
+        out.append(f"non-integer indices, e.g. {next(v for v in idx if type(v) is not int)!r}")
+    elif sorted(idx) != list(range(len(idx))):
+        dup = sorted({v for v in idx if idx.count(v) > 1})
+        out.append(f"indices not exactly 0..{len(idx) - 1} (repeated {dup[:5]}, "
+                   f"missing {sorted(set(range(len(idx))) - set(idx))[:5]})")
+    return out
 
 
 def require_accepted(data_dir, lmdb_path) -> dict:
@@ -65,6 +85,7 @@ def require_accepted(data_dir, lmdb_path) -> dict:
     rep = json.loads(rep_path.read_text())
     csv_path = Path(data_dir) / "train.csv"
     csv_digest = hashlib.sha256(csv_path.read_bytes()).hexdigest()[:16]
+    map_digest = hashlib.sha256((Path(data_dir) / "sign_to_prediction_index_map.json").read_bytes()).hexdigest()[:16]
     problems = [m for ok, m in [
         (rep.get("policy") == VALIDATION_POLICY,
          f"validated under policy {rep.get('policy')}, current is {VALIDATION_POLICY} — run validate again"),
@@ -74,16 +95,21 @@ def require_accepted(data_dir, lmdb_path) -> dict:
          f"validated under contract {rep.get('contract')} / cache {rep.get('cache_version')}"),
         (rep.get("lmdb") == Path(lmdb_path).name, f"report is for {rep.get('lmdb')}, run reads {Path(lmdb_path).name}"),
         (rep.get("csv_digest") == csv_digest, f"train.csv changed since validation ({csv_digest} ≠ {rep.get('csv_digest')})"),
+        (rep.get("sign_map_digest") == map_digest,
+         f"sign map changed since validation ({map_digest} ≠ {rep.get('sign_map_digest')})"),
     ] if not ok]
     if not problems:
-        content = K.content_digest(_open_lmdb_env(str(Path(lmdb_path).resolve())), pd.read_csv(csv_path)["path"].tolist())
+        try:
+            content = K.content_digest(_open_lmdb_env(str(Path(lmdb_path).resolve())), pd.read_csv(csv_path)["path"].tolist())
+        except ValueError as e:  # a record that no longer loads (layout, dtype) or a missing length key
+            content = f"unreadable ({e})"
         if content != rep.get("content_digest"):
             problems.append(f"LMDB content {content} ≠ validated {rep.get('content_digest')}")
     if problems:
         raise SystemExit(f"{data_dir}: not an accepted dataset — " + "; ".join(problems))
     print(f"Validated dataset {data_dir}: content {rep['content_digest']}, train.csv {csv_digest}, "
           f"{rep.get('clips')} clips ({rep.get('raw_resampled')} re-prepared from raw)")
-    return {"content": rep["content_digest"], "csv": csv_digest, "lmdb": Path(lmdb_path).name}
+    return {"content": rep["content_digest"], "csv": csv_digest, "sign_map": map_digest, "lmdb": Path(lmdb_path).name}
 
 
 def main() -> None:
@@ -125,7 +151,12 @@ def main() -> None:
     check(csv_digest == man.get("csv_digest"),
           f"train.csv digest {csv_digest} = manifest {man.get('csv_digest')} (labels / signers / splits unchanged since the build)")
     df = pd.read_csv(a.data_dir / "train.csv")
-    sign_map = json.loads((a.data_dir / "sign_to_prediction_index_map.json").read_text())
+    map_path = a.data_dir / "sign_to_prediction_index_map.json"
+    map_digest = hashlib.sha256(map_path.read_bytes()).hexdigest()[:16]
+    check(map_digest == man.get("sign_map_digest"), f"sign map digest {map_digest} = manifest {man.get('sign_map_digest')}")
+    bad_map = sign_map_problems(map_path)
+    check(not bad_map, f"sign map is a bijection onto 0..N-1 ({'; '.join(bad_map) or 'ok'})")
+    sign_map = json.loads(map_path.read_text())
     check(df["sign"].isin(sign_map).all(), f"labels in the sign map ({int((~df['sign'].isin(sign_map)).sum())} not)")
     pid = pd.to_numeric(df["participant_id"], errors="coerce")
     check(bool(pid.notna().all() and (pid >= 0).all()), f"participant ids resolved ({int((pid.isna() | (pid < 0)).sum())} not)")
@@ -242,7 +273,7 @@ def main() -> None:
     env.close()
 
     report.update({"policy": VALIDATION_POLICY, "failures": fails, "passed": not fails, "lmdb": a.lmdb_path.name, "content_digest": digest,
-                   "csv_digest": csv_digest, "contract": K.CONTRACT_VERSION, "cache_version": CACHE_VERSION,
+                   "csv_digest": csv_digest, "sign_map_digest": map_digest, "contract": K.CONTRACT_VERSION, "cache_version": CACHE_VERSION,
                    "raw_resampled": report.get("raw_resampled", 0), "code": code_revision()})
     (a.data_dir / "validation_report.json").write_text(json.dumps(report, indent=1, default=str))
     if fails:

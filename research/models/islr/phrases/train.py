@@ -244,7 +244,7 @@ def _annotations(sources) -> str:
 def _manifest(data_dir: str) -> dict | None:
     man = Path(data_dir) / "build_manifest.json"
     m = json.loads(man.read_text()) if man.exists() else None
-    return {k: m.get(k) for k in ("version", "dataset", "content_digest", "csv_digest", "contract", "cache_version", "code")} if m else None
+    return {k: m.get(k) for k in ("version", "dataset", "content_digest", "csv_digest", "sign_map_digest", "contract", "cache_version", "code")} if m else None
 
 
 # Recipe arguments two compared runs may differ in (the extra training data is the comparison;

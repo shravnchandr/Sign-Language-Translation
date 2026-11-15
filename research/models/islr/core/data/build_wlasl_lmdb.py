@@ -293,6 +293,7 @@ def finish_build(lmdb_path: Path, paths: list[str], errors: list, allow_errors: 
     import hashlib
 
     csv_digest = hashlib.sha256((lmdb_path.parent / "train.csv").read_bytes()).hexdigest()[:16]
+    map_digest = hashlib.sha256((lmdb_path.parent / "sign_to_prediction_index_map.json").read_bytes()).hexdigest()[:16]
     excl = lmdb_path.parent / "excluded_clips.csv"
     n_excl = len(pd.read_csv(excl)) if excl.exists() else 0
     if attempted is not None:
@@ -304,7 +305,7 @@ def finish_build(lmdb_path: Path, paths: list[str], errors: list, allow_errors: 
             raise SystemExit(f"coverage does not add up: {cov}")
     manifest = {**manifest, "dataset": dataset, "aspect_correction": aspect_correction,
                 "allow_errors": allow_errors, "content_digest": digest, "csv_digest": csv_digest,
-                "clips_written": len(paths), "errors": len(errors), "error_examples": errors[:20],
+                "sign_map_digest": map_digest, "clips_written": len(paths), "errors": len(errors), "error_examples": errors[:20],
                 "lmdb": lmdb_path.name, "contract": CONTRACT_VERSION, "cache_version": CACHE_VERSION,
                 "contract_counts": contract_summary({p_: stats[p_] for p_ in paths}) if stats else None,
                 "code": code_revision()}

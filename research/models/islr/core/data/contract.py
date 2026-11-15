@@ -187,6 +187,8 @@ def prepare(df: pd.DataFrame, aspect: float = 0.75) -> dict:
 
 
 RECORD_KEYS = ("coords", "presence", "status", "assignment_uncertain")  # every stored field, in digest order
+RECORD_DTYPES = {"coords": torch.float32, "presence": torch.uint8, "status": torch.int8,
+                 "assignment_uncertain": torch.uint8}
 
 
 def dump_clip(clip: dict) -> bytes:
@@ -204,22 +206,29 @@ def load_record(value: bytes) -> dict:
     d = torch.load(io.BytesIO(bytes(value)), weights_only=True)
     if not isinstance(d, dict) or set(d) != set(RECORD_KEYS):
         raise ValueError("legacy LMDB value (not the current record layout): rebuild the LMDB with the current builders")
+    wrong = {k: str(d[k].dtype) for k in RECORD_KEYS if d[k].dtype != RECORD_DTYPES[k]}
+    if wrong:  # same bytes under another dtype would load as different values
+        raise ValueError(f"stored dtypes {wrong} ≠ {({k: str(RECORD_DTYPES[k]) for k in wrong})}")
     return d
 
 
 def content_digest(env, paths) -> str:
-    """sha256 over (path, RECORD_KEYS) of every clip, in path order — what the clips
-    contain, independent of the LMDB file layout. env: an open lmdb environment."""
+    """sha256 over (path, stored length key, RECORD_KEYS with dtype and shape) of every clip, in
+    path order — what the clips contain and what loaders read about them, independent of the LMDB
+    file layout. env: an open lmdb environment."""
     import hashlib
 
-    from ._cache_keys import lmdb_key
+    from ._cache_keys import lmdb_key, lmdb_length_key
 
     h = hashlib.sha256()
     with env.begin(buffers=True) as txn:
         for path in sorted(paths):
-            d = load_record(txn.get(lmdb_key(path)))
-            h.update(path.encode())
+            d, n = load_record(txn.get(lmdb_key(path))), txn.get(lmdb_length_key(path))
+            if n is None:
+                raise ValueError(f"no length key for {path}")
+            h.update(path.encode() + b"\0" + bytes(n) + b"\0")
             for k in RECORD_KEYS:
+                h.update(f"{k}:{d[k].dtype}:{tuple(d[k].shape)}\0".encode())
                 h.update(d[k].numpy().tobytes())
     return h.hexdigest()[:16]
 
