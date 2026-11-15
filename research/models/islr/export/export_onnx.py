@@ -118,7 +118,8 @@ def preprocess_spec(max_frames: int) -> dict:
         "frame_rate": "one feature frame per camera frame at the rate the training video was recorded "
                       "(ASL Signs / PopSign phone video, ASL Citizen webcam ≈ 30 fps, WLASL mostly 24–30, most often 29.97); a much "
                       "lower processing rate shortens every sign in frames — resample to ≈ 30 fps (training data recorded "
-                      "faster kept every round(fps / 30)-th frame: PopSign 120 fps → every 4th)",
+                      "faster kept every round(fps / 30)-th frame: PopSign's 120 fps files are 30 fps frames each repeated "
+                      "4× — every 4th kept)",
         "hand_slots": "left_hand = the signer's own left hand (nearest pose 15), "
                       "right_hand = nearest pose 16 — not a handedness label",
         "copied_hands": {"rule": "per frame with both hand slots detected. Copy iff IoU of the two hands' 2D "

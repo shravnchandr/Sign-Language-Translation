@@ -469,6 +469,59 @@ below). Three findings:
    give, so not simply a different crop; unverified without the videos), inside ASL Signs' p1–p99
    (0.27–0.50). Recorded (width / height, prep_aspect per clip); no change.
 
+**PopSign frame timing (`islr-timing-popsign`, cbce89a; full probe `fps-popsign`).** Every one of
+the 26,278 videos probed: 6,476 at 120 fps (24.6 %), 22 at 60, the rest 29–31; the extracted landmark
+frame count equals the header frame count for every clip. Decoded (30 videos per class; per-frame
+timestamps in `video_timing_frames.csv`, 0 failures): timestamps are regular (120: 8.333 ms, 60: 16.667,
+30: 33.4; ffprobe packet times identical) and spans alike (≈ 2.0–2.3 s), but **75 % of consecutive
+frames at 120 fps and 54 % at 60 fps are near duplicates** (30 fps: 1.5 %). The duplicates come in runs
+of 4 (120) / 2 (60) in every sampled video, and the number of distinct frames (median 61.5) equals a
+30 fps clip's (62): these are ~30 fps recordings stored in a 120 / 60 fps container, each frame repeated.
+Decimation (step 4 / 2) takes ≈ 98 % of the distinct frames exactly once (29 / 30 videos in phase;
+10 runs missed and 43 taken twice of 1,890 — the 30 fps class shows the same rate of "twice", from held
+poses merging runs), so the kept frames are the real 30 fps images, not a resampling of 120 fps motion.
+Until now, about a quarter of PopSign clips were 4× slow in frames.
+
+**ASL Signs copy-rule transfer (statistical; `islr-evidence-aslsigns`, `copy_evidence`).** ASL Signs has
+no videos, so the 1,856 v4 copy decisions (544 clips, median 2 per clip; 1,940 two-slot frames in those
+clips) were compared with the visually labelled frames of IoU ≥ 0.1. Slot landmark distance / hand size,
+median (p10–p90): ASL Signs decisions 0.24 (0.04–0.78); labelled copies WLASL 0.12 (0.00–0.58), PopSign
+0.41 (0.05–1.16); labelled real pairs WLASL 0.96 (0.30–1.58). Share below 0.3: decisions 59 %, labelled
+copies 50 %, labelled real pairs 10.5 %. IoU median: decisions 0.69, copies 0.73, real pairs 0.26.
+Consistent with the decisions being copies (a mixture of the labelled distributions does not fit
+anything but nearly all copies); not a proof. The rule fires in 17 % of ASL Signs' 10,974 two-slot
+frames but 0.05 % of all frames. (An earlier sample, 0 ghosts in 27 two-hand frames of 257 clips, was
+too small to show this rate.)
+
+**v4 statistics per dataset** (raw audits at d19ba7c vs v3 at dd3d977, per clip; frame-level v3
+decisions are not stored, so "frames changed" is the per-clip count difference, a lower bound).
+
+| | WLASL | ASL Citizen | PopSign | ASL Signs |
+|---|---|---|---|---|
+| clips / kept frames | 11,980 / 821,099 | 8,557 / 684,002 | 26,278 / 3.03 M | 94,477 / 3.58 M |
+| two-slot frames | 305,138 | 98,856 | 36,050 | 10,974 |
+| v4 copy frames (share of two-slot) | 20,275 (6.6 %) | 7,031 (7.1 %) | 24,312 (67 %) | 1,856 (17 %) |
+| clips with copies, v3 → v4 | 2,242 → 2,346 | 1,232 → 1,298 | 3,472 → 3,787 | 439 → 544 |
+| assignment_uncertain: frames (of copies / of all frames) | 6,161 (30 % / 0.75 %) | 1,890 (27 % / 0.28 %) | 4,304 (18 % / 0.14 %) | 464 (25 % / 0.013 %) |
+| clips with uncertain frames | 1,191 | 591 | 1,280 | 180 |
+| clips whose copy count changed (v3 only / v4 only) | 1,680 (224 / 328) | 680 (87 / 153) | 1,137 (40 / 355) | 187 (8 / 113) |
+| frames changed, lower bound | 6,628 | 1,738 | 2,101 | 265 |
+
+PopSign's v4 audit ran at frame step 1 (it predates step 0), so its frame counts are pre-decimation.
+
+**Releases (contract v4, built at 8ba0b35 with no local changes, re-validated under policy 7 at 0b4a608
+by copying the release unchanged — content digests identical).**
+
+| Release (Kaggle notebook) | clips | coverage | notes |
+|---|---|---|---|
+| ASL Signs (`accepted-aslsigns`) | 94,477 | 94,477 listed = written | 1,856 copy frames in 544 clips |
+| WLASL 206 (`accepted-wlasl`) | 1,605 | 11,980 selected = 10,309 filtered (outside the 206) + 66 duplicates + 1,605 | = the old release minus exactly the 66 duplicates |
+| WLASL all glosses (`accepted-wlasl-all`) | 10,162 | 11,980 = 1,818 duplicates (1,753 same content under different labels, 65 repeats) + 10,162 | the old release kept the 1,753; labels with clips 1,973 → 1,960 |
+| ASL Citizen (`accepted-aslcitizen`, research only) | 8,557 | complete | |
+| PopSign (`accepted-popsign`) | 26,021 | 26,278 = 257 ASL Signs matches excluded + 26,021 | frame steps 1: 19,582, 4: 6,417, 2: 22 |
+
+Each: 200 clips re-prepared from raw = stored; canonical label map (WLASL all: canonical 250 + extras).
+
 ### Review of ce3c929 (three more, fixed)
 
 | Finding | Fix | Reproduction now |
