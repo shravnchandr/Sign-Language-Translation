@@ -603,9 +603,10 @@ phrases06's ASL Citizen score is in-domain (trained on other ASL Citizen signers
 | phrases06 (research only) | pending | | | |
 
 Paired against the re-scored legacy checkpoints (same clips): phrases05 legacy → frozen WLASL 82.7 →
-82.5 % (+28 / −29, p = 1), ASL Citizen 71.4 → 70.4 % (+149 / −183, p = 0.07). Retraining on the accepted
-data reproduces the legacy phrases05 within noise, so the frozen phrases05 is a valid baseline for the
-comparison. (legacy phrases07 → frozen phrases05: ASL Citizen 73.5 → 70.4 %, +116 / −220, p = 1.5e-8;
+82.5 % (+28 / −29, p = 1), ASL Citizen 71.4 → 70.4 % (+149 / −183, p = 0.07). Broadly similar, with no
+statistically detectable difference — not shown equivalent (the ASL Citizen point estimate is 1.0 point
+lower). The frozen phrases05 is a valid baseline because its configuration and evaluation protocol pass
+the freeze checks, not because of this agreement. (legacy phrases07 → frozen phrases05: ASL Citizen 73.5 → 70.4 %, +116 / −220, p = 1.5e-8;
 this compares models, not data, and is not the planned test, which is frozen 05 vs frozen 07.)
 
 **Browser / export review (2026-11-15; ASL-App issues are the app owner's to fix, this repo supplies the
