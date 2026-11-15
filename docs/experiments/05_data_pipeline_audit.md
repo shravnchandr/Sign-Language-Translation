@@ -592,6 +592,22 @@ Paired, phrases05 → phrases07: WLASL 82.7 → 84.3 % (+35 / −22, McNemar p =
 73.5 % (+197 / −127, p = 1.2e-4) — the same direction as the legacy measurement (70.9 → 73.4 %).
 phrases06's ASL Citizen score is in-domain (trained on other ASL Citizen signers recorded the same way; the official splits are signer-disjoint), so it is not comparable with the others there.
 
+**Frozen comparison (`islr-frozen-<run>` at 2de95c1, Kaggle T4, `--frozen-spec` = the reference spec,
+`--allow-diff spec_only`).** Each run's own `experiment_spec.json` is checked with
+`check_freeze --commit 2de95c1 --profile <run>`.
+
+| run | check_freeze | best val WER | WLASL test exact / top-5 | ASL Citizen test exact / top-5 |
+|---|---|---|---|---|
+| phrases05 (retrained on the accepted releases) | 15 / 15 | 0.2826 (epoch 27 / 30) | 82.5 / 95.4 % | 70.4 / 88.6 % |
+| phrases07 | pending | | | |
+| phrases06 (research only) | pending | | | |
+
+Paired against the re-scored legacy checkpoints (same clips): phrases05 legacy → frozen WLASL 82.7 →
+82.5 % (+28 / −29, p = 1), ASL Citizen 71.4 → 70.4 % (+149 / −183, p = 0.07). Retraining on the accepted
+data reproduces the legacy phrases05 within noise, so the frozen phrases05 is a valid baseline for the
+comparison. (legacy phrases07 → frozen phrases05: ASL Citizen 73.5 → 70.4 %, +116 / −220, p = 1.5e-8;
+this compares models, not data, and is not the planned test, which is frozen 05 vs frozen 07.)
+
 **Browser / export review (2026-11-15; ASL-App issues are the app owner's to fix, this repo supplies the
 reference).**
 
