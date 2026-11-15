@@ -10,6 +10,7 @@ a skeleton on no hand at all).
 |---|---|
 | `wlasl_{calibration,holdout}_claude.csv` | `islr-label-wlasl3` (seed 0, 12 per band per set) |
 | `popsign_{calibration,holdout}_claude.csv` | `islr-label-popsign2` (PopSign shards 0–9) |
+| `round2_{wlasl,popsign}_{calibration,holdout}_claude.csv` | `islr-round2b-wlasl`, `islr-round2b-popsign` (seed 1, 18 per wrist stratum per set, seen recordings excluded; + `side` of a copy: the shoulder the arm attaches to — image-left shoulder = `right`, the pose model's frame) |
 | `lowiou_*` | `islr-lowiou-wlasl`, `islr-lowiou-popsign` (IoU < 0.1 / < 0.2, distance < 0.3) |
 
 Committed before the calibration analysis. An independent labelling of the same tiles is welcome:
