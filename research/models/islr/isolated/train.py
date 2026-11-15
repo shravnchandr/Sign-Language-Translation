@@ -14,6 +14,7 @@ from torch.amp.autocast_mode import autocast
 from torch.amp.grad_scaler import GradScaler
 from tqdm import tqdm
 from ..core.data.dataset import clean_subset_loader, get_data_loaders
+from ..core.data.vocab import load_base
 from ..core.data.augmentation import AdvancedAugmentation, mixup_batch
 from ..core.model.landmark_conformer import HandDominanceModule, LandmarkConformer
 from ..core.model.graph_conformer import GraphConformer
@@ -643,8 +644,7 @@ def main():
     sign_map_file = os.path.join(args.data_dir, "sign_to_prediction_index_map.json")
     if not os.path.exists(sign_map_file):
         raise FileNotFoundError(f"Sign map not found: {sign_map_file}")
-    with open(sign_map_file) as f:
-        NUM_CLASSES = len(json.load(f))
+    NUM_CLASSES = len(load_base(sign_map_file))
 
     print("Building data loaders...")
     train_loader, test_loader, n_signers = get_data_loaders(

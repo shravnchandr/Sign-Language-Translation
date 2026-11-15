@@ -8,7 +8,9 @@ these 250 assignments and numbers its extra classes from 250 on.
 
   base_problems(m)      exact agreement with the canonical map
   extended_problems(m)  the canonical 250 first, extra classes 250..N-1
-  load_base(path)       a builder's --sign-map, checked before any gloss is remapped (exits otherwise)
+  load_base(path)       a builder's --sign-map (checked before any gloss is remapped) or any reader of the
+                        base vocabulary: training, evaluation, export, review tools (exits otherwise)
+  load_map(path, extended=True)  a reader that may also take a permitted extension (cross_dataset)
 """
 
 import hashlib
@@ -71,8 +73,13 @@ def check_map(path: Path, extended: bool = False) -> list[str]:
     return map_problems(path) or (extended_problems if extended else base_problems)(json.loads(Path(path).read_text()))
 
 
-def load_base(path: Path) -> dict:
-    problems = check_map(path)
+def load_map(path: Path, extended: bool = False) -> dict:
+    problems = check_map(path, extended)
     if problems:
-        raise SystemExit(f"{path}: not the canonical ASL Signs label map ({CANONICAL_PATH.name}): " + "; ".join(problems))
+        raise SystemExit(f"{path}: not the canonical ASL Signs label map ({CANONICAL_PATH.name})"
+                         + (" or an extension of it" if extended else "") + ": " + "; ".join(problems))
     return json.loads(Path(path).read_text())
+
+
+def load_base(path: Path) -> dict:
+    return load_map(path)

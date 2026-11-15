@@ -29,6 +29,7 @@ import torch
 
 from ..core import config as C
 from ..core.data import contract as K
+from ..core.data.vocab import load_base
 from ..core.data.audit_raw import shard_clips
 from ..core.data.build_wlasl_lmdb import _SIGNER_OFFSET, aspect_factor, signer_split
 from .cross_dataset import mcnemar
@@ -115,7 +116,7 @@ def main() -> None:
     a = p.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
 
-    sign2idx = json.loads((a.sign_map or a.asl_signs_root / "sign_to_prediction_index_map.json").read_text())
+    sign2idx = load_base(a.sign_map or a.asl_signs_root / "sign_to_prediction_index_map.json")
     idx2sign = {v: k for k, v in sign2idx.items()}
     df = shard_clips(a.input_root, a.keyword)
     if a.keyword == "wlasl":

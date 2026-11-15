@@ -10,6 +10,7 @@ from pathlib import Path
 from torch.utils.data import DataLoader, Dataset, Sampler
 from typing import Dict, List, Optional, Tuple
 from sklearn.model_selection import GroupKFold, GroupShuffleSplit, train_test_split
+from .vocab import load_base
 from .augmentation import augment_sample, bone_scale, hand_dropout
 from .contract import dump_clip, load_clip, model_input, prepare, subsample_index
 from ..config import COORDS_PER_LM, LH_START, N_LH, RH_START
@@ -412,8 +413,7 @@ def get_data_loaders(
     sign_map_file = Path(data_dir) / "sign_to_prediction_index_map.json"
     train_csv = Path(data_dir) / "train.csv"
 
-    with open(sign_map_file) as f:
-        sign2idx = json.load(f)
+    sign2idx = load_base(sign_map_file)
 
     df = pd.read_csv(train_csv)
     df["sign"] = df["sign"].map(sign2idx)

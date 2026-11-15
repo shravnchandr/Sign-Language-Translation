@@ -1,4 +1,3 @@
-import json
 import os
 from typing import List, Tuple
 
@@ -15,13 +14,7 @@ except NameError:
 
 BASE_PATH = os.environ.get("KAGGLE_INPUT_DIR", _LOCAL_BASE)
 TRAIN_FILE = os.path.join(BASE_PATH, "train.csv")
-SIGN_INDEX_FILE = os.path.join(BASE_PATH, "sign_to_prediction_index_map.json")
-
-if os.path.exists(SIGN_INDEX_FILE):
-    with open(SIGN_INDEX_FILE, "r") as json_file:
-        SIGN2INDEX_JSON = json.load(json_file)
-else:
-    SIGN2INDEX_JSON = {}
+# the label map is read only through core/data/vocab.py (canonical, checked)
 
 INCLUDE_FACE = True
 INCLUDE_DEPTH = True

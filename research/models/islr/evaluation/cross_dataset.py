@@ -37,6 +37,7 @@ import torch
 from ..core import config as C
 from ..core.data._cache_keys import lmdb_key
 from ..core.data.build_wlasl_lmdb import signer_split
+from ..core.data.vocab import load_map
 from ..core.data.dataset import _open_lmdb_env
 from ..core.data.validate import require_accepted
 from ..isolated.error_review import load_model
@@ -85,7 +86,7 @@ def main() -> None:
     args = p.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    sign2idx = json.loads((args.sign_map or args.data_dir / "sign_to_prediction_index_map.json").read_text())
+    sign2idx = load_map(args.sign_map or args.data_dir / "sign_to_prediction_index_map.json", extended=True)
     meta_path = args.checkpoint.with_name("phrases_meta.json")
     phrase = meta_path.exists()
     if phrase:

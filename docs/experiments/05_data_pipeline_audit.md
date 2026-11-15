@@ -446,7 +446,11 @@ identical to every local copy; the app's label order matches). Its 250 assignmen
 is exactly canonical **before** any gloss is remapped (`wlasl_gloss_map.json` holds canonical indices, in
 the shared-sign build too); `validate` requires the release map to be exactly canonical, or — WLASL all
 glosses only — the canonical 250 unchanged with extra classes numbered from 250; `phrases.train` the same
-for the data dir and `--vocab`; `export_onnx` exactly canonical. Tests (`check_contract`, 8 cases + a
+for the data dir and `--vocab`; `export_onnx` exactly canonical. Every other reader too (review of 460465e:
+isolated training and `cross_dataset --sign-map` read the JSON directly; a search found four more —
+`get_data_loaders`, `breakdown`, `sign_reliability`, `aspect_compare`, `error_review` — all now through
+`vocab.load_base`, `cross_dataset` through `load_map(extended=True)`; `config.SIGN2INDEX_JSON`, unused,
+removed). Swapped map refused by each; WLASL-all extension accepted by `cross_dataset`. Tests (`check_contract`, 8 cases + a
 release): two base indices swapped (still a bijection) refused by the builder, by `validate` and as an
 extension; valid extras appended accepted; extras as a base vocabulary, extras not from 250 and two signs on
 one class refused; the existing 2,017-label WLASL-all map passes as an extension.

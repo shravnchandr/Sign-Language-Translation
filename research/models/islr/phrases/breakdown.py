@@ -28,6 +28,7 @@ import torch
 
 from ..core.data.contract import model_input, subsample_index
 from ..core.data.dataset import get_data_loaders
+from ..core.data.vocab import load_base
 from .dataset import phrase_datasets
 from ..isolated.error_review import load_model
 from ..export.export_onnx import load_ctc_model
@@ -100,7 +101,7 @@ def main() -> None:
     args = p.parse_args()
 
     meta = json.loads((args.meta or args.checkpoint.with_name("phrases_meta.json")).read_text())
-    sign2idx = json.load(open(Path(args.data_dir) / "sign_to_prediction_index_map.json"))
+    sign2idx = load_base(Path(args.data_dir) / "sign_to_prediction_index_map.json")
     idx2sign = {v: k for k, v in sign2idx.items()}
     blank = len(sign2idx)
 

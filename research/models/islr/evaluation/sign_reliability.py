@@ -32,6 +32,7 @@ import torch
 from ..core.data._cache_keys import lmdb_key
 from ..core.data.build_wlasl_lmdb import signer_split
 from ..core.data.contract import clip_input, load_clip
+from ..core.data.vocab import load_base
 from ..core.data.dataset import _open_lmdb_env, signer_fold_split
 from ..core.data.validate import require_accepted
 from ..export.export_onnx import load_ctc_model
@@ -112,7 +113,7 @@ def main() -> None:
 
     torch.set_num_threads(os.cpu_count() or 4)
     meta = json.loads(args.checkpoint.with_name("phrases_meta.json").read_text())
-    sign2idx = json.loads((args.data_dir / "sign_to_prediction_index_map.json").read_text())
+    sign2idx = load_base(args.data_dir / "sign_to_prediction_index_map.json")
     idx2sign = {v: k for k, v in sign2idx.items()}
     model = load_ctc_model(args.checkpoint, meta, len(sign2idx)).eval()
 

@@ -41,6 +41,7 @@ import torch
 
 from ..core.config import COORDS_PER_LM
 from ..core.data.dataset import collate_batch, get_data_loaders
+from ..core.data.vocab import load_base
 from ..core.model.graph_conformer import GraphConformer
 from ..core.model.landmark_conformer import LandmarkConformer
 
@@ -149,7 +150,7 @@ def main():
     args = ap.parse_args()
     rng = random.Random(args.seed)
 
-    sign2idx = json.load(open(Path(args.data_dir) / "sign_to_prediction_index_map.json"))
+    sign2idx = load_base(Path(args.data_dir) / "sign_to_prediction_index_map.json")
     idx2sign = {v: k for k, v in sign2idx.items()}
     train_loader, val_loader, _ = get_data_loaders(
         args.data_dir, lmdb_path=args.lmdb_path, num_workers=0, val_fold=args.val_fold
