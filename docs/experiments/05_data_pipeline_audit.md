@@ -590,7 +590,7 @@ undecimated PopSign), so these are baselines for the frozen comparison, not new 
 
 Paired, phrases05 → phrases07: WLASL 82.7 → 84.3 % (+35 / −22, McNemar p = 0.11); ASL Citizen 71.4 →
 73.5 % (+197 / −127, p = 1.2e-4) — the same direction as the legacy measurement (70.9 → 73.4 %).
-phrases06 scores on ASL Citizen are not comparable (same signers' recording conditions in training).
+phrases06's ASL Citizen score is in-domain (trained on other ASL Citizen signers recorded the same way; the official splits are signer-disjoint), so it is not comparable with the others there.
 
 ### Review of ce3c929 (three more, fixed)
 
