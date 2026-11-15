@@ -508,10 +508,19 @@ spread evenly, → 1 when all motion falls on one phase), k = 2, 4, and its 24-f
    ordinary ≤ 0.5 %, and ≤ 1 % on the held-pose controls.
 3. Only then ASL Signs: first the 59 candidates (ASL side of a 120 fps PopSign match) against the 198
    matches of ordinary PopSign clips (negative controls), then the whole dataset.
-4. Convincing iff (2) holds and the candidates are flagged far more often than the controls; then the
-   affected clips are corrected before training (a frame step for ASL Signs clips, with the phase taken
-   from the motion — a separate, reviewed change). Otherwise the accepted release stays and this is
-   documented as a limitation.
+4. **Convincing** iff (2) holds and, on ASL Signs, the candidates are flagged at ≥ 70 % and the
+   controls at ≤ 2 %, with the difference significant (Fisher exact p < 0.001). Then the affected clips
+   are corrected before training (a frame step for ASL Signs clips, with the phase taken from the
+   motion — a separate, reviewed change). Otherwise the accepted release stays and this is documented
+   as a limitation.
+5. Definitions (review of 9a59d20, committed before the results): the decision uses the **global s_4**
+   only (threshold from step 1); the window median is diagnostic. **Unscorable** clips (s_4 NaN: fewer
+   than 8 motion steps or no motion) are never flagged: they count as misses among repeated ×4 clips
+   and as not flagged among ordinary clips and controls (every denominator includes them), their number
+   is reported per group, and unscorable ASL Signs clips stay unchanged. The 60 fps (×2) clips are
+   reported separately, outside the ×4-vs-ordinary evaluation. The 59 candidates and 198 controls are
+   **proxy labels** (cross-dataset matches, not confirmed recordings): passing (4) supports transfer of
+   the detector to ASL Signs, it does not establish each ASL Signs decision.
 
 **v4 statistics per dataset** (raw audits at d19ba7c vs v3 at dd3d977, per clip; frame-level v3
 decisions are not stored, so "frames changed" is the per-clip count difference, a lower bound).
