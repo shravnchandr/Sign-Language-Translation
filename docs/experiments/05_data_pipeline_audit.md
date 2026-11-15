@@ -340,8 +340,10 @@ are copies); every candidate that treats `stacked` differently raises PopSign re
 lowers WLASL deletion. **B0 stays the copy rule** (no candidate beats it on calibration; holdout is
 evaluated for the record). PopSign `both_own` copies (15 / 16, 4 % of its frames) are B0's known residual.
 
-**Assignment (frozen):** a copy goes to the slot on the side whose pose wrist is nearer the copy's wrist
-(mean of the two slot wrists); confident iff nearer / farther < 0.45 (the largest ratio with ≤ 5 % wrong
+**Assignment (frozen):** with D_left = (|LH wrist − pose 15| + |RH wrist − pose 15|) / 2 and D_right =
+(|LH wrist − pose 16| + |RH wrist − pose 16|) / 2 (the mean of the two slot wrists' *distances*, not the
+distance from their midpoint, which gives PopSign holdout 1 / 24 instead of the evaluated 1 / 19), a copy
+goes to the slot of the smaller D; confident iff min(D) / max(D) < 0.45 (the largest ratio with ≤ 5 % wrong
 confident assignments on PopSign calibration: 1 / 25; WLASL 0 / 15), otherwise the same nearer side is
 used and the frame flagged `assignment_uncertain` (calibration: 47 % of PopSign and 31 % of WLASL copies;
 fallback wrong 7 / 20 and 0 / 4 among side-labelled). This replaces the clip-level "alone more often"
@@ -361,16 +363,23 @@ No candidate beats B0 → **B0 is the v4 copy rule** (criterion 1 fails for ever
 wrong confident assignments 0 / 10 (WLASL) and 1 / 19 (PopSign) = 1 / 29 (3.4 %) of confident assignments
 with a known side → **adopted** under the criterion as written (pooled); PopSign alone is 5.3 % (one
 frame, n = 19 — the criterion did not specify per-dataset, noted rather than reinterpreted).
-Uncertain share: 7 / 24 WLASL and 27 / 53 PopSign copies (fallback wrong 1 / 4 and 2 / 17 among
-side-labelled). Copies with no side label: 10 / 24 and 17 / 53.
+Uncertain share — two denominators, kept apart: among *reference-labelled copies* (including copies
+the rule kept) 7 / 24 WLASL and 27 / 53 PopSign (fallback wrong 1 / 4 and 2 / 17 among side-labelled);
+among the *rule's copy decisions* in the holdout sample 9 / 36 for each dataset (stratified-sample
+counts, not population rates). Copies with no side label: 10 / 24 and 17 / 53.
 
 **v4 (frozen):** per frame with both slots detected — copy iff IoU ≥ 0.1 and not both slots on their own
-side by > 0.1 shoulder widths; a copy is kept in the slot on the nearer pose wrist's side (confident iff
-nearer / farther < 0.45, else flagged `assignment_uncertain`), the other slot rejected; otherwise both kept.
+side by > 0.1 shoulder widths; a copy is kept in the slot of the smaller mean wrist-to-pose-wrist distance D (above; confident iff
+min(D) / max(D) < 0.45, else flagged `assignment_uncertain`), the other slot rejected; otherwise both kept.
 Single hands are never moved; a hand never detected stays absent. Documented residuals: WLASL real hands
 lost where hands stack or cross (holdout 7 / 23 labelled pairs, ~9 % of its IoU ≥ 0.1 frames weighted);
 PopSign copies kept where the copy sits between the wrists (`both_own`, 18 / 18 on holdout, ~4 % of its
-frames). Next: implement in `contract.py` (+ the browser spec and fixtures), version bump, rebuild.
+frames). Implementation checklist: `contract.py` (rule, statuses, `assignment_uncertain` per frame); carried
+through LMDB serialisation (`dump_clip` / `load_record`), the content digest, `validate.py` schema checks
+and the `--raw-root` re-prepare comparison, `browser_fixtures` (written and verified), `check_contract`
+cases (copy / two / boundary: IoU exactly 0.1, margin exactly 0.1, ratio exactly 0.45; ties);
+`CONTRACT_VERSION`, `CACHE_VERSION` and `VALIDATION_POLICY` bumped; the preprocess spec *and* the
+ASL-App preprocessing updated, with Python / browser parity checked on the fixtures; then the rebuild.
 
 **Aspect: same clips, builder vs browser preparation (`islr-aspect-wlasl`, `aspect_compare`, 824
 held-out-signer WLASL clips, 0 errors).** k builder / browser median 1.08 (p10–p90 0.99–1.23).
