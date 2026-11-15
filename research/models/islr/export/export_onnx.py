@@ -115,11 +115,20 @@ def preprocess_spec(max_frames: int) -> dict:
         "aspect": "training video is portrait 3:4 (x is a fraction of the width, y of the height): crop the "
                   "camera to 3:4, or scale x and z by (width / height) / 0.75; check: (shoulder drop below "
                   "the nose) / (shoulder width) ≈ 0.40",
-        "frame_rate": "one feature frame per camera frame at the rate the training video was recorded "
-                      "(ASL Signs / PopSign phone video, ASL Citizen webcam ≈ 30 fps, WLASL mostly 24–30, most often 29.97); a much "
-                      "lower processing rate shortens every sign in frames — resample to ≈ 30 fps (training data recorded "
-                      "faster kept every round(fps / 30)-th frame: PopSign's 120 fps files are 30 fps frames each repeated "
-                      "4× — every 4th kept)",
+        "frame_rate": {"rule": "resample the raw landmark stream onto a 30 fps grid by capture timestamp, "
+                                "before anything else: ticks t_k = t_0 + k * 1000 / 30 ms (t_k <= last "
+                                "timestamp). Mode chosen once per stream from the median capture interval: "
+                                "capture >= nearest_min * 30 fps → each tick takes the nearest frame (ties → the "
+                                "earlier); slower → linear interpolation between the frames around the tick (a "
+                                "part detected in both is interpolated, otherwise the nearer frame's part or its "
+                                "absence is taken). A tick within snap_ms of a frame takes that frame. Frame "
+                                "counts and velocities then do not depend on the device's processing rate.",
+                       "fps": 30, "nearest_min": 0.95, "snap_ms": 0.5,
+                       "reference": "islr/export/browser_fixtures.py resample_plan / apply_plan; test vectors: "
+                                    "check_contract --write-fixtures → timing_vectors.json",
+                       "training_data": "recorded ~30 fps (ASL Signs / PopSign phone video, ASL Citizen webcam; "
+                                        "WLASL mostly 24–30, most often 29.97); PopSign's 120 / 60 fps files are 30 fps "
+                                        "frames repeated 4× / 2×, every 4th / 2nd kept"},
         "hand_slots": "left_hand = the signer's own left hand (nearest pose 15), "
                       "right_hand = nearest pose 16 — not a handedness label",
         "copied_hands": {"rule": "per frame with both hand slots detected. Copy iff IoU of the two hands' 2D "
@@ -139,7 +148,8 @@ def preprocess_spec(max_frames: int) -> dict:
         "missing_hand": "presence 0; coordinates hold the nearest detection "
                         "(previous one, or the next for leading frames); 0 if never detected",
         "missing_face": "hold the previous frame (next for leading frames); 0 if never seen",
-        "segment": "first..last frame with a hand present",
+        "segment": "first..last frame with a hand present — after hold-fill over the whole clip (fill, then "
+                   "trim: a face seen only before the hand span is carried into it; fixture face_lost_in_span)",
         "subsample": "more than max_frames frames: keep positions (i * (T - 1)) // (max_frames - 1), i < max_frames",
         "delta1": "frame t minus frame t-1 of the position block, after the subsample; 0 at t = 0",
         "max_frames": max_frames,
@@ -191,6 +201,9 @@ def main() -> None:
         with torch.no_grad():
             ref = wrapped(x).numpy()
         out = sess.run(None, {"features": x.numpy()})[0]
+        if not (np.isfinite(ref).all() and np.isfinite(out).all()):  # max(0, nan) would hide it below
+            raise SystemExit(f"non-finite logits on verification input {n} (PyTorch finite: "
+                             f"{bool(np.isfinite(ref).all())}, ONNX finite: {bool(np.isfinite(out).all())})")
         worst = max(worst, float(np.abs(out - ref).max()))
         agree += int((out.argmax(-1) == ref.argmax(-1)).all())
         n += 1

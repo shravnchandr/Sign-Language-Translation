@@ -67,6 +67,76 @@ def raw_frames(df: pd.DataFrame) -> list:
     return out
 
 
+LIVE_FPS = contract.TARGET_FPS
+NEAREST_MIN = 0.95  # median capture rate >= 95 % of LIVE_FPS: pick frames; slower: interpolate
+SNAP_MS = 0.5  # a tick this close to a capture timestamp takes that frame exactly (timestamps are rounded)
+
+
+def resample_plan(ts_ms: list, fps: float = LIVE_FPS) -> list:
+    """Live input, before anything else (the browser's counterpart of contract step 0): a 30 fps grid
+    t_k = ts[0] + k * 1000 / fps (t_k <= ts[-1]) over the capture timestamps. Per tick
+    (i0, i1, w): the output frame is (1 - w) · frame i0 + w · frame i1. Mode chosen once per stream from
+    the median capture interval: at >= NEAREST_MIN · fps, the nearest frame (w = 0, i0 = i1; ties → the
+    earlier) — what training's frame step does; slower, linear interpolation between the frames around
+    the tick, except that a tick within SNAP_MS of a frame takes that frame (repeating frames would put zero-velocity steps into the features, which training never
+    sees). Timestamps must be strictly increasing."""
+    t = np.asarray(ts_ms, dtype=np.float64)
+    if len(t) == 0:
+        return []
+    if len(t) > 1 and not (np.diff(t) > 0).all():
+        raise ValueError("capture timestamps must be strictly increasing")
+    step = 1000.0 / fps
+    n = int(np.floor((t[-1] - t[0] + SNAP_MS) / step)) + 1
+    ticks = t[0] + step * np.arange(n)
+    nearest = len(t) < 2 or float(np.median(np.diff(t))) <= step / NEAREST_MIN
+    plan = []
+    for tk in ticks:
+        j = min(int(np.searchsorted(t, tk, side="right")) - 1, len(t) - 1)
+        if j == len(t) - 1 or tk - t[j] <= SNAP_MS:
+            plan.append((j, j, 0.0))
+        elif t[j + 1] - tk <= SNAP_MS:
+            plan.append((j + 1, j + 1, 0.0))
+        elif nearest:
+            k = j if tk - t[j] <= t[j + 1] - tk else j + 1
+            plan.append((k, k, 0.0))
+        else:
+            plan.append((j, j + 1, float((tk - t[j]) / (t[j + 1] - t[j]))))
+    return plan
+
+
+def apply_plan(frames: list, plan: list) -> list:
+    """Resampled raw frames (fixture format: part → (n, 3) list or None). A part detected in both
+    frames is interpolated; otherwise the nearer frame's part (or its absence) is taken as it is."""
+    out = []
+    for i0, i1, w in plan:
+        f = {}
+        for part in _PARTS:
+            a, b = frames[i0][part], frames[i1][part]
+            if w == 0.0 or a is None or b is None:
+                f[part] = a if w < 0.5 else b
+            else:
+                f[part] = ((1 - w) * np.asarray(a, np.float64) + w * np.asarray(b, np.float64)).astype(np.float32).tolist()
+        out.append(f)
+    return out
+
+
+def timing_vectors() -> list:
+    """Reference cases for a port of resample_plan: capture at 15 / 24 / 30 / 60 / 120 fps over 2 s,
+    and 30 fps with ±3 ms jitter."""
+    rng = np.random.default_rng(0)
+    cases = []
+    for name, fps_in, jitter in (("15fps", 15, 0), ("24fps", 24, 0), ("30fps", 30, 0), ("60fps", 60, 0),
+                                 ("120fps", 120, 0), ("30fps_jitter3ms", 30, 3.0)):
+        n = int(2 * fps_in)
+        ts = 1000.0 * np.arange(n) / fps_in + 50.0
+        if jitter:
+            ts[1:-1] += rng.uniform(-jitter, jitter, n - 2)
+        ts = np.round(ts, 3)
+        cases.append({"name": name, "timestamps_ms": ts.tolist(),
+                      "plan": [{"i0": i0, "i1": i1, "w": w} for i0, i1, w in resample_plan(ts.tolist())]})
+    return cases
+
+
 def frames_to_rows(frames: list) -> pd.DataFrame:
     """A fixture's serialized `frames` back to competition-format rows (frame = position)."""
     rows = []

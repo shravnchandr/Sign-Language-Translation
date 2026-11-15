@@ -24,6 +24,8 @@ import pandas as pd
 import torch
 
 from ..config import SELECTED_FACE_INDICES
+
+FACE_START = (21 + 33 + 21) * 3  # stored layout: left hand, pose, right hand, face (config.ALL_COLUMNS)
 from . import contract as K
 from . import vocab as V
 from .build_wlasl_lmdb import write_clips
@@ -41,11 +43,11 @@ def _hand(cx: float, cy: float, size: float = 0.08) -> np.ndarray:
     return pts
 
 
-def clip(T: int, lh=None, rh=None, no_pose=(), copy=(), copy_mid=(), overlap_own=(), seed=0) -> pd.DataFrame:
+def clip(T: int, lh=None, rh=None, no_pose=(), copy=(), copy_mid=(), overlap_own=(), no_face=(), seed=0) -> pd.DataFrame:
     """Competition-format rows. lh / rh: frames where that hand is detected. copy: frames where rh
     copies lh (+ tiny jitter) by the signer's left wrist; copy_mid: the same, both midway between the
     pose wrists (assignment uncertain); overlap_own: two real hands whose boxes overlap, each wrist by
-    its own pose wrist."""
+    its own pose wrist. no_face: frames without a face mesh (pose still detected)."""
     rng = np.random.default_rng(seed)
     rows = []
     for t in range(T):
@@ -56,7 +58,7 @@ def clip(T: int, lh=None, rh=None, no_pose=(), copy=(), copy_mid=(), overlap_own
         pose[11, :2], pose[12, :2] = (0.6, 0.45), (0.4, 0.45)  # shoulders: fixed width (copy rule scale)
         has_pose = t not in no_pose
         parts = {"pose": pose if has_pose else None,
-                 "face": np.column_stack([rng.uniform(0.4, 0.6, 468), rng.uniform(0.2, 0.4, 468), rng.uniform(-0.1, 0.1, 468)]) if has_pose else None,
+                 "face": np.column_stack([rng.uniform(0.4, 0.6, 468), rng.uniform(0.2, 0.4, 468), rng.uniform(-0.1, 0.1, 468)]) if has_pose and t not in no_face else None,
                  "left_hand": _hand(0.62 + drift, 0.6) if lh is not None and t in lh else None,
                  "right_hand": _hand(0.38 - drift, 0.6) if rh is not None and t in rh else None}
         if t in copy and parts["left_hand"] is not None:
@@ -88,6 +90,9 @@ CASES = {
     "copy_uncertain": (40, dict(lh=range(40), rh=[20], copy_mid=[20])),
     "overlap_own_sides": (30, dict(lh=range(30), rh=range(30), overlap_own=range(30))),
     "long_clip": (500, dict(lh=range(30, 480), rh=range(200, 260))),
+    # face seen only before the hand span: hold-fill runs on the whole clip before the segment trim, so
+    # the trimmed features carry the last face seen (frame 4) — never zeros (a port that trims first loses it)
+    "face_lost_in_span": (40, dict(lh=range(10, 40), no_face=range(5, 40))),
 }
 
 
@@ -195,6 +200,42 @@ def frame_step_cases() -> None:
     print("ok  frame step: 120 → 4, 60 / 50 → 2, ≤ 44 → 1; step k = every k-th raw frame, bit-exact; bad steps and an infinity in a discarded frame refused")
 
 
+def timing_cases() -> list:
+    """Live input resampling (browser_fixtures.resample_plan): plans per capture rate, and the review's
+    case — one 2 s constant-speed motion captured at 15 / 30 / 60 / 120 fps must give the same number of
+    feature frames and the same per-frame velocity as 30 fps."""
+    from ...export import browser_fixtures as BF
+
+    vec = BF.timing_vectors()
+    by = {c["name"]: [(d["i0"], d["i1"], d["w"]) for d in c["plan"]] for c in vec}
+    if by["30fps"] != [(k, k, 0.0) for k in range(60)]:
+        fail("timing: 30 fps capture must map frame k to tick k")
+    if by["120fps"] != [(4 * k, 4 * k, 0.0) for k in range(60)] or by["60fps"] != [(2 * k, 2 * k, 0.0) for k in range(60)]:
+        fail("timing: 120 / 60 fps must keep every 4th / 2nd frame")
+    want15 = [(k // 2, k // 2, 0.0) if k % 2 == 0 else (k // 2, k // 2 + 1, 0.5) for k in range(59)]
+    if len(by["15fps"]) != len(want15) or any((a[:2] != b[:2]) or abs(a[2] - b[2]) > 1e-4 for a, b in zip(by["15fps"], want15)):
+        fail(f"timing: 15 fps must alternate frames and midpoints, got {by['15fps'][:4]}")
+    if any(i0 != i1 for i0, i1, _ in by["30fps_jitter3ms"]):
+        fail("timing: jittered 30 fps capture must pick frames, not interpolate")
+    feats = {}
+    for fps_in in (15, 30, 60, 120):
+        n = 2 * fps_in
+        ts = (1000.0 * np.arange(n) / fps_in).tolist()
+        x = 0.4 + 0.1 * np.asarray(ts) / 1000.0  # 0.1 image widths per second
+        frames = [{"pose": None, "face": None, "right_hand": None,
+                   "left_hand": [[float(v), 0.5, 0.0]] * 21} for v in x]
+        out = BF.apply_plan(frames, BF.resample_plan(ts))
+        xs = np.array([f["left_hand"][0][0] for f in out])
+        feats[fps_in] = (len(xs), np.diff(xs))
+    n30, v30 = feats[30]
+    for fps_in, (n, v) in feats.items():
+        if n not in (n30 - 1, n30) or not np.allclose(v[: n30 - 2], v30[: n30 - 2], atol=1e-6):
+            fail(f"timing: {fps_in} fps gives {n} frames / velocity {v[:3]} vs 30 fps {n30} / {v30[:3]}")
+    print(f"ok  live timing: 15 / 30 / 60 / 120 fps → {sorted({n for n, _ in feats.values()})} frames per 2 s, "
+          f"velocity {v30[0]:.5f} per frame at every rate; jittered 30 fps picks frames")
+    return vec
+
+
 def vocab_cases(tmp: Path) -> None:
     """The canonical label map: exact for a base vocabulary; an extension keeps its 250 and adds from 250."""
     c = V.canonical()
@@ -240,6 +281,11 @@ def main() -> None:
         tmp = Path(tmp)
         vocab_cases(tmp)
         frame_step_cases()
+        vec_t = timing_cases()
+        if args.write_fixtures:
+            (args.write_fixtures / "timing_vectors.json").write_text(json.dumps(
+                {"rule": "browser_fixtures.resample_plan / apply_plan (preprocess.json frame_rate)", "fps": 30,
+                 "nearest_min": 0.95, "snap_ms": 0.5, "cases": vec_t}, indent=1))
         (tmp / "train_landmark_files").mkdir()
         rows, raw = [], {}
         for k, (name, (T, kw)) in enumerate(CASES.items()):
@@ -319,6 +365,12 @@ def main() -> None:
                 (args.write_fixtures / f"{name}.json").write_text(json.dumps(fx))
             if float(ref[0, coords.shape[1]: 2 * coords.shape[1]].abs().max()) != 0.0:
                 fail(f"{name}: Δ1 of the first frame must be 0")
+            if name == "face_lost_in_span":
+                fs, n_face = FACE_START, len(SELECTED_FACE_INDICES) * 3
+                held = coords[4, fs: fs + n_face]
+                span = ref[:, fs: fs + n_face]
+                if float(held.abs().max()) == 0.0 or not torch.equal(span, held.expand_as(span)):
+                    fail(f"{name}: the trimmed span must hold the face of frame 4 (fill before trim), not zeros")
             if name == "long_clip" and ref.shape[0] != MAX_FRAMES:
                 fail(f"{name}: {ref.shape[0]} frames after subsample, want {MAX_FRAMES}")
             print(f"ok  {name:20s} T {len(coords):3d} → {ref.shape[0]:3d} | presence frames lh {int(presence[:, 0].sum())} "

@@ -592,6 +592,15 @@ Paired, phrases05 → phrases07: WLASL 82.7 → 84.3 % (+35 / −22, McNemar p =
 73.5 % (+197 / −127, p = 1.2e-4) — the same direction as the legacy measurement (70.9 → 73.4 %).
 phrases06's ASL Citizen score is in-domain (trained on other ASL Citizen signers recorded the same way; the official splits are signer-disjoint), so it is not comparable with the others there.
 
+**Browser / export review (2026-11-15; ASL-App issues are the app owner's to fix, this repo supplies the
+reference).**
+
+| Finding | Here | Reproduction now |
+|---|---|---|
+| Browser feature timing follows the device's processing rate (2 s at 15 / 30 / 60 fps → 30 / 60 / 120 frames, velocities halved / doubled) | `preprocess.json` `frame_rate` is now an exact rule: resample the raw stream onto a 30 fps grid by capture timestamp — nearest frame at ≥ 95 % of 30 fps, linear interpolation below (repeating frames would add zero-velocity steps training never sees), 0.5 ms snap; reference `browser_fixtures.resample_plan` / `apply_plan`, vectors `timing_vectors.json` | constant-speed 2 s motion at 15 / 30 / 60 / 120 fps → 59–60 frames, velocity 0.00333 per frame at every rate; 30 fps → identity; 120 / 60 → every 4th / 2nd; jittered 30 fps picks frames |
+| Browser `buildFeatures(trim=true)` trims before hold-fill: a face seen only before the hand span becomes zeros (Python fills, then trims) | contract case + fixture `face_lost_in_span` (the trimmed span must hold the last face seen); spec `segment` says fill, then trim | trim-then-fill differs in 5,040 feature values (face all 0); the fixture fails a port that trims first |
+| `export_onnx` verification passed NaN logits (`max(0, nan)` = 0) | finite PyTorch and ONNX logits required before the comparison | injected NaN: the old check reported 0 error; the new one exits |
+
 ### Review of ce3c929 (three more, fixed)
 
 | Finding | Fix | Reproduction now |
