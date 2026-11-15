@@ -571,6 +571,27 @@ by copying the release unchanged — content digests identical).**
 
 Each: 200 clips re-prepared from raw = stored; canonical label map (WLASL all: canonical 250 + extras).
 
+**Re-score of the existing checkpoints on the accepted releases (`islr-rescore-product` /
+`islr-rescore-research` at 2de95c1, CPU; single-sign exact decode).** The first scores of these
+checkpoints under contract v4 data (WLASL test half 808 clips / 34 signers; ASL Citizen official test
+split 3,408 clips). The checkpoints themselves were trained on the legacy pipeline (phrases07: on
+undecimated PopSign), so these are baselines for the frozen comparison, not new models.
+
+| checkpoint | WLASL test exact / top-5 | ASL Citizen test exact / top-5 | ASL Citizen identical / variant / synonym |
+|---|---|---|---|
+| phrases01 | 42.9 % / 74.5 % | 52.8 % / 80.4 % | 59.7 / 38.3 / 56.9 % |
+| phrases03 | 79.3 / 94.3 | 67.7 / 88.7 | 75.5 / 53.6 / 62.6 |
+| phrases04 | 80.7 / 95.8 | 67.0 / 88.8 | 74.8 / 53.3 / 61.0 |
+| phrases05 (browser model) | 82.7 / 95.9 | 71.4 / 89.8 | 78.6 / 58.6 / 66.3 |
+| phrases05-long | 82.4 / 96.0 | 70.8 / 90.1 | 77.4 / 59.6 / 64.2 |
+| phrases07 | 84.3 / 96.2 | 73.5 / 90.1 | 80.7 / 61.0 / 66.7 |
+| phrases06 (research only; trained on ASL Citizen train) | 85.9 / 96.8 | 86.8 / 97.4 | 89.7 / 86.4 / 63.4 |
+| phrases06-long (research only) | 87.5 / 97.3 | 88.0 / 97.3 | 90.6 / 87.9 / 66.3 |
+
+Paired, phrases05 → phrases07: WLASL 82.7 → 84.3 % (+35 / −22, McNemar p = 0.11); ASL Citizen 71.4 →
+73.5 % (+197 / −127, p = 1.2e-4) — the same direction as the legacy measurement (70.9 → 73.4 %).
+phrases06 scores on ASL Citizen are not comparable (same signers' recording conditions in training).
+
 ### Review of ce3c929 (three more, fixed)
 
 | Finding | Fix | Reproduction now |
