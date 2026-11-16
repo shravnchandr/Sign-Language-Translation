@@ -773,6 +773,17 @@ Status (2026-11-16): no ASL-knowledgeable reviewer is available; the semantic re
 A Kaggle-hosted review page (blind pass, then reveal) is to be built only once a reviewer is lined up,
 scoped to this queue.
 
+### PopSign game-test split as a holdout candidate (2026-11-16)
+
+Only the four game-*train* parts of the PopSign Kaggle mirror were ever extracted. The mirror also has
+`mrgeislinger/popsign-asl-v1-0-game-test` (131 GB). Its participants, from file names only
+(`core.data.popsign_signers`, `islr-popsign-test-signers` at 67c16d0): **33,600 videos, 8 participants
+(users 8031, 8032, 8033, 8035, 8036, 8037, 8038, 8039), all 250 signs; none of them among the 31 users of the
+accepted PopSign training release.** Their prefix differs too (`gtsignstudy4a.` vs `4a.` in training).
+Not yet checked: overlap with ASL Signs signers (same project; 257 PopSign training videos matched ASL
+Signs recordings) — needs landmarks, so it comes after extraction. Until then it is a candidate, not a
+holdout. The rest of the game-train videos are not a holdout (the same 31 training signers).
+
 **Browser / export review (2026-11-15; ASL-App issues are the app owner's to fix, this repo supplies the
 reference).**
 
