@@ -758,9 +758,20 @@ model's top sign, and the screen's location / handshape calls. Fields to fill, p
 - `review_notes`: free text, e.g. what the clip actually shows.
 Order of review: into (IN) first (a mapping question, cheapest to settle), then cowboy, pretend, hen
 (strongest form differences), then hate / yucky together (possible crossing), finger, listen. A per-sign
-decision only after all its clips: a confirmed mapping error → versioned label correction (separate
-from any training experiment); a confirmed variant → report it as a variant and treat it as a coverage
-question; neither → a recognition error.
+decision only after all its clips:
+- **Blind first pass.** The reviewer first sees only the video and writes what sign it is; the dataset
+  label, the model's prediction and the pre-screen are shown only after that answer is saved. The
+  pre-screen columns of the sheet are hidden for this pass.
+- **Unresolved is an outcome.** Unclear meaning or too little visibility stays `unresolved`; a sign is
+  called a recognition error only when the reviewer confirms the clip shows the label's sign in a form
+  the training data covers — never by default.
+- **Corrections need agreement across clips.** A mapping correction only when the reviewer's reading
+  holds across several signers' clips of that gloss, ideally confirmed by a second reviewer; then a
+  versioned label correction, separate from any training experiment. A confirmed variant is reported as a
+  variant and treated as a coverage question.
+Status (2026-11-16): no ASL-knowledgeable reviewer is available; the semantic review is blocked on one.
+A Kaggle-hosted review page (blind pass, then reveal) is to be built only once a reviewer is lined up,
+scoped to this queue.
 
 **Browser / export review (2026-11-15; ASL-App issues are the app owner's to fix, this repo supplies the
 reference).**
