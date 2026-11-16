@@ -845,6 +845,15 @@ signer are not separable. Two-hand clips: 25 (88 %). Higher than WLASL test half
 test (73.2 %), as expected for the training sources' own recording setup; with 3 signers, the per-signer
 spread (13 points) is as large as the gap to WLASL. The sealed final part was not scored.
 
+**Paired with frozen phrases05 (no PopSign in training), same 2,677 development clips:** 72.8 → 87.1 %
+(+433 / −51, McNemar p = 1.6e-76); every signer up (708031 66.5 → 81.0, 708036 64.8 → 84.4, 708037 85.3 →
+94.4 %). PopSign training data helps PopSign signers the model never saw, not only the training signers.
+Of phrases07's 346 failures, 301 never emit the label in the greedy decode (45 emit it among extra
+tokens), so extra-token cleanup would reach few. Signs below 50 % (12–13 clips each, so rough): duck
+(→ no), glasswindow (→ tooth), go, hide (→ not), say (→ chin; 05 → 07: 8 → 42 %); the confusions are
+pooled top-1 and are hypotheses about similar forms, for a reviewer, not findings. 25 two-hand clips are
+too few to guide two-hand changes.
+
 **Browser / export review (2026-11-15; ASL-App issues are the app owner's to fix, this repo supplies the
 reference).**
 
