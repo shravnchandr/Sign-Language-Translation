@@ -849,7 +849,7 @@ spread (13 points) is as large as the gap to WLASL. The sealed final part was no
 (+433 / −51, McNemar p = 1.6e-76); every signer up (708031 66.5 → 81.0, 708036 64.8 → 84.4, 708037 85.3 →
 94.4 %). PopSign training data helps PopSign signers the model never saw, not only the training signers.
 Of phrases07's 346 failures, 301 never emit the label in the greedy decode (45 emit it among extra
-tokens), so extra-token cleanup would reach few. Signs below 50 % (12–13 clips each, so rough): duck
+tokens), so extra-token cleanup would reach few. Signs below 50 % (8–12 clips each, so rough): duck
 (→ no), glasswindow (→ tooth), go, hide (→ not), say (→ chin; 05 → 07: 8 → 42 %); the confusions are
 pooled top-1 and are hypotheses about similar forms, for a reviewer, not findings. 25 two-hand clips are
 too few to guide two-hand changes.
