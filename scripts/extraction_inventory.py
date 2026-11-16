@@ -26,13 +26,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from extract_aslcitizen import DATASET as ASLC_DATASET, cells_at, cells_digest  # noqa: E402
-from extract_popsign import DATASETS as POPSIGN_DATASETS  # noqa: E402
+from extract_popsign import DATASETS as POPSIGN_DATASETS, SPLIT_DATASETS as POPSIGN_SPLITS  # noqa: E402
 from extract_wlasl import DATASET as WLASL_DATASET  # noqa: E402
 from kaggle_run import REPO_URL, ROOT, kaggle, user  # noqa: E402
 
 # extractor → (script holding CELL_SELECT, datasets, the selection globals its push used)
 EXTRACTORS = {
     "popsign": ("extract_popsign.py", POPSIGN_DATASETS, {"PER_PAIR": 4}),
+    "popsign-test": ("extract_popsign.py", POPSIGN_SPLITS["test"], {"PER_PAIR": 4, "SPLIT": "test"}),
     "aslcitizen": ("extract_aslcitizen.py", [ASLC_DATASET], {"ALL": False}),
     "wlasl": ("extract_wlasl.py", [WLASL_DATASET], {}),
 }
