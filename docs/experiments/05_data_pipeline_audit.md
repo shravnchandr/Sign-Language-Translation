@@ -779,7 +779,10 @@ Only the four game-*train* parts of the PopSign Kaggle mirror were ever extracte
 `mrgeislinger/popsign-asl-v1-0-game-test` (131 GB). Its participants, from file names only
 (`core.data.popsign_signers`, `islr-popsign-test-signers` at 67c16d0): **33,600 videos, 8 participants
 (users 8031, 8032, 8033, 8035, 8036, 8037, 8038, 8039), all 250 signs; none of them among the 31 users of the
-accepted PopSign training release.** Their prefix differs too (`gtsignstudy4a.` vs `4a.` in training).
+accepted PopSign training release.** (The `gtsignstudy4a.` prefix does not mark another study: training has
+`gtsignstudy4a.8040`; the test users are numbered among the training users' 8027–8054 — likely the same
+recording programme, different people by id.) The test videos seen so far are 1080×1920 (9:16), like
+5 % of the training clips (the rest 1944×2592).
 Not yet checked: overlap with ASL Signs signers (same project; 257 PopSign training videos matched ASL
 Signs recordings) — needs landmarks, so it comes after extraction. Until then it is a candidate, not a
 holdout. The rest of the game-train videos are not a holdout (the same 31 training signers).
