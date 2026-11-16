@@ -702,7 +702,9 @@ Reported, not decisive: ASL Citizen val two-hand clips (442) 70.4 → 67.4 % (+1
 two-hand recognition on unseen ASL Citizen signers — the point estimate went the other way — and cost
 ASL Signs accuracy. One seed; this rejects the 30 / 50 / 20 mix as registered, it does not show that
 two-hand coverage is irrelevant (WLASL's two-hand frames come with its recording style and 1,767
-extra-gloss labels). Test splits (post-decision, `islr-w50-tests`): pending.
+extra-gloss labels). Test splits (post-decision, `islr-w50-tests`, reported only): WLASL test half 84.0 → 82.5 % (+33 / −45,
+p = 0.21); ASL Citizen test 73.2 → 72.7 % (+155 / −170, p = 0.44), two-hand clips 64.7 → 64.7 %, one-hand 79.7 →
+78.9 %. No detectable difference on either, and no two-hand gain — consistent with the decision.
 
 **Browser / export review (2026-11-15; ASL-App issues are the app owner's to fix, this repo supplies the
 reference).**
