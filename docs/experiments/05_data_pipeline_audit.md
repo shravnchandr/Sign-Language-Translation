@@ -824,7 +824,18 @@ calibrated within a dataset; "not flagged" does not establish absence.
 signers (708033); sort the rest by frame width, then `crc32(str(participant_id))`; assign alternately
 final, development, … → **development 708031, 708036, 708037 (2,677 clips; 918 at 1944×2592)**, **sealed
 final 708032, 708035, 708038, 708039 (3,686 clips; 893 at 1944×2592)**. The final part is scored once, for
-a model already chosen on development, with the decision rule written down first.
+a model already chosen on development, with the decision rule written down first. Coverage: development has all
+250 signs; final has 248 (**dog** and **shower** absent — none of its four signers has a clip of them).
+
+**Scoring a part** (`cross_dataset --partition core/data/popsign_test_split.json:development`; `:final`
+also needs `--score-final`). The release's `split` column is `test` for all 7,236 clips, so `--split`
+cannot select a part (it would include both parts and 708033). `--partition` refuses a manifest whose
+release digests differ from the opened release, one that does not account for exactly the release's
+signers (missing, extra, or one signer in two parts), any part other than development / final, and
+combination with `--signers` / `--split` / `--val-fold`; it prints the selected signers and clip count
+before inference and records manifest, sha256, part and signers in the summary. Checked on the release:
+development 2,677 clips (708031 / 708036 / 708037), final 3,686 with `--score-final`, refused without it,
+and each refusal on an edited manifest copy.
 
 **Browser / export review (2026-11-15; ASL-App issues are the app owner's to fix, this repo supplies the
 reference).**

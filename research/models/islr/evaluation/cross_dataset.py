@@ -26,6 +26,7 @@ Usage:
 """
 
 import argparse
+import hashlib
 import json
 from math import comb
 from pathlib import Path
@@ -67,6 +68,37 @@ def mcnemar(a: pd.Series, b: pd.Series) -> dict:
     return {"before": float(a.mean()), "after": float(b.mean()), "gained": up, "lost": down, "p": p}
 
 
+def partition_rows(df: pd.DataFrame, release: dict, spec: str, score_final: bool) -> tuple[pd.DataFrame, dict]:
+    """The rows of one part of a committed signer partition (popsign_test_split.json format), refusing a
+    manifest written for another release or one that does not account for every signer in it."""
+    path, _, part = spec.rpartition(":")
+    if not path or part not in ("development", "final"):
+        raise SystemExit(f"--partition {spec!r}: expected MANIFEST:development or MANIFEST:final")
+    if part == "final" and not score_final:
+        raise SystemExit("--partition …:final is the sealed part; pass --score-final to score it (once)")
+    raw = Path(path).read_bytes()
+    m = json.loads(raw)
+    want = {"content": m["release"]["content_digest"], "csv": m["release"]["csv_digest"]}
+    got = {k: release.get(k) for k in want}
+    if got != want:
+        raise SystemExit(f"--partition {path} was written for release {want}, the opened release is {got}")
+    parts = {"development": m["development"], "final": m["final"], "excluded": list(m["excluded"])}
+    ids = {k: {int(x) for x in v} for k, v in parts.items()}
+    every = [x for v in ids.values() for x in v]
+    if len(every) != len(set(every)):
+        raise SystemExit(f"--partition {path}: a signer is in more than one part")
+    present = set(df["participant_id"].astype(int))
+    if present != set(every):
+        raise SystemExit(f"--partition {path} does not match the release's signers: missing from the manifest "
+                         f"{sorted(present - set(every))}, not in the release {sorted(set(every) - present)}")
+    sel = df[df["participant_id"].astype(int).isin(ids[part])]
+    signers = sorted(ids[part])
+    print(f"partition {Path(path).name}:{part} — {len(sel)} clips, signers {signers} "
+          f"(excluded from every part: {sorted(ids['excluded'])})")
+    return sel, {"manifest": str(path), "sha256": hashlib.sha256(raw).hexdigest()[:16], "part": part,
+                 "signers": signers, "excluded_signers": sorted(ids["excluded"]), "clips": len(sel)}
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--checkpoint", required=True, type=Path)
@@ -85,9 +117,16 @@ def main() -> None:
     p.add_argument("--split", help="keep rows whose `split` column equals this (ASL Citizen: train / val / test)")
     p.add_argument("--val-fold", type=int, help="ASL Signs: score the held-out signers of this frozen fold "
                    "(dataset.signer_fold_split; no aspect correction, both_hands from stored presence)")
+    p.add_argument("--partition", help="MANIFEST:PART — the signers of one part of a committed signer partition "
+                   "(e.g. core/data/popsign_test_split.json:development); the manifest's release digests and "
+                   "signer list must match the opened release")
+    p.add_argument("--score-final", action="store_true", help="allow --partition …:final (the sealed part: score "
+                   "once, for a model already chosen on development)")
     args = p.parse_args()
     if args.val_fold is not None and (args.signers != "all" or args.split):
         raise SystemExit("--val-fold selects ASL Signs signers; it does not combine with --signers / --split")
+    if args.partition and (args.signers != "all" or args.split or args.val_fold is not None):
+        raise SystemExit("--partition selects the signers itself; it does not combine with --signers / --split / --val-fold")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     sign2idx = load_map(args.sign_map or args.data_dir / "sign_to_prediction_index_map.json", extended=True)
@@ -140,6 +179,9 @@ def main() -> None:
         df = df.assign(synonym=False, aspect_k=1.0, ratio_raw=np.nan, fps=30, source="aslsigns", both_hands=-1)
     lmdb_path = args.lmdb_path or args.data_dir / "wlasl.lmdb.mdb"
     release = require_accepted(args.data_dir, lmdb_path)  # scores only on a validated dataset release
+    partition = None
+    if args.partition:
+        df, partition = partition_rows(df, release, args.partition, args.score_final)
     env = _open_lmdb_env(str(lmdb_path))  # the handle require_accepted opened (one env per process)
     rows = []
     with env.begin() as txn:
@@ -169,6 +211,7 @@ def main() -> None:
         "wlasl_signers": args.signers,
         "split": args.split,
         "val_fold": args.val_fold, "fold_signers": fold_signers,
+        "partition": partition,
         "kind": "phrase (single-sign exact decode)" if phrase else "isolated (top-1)",
         "dataset_release": release,
         "clips": len(res), "signs": int(df["sign"].nunique()), "signers": int(res["signer"].nunique()),
