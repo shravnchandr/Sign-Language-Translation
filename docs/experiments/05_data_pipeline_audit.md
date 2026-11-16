@@ -651,7 +651,13 @@ style and extra-gloss labels rise with it).
 - **Arms.** Baseline = the existing frozen phrases07 run (seed 42). New arm = profile `phrases07-w50` in
   `frozen_inputs.json` (differs from `phrases07` only in `--extra-frac 0.5 0.2`), code at the commit that
   registers this, same reference spec (`--frozen-spec`, `--allow-diff spec_only`); its spec must pass
-  `check_freeze --profile phrases07-w50`. Everything else fixed (releases, init, vocabulary, folds,
+  `check_freeze --profile phrases07-w50`.
+  *Amendment (before any w50 result):* the reference spec records code 2de95c1, so the run also needs
+  `--allow-diff spec_only code` (the first launch at 74a699c, without it, stops at the frozen-spec check).
+  Between 2de95c1 and the run's commit no training-path file changed (`phrases/train.py`, `phrases/dataset.py`,
+  `core/data/contract.py`, `core/data/dataset.py`, `core/model/` identical; the diff is evaluation, export,
+  fixtures, `check_freeze`, the runner and data records); every other dependency check stays strict, and
+  `check_freeze` still requires a clean commit. Everything else fixed (releases, init, vocabulary, folds,
   validation phrases, seed 42, epochs / patience, augmentation, runtime).
 - **Checkpoint.** The trainer's rule, as for the baseline: lowest synthetic validation WER
   (`best_phrases.pth`). That checkpoint is scored once on each set below; no other checkpoint is scored.
@@ -669,9 +675,13 @@ style and extra-gloss labels rise with it).
 - **Reported, not decisive.** ASL Citizen validation two-hand / one-hand / per-signer changes; ASL Signs
   per-signer changes; ASL Citizen test and WLASL test half, scored once after the decision (both inspected
   repeatedly before; WLASL is in-domain for the source being increased).
-- **Replication (only if adopted).** Both arms again with seed 43, otherwise identical (needs a
-  `check_freeze` option for an expected seed, added and committed before launch). Replicated iff the seed-43
-  pair also meets the primary rule and both guards. If it does not, the result is reported as not
+- **Replication (only if adopted).** Both arms again with seed 43, otherwise identical. The trainer draws
+  validation phrases with seed + 1000, so seed 43 changes all 3,000 validation phrases: the replication
+  uses the seed-43 validation set, shared by both seed-43 arms, and its WER guard is **the seed-43
+  control's best WER + 0.02** (unrounded) — never the seed-42 threshold. Primary metric and the ASL Signs
+  fold-0 guard are unchanged (real clips, seed-independent). Needs a `check_freeze` option for an expected
+  seed and `--allow-diff` for `seed` / `val_set` against the reference, added and committed before launch.
+  Replicated iff the seed-43 pair also meets the primary rule and both guards (with that WER threshold). If it does not, the result is reported as not
   replicated and no further mixture search starts from it.
 - **Not established by any of this:** a product improvement — that needs the consented camera holdout.
 
