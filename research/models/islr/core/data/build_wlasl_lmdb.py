@@ -206,9 +206,12 @@ def _selection(c: Path, k: int, inventory: pd.DataFrame | None) -> tuple[set, se
                      "list alone cannot show which selected videos are missing (scripts/extraction_inventory.py)")
 
 
-def load_shards(root: Path, keyword: str, expect: int, inventory: Path | None = None,
+def load_shards(root: Path, keyword: str, expect: int | dict, inventory: Path | None = None,
                 allow_missing: int = 0) -> tuple[pd.DataFrame, dict]:
-    """The shard_*.csv of ONE extraction version under root (path containing keyword) → clips.
+    """The shard_*.csv of ONE extraction version under root (path containing keyword) → clips;
+    expect = {version: shards} names several versions instead (a nested extraction added to an
+    accepted one: each version's shards 0..n-1 all present, selections disjoint, at most one version
+    taking its selection from the --inventory).
 
     Each shard must sit inside its notebook's folder `<version>-s<k>` (how Kaggle mounts a
     kernel's output). Exits when shards of two versions are mounted together, a shard number
@@ -228,22 +231,37 @@ def load_shards(root: Path, keyword: str, expect: int, inventory: Path | None = 
             raise SystemExit(f"{c}: not inside an extraction notebook folder named <version>-s<k>")
         found[c] = (m["version"], int(m["k"]))
     versions = sorted({v for v, _ in found.values()})
-    if len(versions) > 1:
-        raise SystemExit(f"shards from more than one extraction version mounted: {versions} — mount one")
-    ks = sorted(k for _, k in found.values())
-    if len(set(ks)) != len(ks):
-        raise SystemExit(f"shard numbers repeat: {ks}")
-    if not expect or ks != list(range(expect)):
-        raise SystemExit(f"expected shards 0..{expect - 1} of {versions[0]}, found {ks}")
+    if not isinstance(expect, dict):
+        if len(versions) > 1:
+            raise SystemExit(f"shards from more than one extraction version mounted: {versions} — mount one")
+        expect = {versions[0]: expect}
+    if sorted(expect) != versions:
+        raise SystemExit(f"extraction versions mounted {versions}, expected {sorted(expect)}")
+    for v, n in expect.items():
+        ks = sorted(k for v_, k in found.values() if v_ == v)
+        if len(set(ks)) != len(ks):
+            raise SystemExit(f"shard numbers of {v} repeat: {ks}")
+        if not n or ks != list(range(n)):
+            raise SystemExit(f"expected shards 0..{n - 1} of {v}, found {ks}")
+    no_own = sorted({found[c][0] for c in csvs if not c.with_name(f"selected_{found[c][1]}.csv").exists()})
+    if len(no_own) > 1:
+        raise SystemExit(f"versions {no_own} have shards without selected_<k>.csv — one --inventory cannot serve both")
     inv = pd.read_csv(inventory) if inventory else None
     inv_meta = json.loads(Path(inventory).with_suffix(".json").read_text()) if inventory and Path(inventory).with_suffix(".json").exists() else None
-    parts, missing_sel, recorded_failed, selected_n, sources = [], [], [], 0, {}
+    parts, missing_sel, recorded_failed, selected_n, sources, seen_sel = [], [], [], 0, {}, set()
     for c in csvs:
         d = pd.read_csv(c, dtype={"video": str})
         d["full_path"] = [str(c.parent / p_) for p_ in d["path"]]
         parts.append(d)
-        k = found[c][1]
-        sel, fail, sources[k] = _selection(c, k, inv)
+        v, k = found[c]
+        sel, fail, src = _selection(c, k, inv)
+        if len(expect) > 1:
+            sources[f"{v}-s{k}"] = src
+            if sel & seen_sel:
+                raise SystemExit(f"{v} shard {k}: {len(sel & seen_sel)} videos also selected by another shard / version")
+            seen_sel |= sel
+        else:
+            sources[k] = src
         listed = set(d["path"])
         if listed - sel:
             raise SystemExit(f"shard {k}: {len(listed - sel)} listed clips were never selected, e.g. {sorted(listed - sel)[0]}")
@@ -253,7 +271,7 @@ def load_shards(root: Path, keyword: str, expect: int, inventory: Path | None = 
         missing_sel += miss
         recorded_failed += [m for m in miss if m in fail]
         selected_n += len(sel)
-        print(f"{c}: {len(d)} clips of {len(sel)} selected ({len(miss)} missing; selection from {sources[k]})")
+        print(f"{c}: {len(d)} clips of {len(sel)} selected ({len(miss)} missing; selection from {src})")
     if len(missing_sel) > allow_missing:
         raise SystemExit(f"{len(missing_sel)} selected videos are not in the shard lists (allowed {allow_missing}; "
                          f"{len(recorded_failed)} recorded as failed), e.g. {missing_sel[:3]}")
@@ -269,7 +287,9 @@ def load_shards(root: Path, keyword: str, expect: int, inventory: Path | None = 
     coverage = {"selected": selected_n, "listed": len(df), "missing": len(missing_sel),
                 "missing_recorded_failed": len(recorded_failed), "allow_missing": allow_missing,
                 "missing_paths": missing_sel, "selection_sources": sources, "inventory": inv_meta}
-    return df, {"version": versions[0], "shards": ks, "clips_listed": len(df), "csvs": [str(c) for c in csvs],
+    one = len(expect) == 1
+    return df, {"version": versions[0] if one else "+".join(versions), "shards": list(range(expect[versions[0]])) if one else expect,
+                "clips_listed": len(df), "csvs": [str(c) for c in csvs],
                 "coverage": coverage}
 
 

@@ -71,12 +71,14 @@ def main() -> None:
     p.add_argument("--lmdb-name", default="popsign.lmdb.mdb")
     p.add_argument("--workers", type=int, default=os.cpu_count() or 4)
     p.add_argument("--limit", type=int, default=0, help="first N clips (smoke test)")
-    p.add_argument("--expect-shards", type=int, required=True, help="shards 0..N-1 of one extraction version must all be there")
+    p.add_argument("--expect-shards", nargs="+", required=True,
+                   help="N: shards 0..N-1 of one extraction version must all be there; or VERSION=N ... for several "
+                        "versions built together (a nested extraction added to an accepted one)")
     p.add_argument("--allow-errors", type=int, default=0, help="clips that may fail before the build exits")
     p.add_argument("--inventory", type=Path, help="selection inventory (scripts/extraction_inventory.py) for shards "
                    "without their own selected_<k>.csv")
     p.add_argument("--allow-missing", type=int, default=0, help="selected videos that may be absent from the shard lists")
-    p.add_argument("--fps-csv", type=Path, required=True,
+    p.add_argument("--fps-csv", type=Path, nargs="+", required=True,
                    help="video_probe.csv of `extraction_inventory.py push popsign --probe-all` (path, fps for every "
                         "selected video): ~19 %% of PopSign is 120 fps, kept every round(fps / 30)-th frame")
     p.add_argument("--exclude-csv", type=Path, default=_MATCHES,
@@ -86,7 +88,11 @@ def main() -> None:
     sign2idx = load_base(args.sign_map)
     by_lower = {s.lower(): s for s in sign2idx}
 
-    df, manifest = load_shards(args.input_root, "popsign", args.expect_shards, args.inventory, args.allow_missing)
+    if len(args.expect_shards) == 1 and "=" not in args.expect_shards[0]:
+        expect = int(args.expect_shards[0])
+    else:
+        expect = {v: int(n) for v, _, n in (e.partition("=") for e in args.expect_shards)}
+    df, manifest = load_shards(args.input_root, "popsign", expect, args.inventory, args.allow_missing)
 
     df["popsign_gloss"] = df["gloss"]
     df["sign"] = df["gloss"].map(lambda g: by_lower.get(str(g).lower()))
@@ -102,11 +108,11 @@ def main() -> None:
         raise SystemExit(f"PopSign user ids collide after numbering: {clash[clash > 1].index.tolist()}")
     df["sequence_id"] = df["video"].map(lambda v: os.path.splitext(str(v))[0])
     df["source"] = "popsign"
-    probe = pd.read_csv(args.fps_csv).drop_duplicates("path").set_index("path")["fps"]
+    probe = pd.concat([pd.read_csv(f) for f in args.fps_csv]).drop_duplicates("path").set_index("path")["fps"]
     df["fps"] = df["path"].map(probe)  # the video's own frame rate (probed)
     if df["fps"].isna().any() or (df["fps"] <= 0).any():
         bad = df.loc[df["fps"].isna() | (df["fps"] <= 0), "path"].tolist()
-        raise SystemExit(f"{len(bad)} clips without a probed frame rate in {args.fps_csv}, e.g. {bad[:3]}")
+        raise SystemExit(f"{len(bad)} clips without a probed frame rate in {[str(f) for f in args.fps_csv]}, e.g. {bad[:3]}")
     df["frame_step"] = [frame_step_for(f) for f in df["fps"]]
     print(f"frame steps (raw frames per kept frame): {df['frame_step'].value_counts().sort_index().to_dict()}")
     excl = pd.read_csv(args.exclude_csv)
@@ -116,7 +122,7 @@ def main() -> None:
     print(f"excluded before preparation ({args.exclude_csv.name}): {int(hit.sum())} of {len(excl)} listed clips")
     manifest["excluded_listed"] = {"file": args.exclude_csv.name, "sha256": hashlib.sha256(args.exclude_csv.read_bytes()).hexdigest()[:16],
                                    "listed": len(excl), "excluded": int(hit.sum())}
-    manifest["fps_probe"] = {"file": str(args.fps_csv), "frame_steps": {int(k): int(v) for k, v in df["frame_step"].value_counts().items()}}
+    manifest["fps_probe"] = {"file": str(args.fps_csv[0]) if len(args.fps_csv) == 1 else [str(f) for f in args.fps_csv], "frame_steps": {int(k): int(v) for k, v in df["frame_step"].value_counts().items()}}
     df = df[~hit].copy()
     if args.limit:
         df = df.head(args.limit)
