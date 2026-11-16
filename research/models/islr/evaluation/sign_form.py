@@ -5,7 +5,7 @@ detected in more frames; ties → more wrist motion), with x negated when it is 
 chiralities share one side; the median shoulder width (pose 11–12, xy) as the unit; then
   loc_x, loc_y        median dominant-wrist position relative to the nose (shoulder widths)
   start_y, end_y      the same over the first / last fifth of its detected frames
-  path                dominant-wrist path length (shoulder widths)
+  wrist_path          dominant-wrist path length (shoulder widths)
   both_share          frames with both hands detected / frames with any hand
   cos_<finger><j>     median joint-angle cosines of the dominant hand (15: 3 per finger)
 Per sign and dataset: medians (`sign_form_by_sign.csv`). Per clip of the reviewed dataset: distance
@@ -36,7 +36,7 @@ from ..core.data.validate import require_accepted
 
 CHAINS = {"thumb": [0, 1, 2, 3, 4], "index": [0, 5, 6, 7, 8], "middle": [0, 9, 10, 11, 12],
           "ring": [0, 13, 14, 15, 16], "pinky": [0, 17, 18, 19, 20]}
-GROUPS = {"location": ["loc_x", "loc_y", "start_y", "end_y"], "motion": ["path"], "two_hand": ["both_share"],
+GROUPS = {"location": ["loc_x", "loc_y", "start_y", "end_y"], "motion": ["wrist_path"], "two_hand": ["both_share"],
           "handshape": [f"cos_{f}{j}" for f in CHAINS for j in range(3)]}
 
 
@@ -63,7 +63,7 @@ def features(coords: np.ndarray, pres: np.ndarray) -> dict | None:
     k = max(1, len(w) // 5)
     f = {"loc_x": float(np.median(w[:, 0])), "loc_y": float(np.median(w[:, 1])),
          "start_y": float(np.median(w[:k, 1])), "end_y": float(np.median(w[-k:, 1])),
-         "path": motion[h] / sw, "both_share": float(pres.all(1).sum() / max(pres.any(1).sum(), 1))}
+         "wrist_path": motion[h] / sw, "both_share": float(pres.all(1).sum() / max(pres.any(1).sum(), 1))}
     hand = np.stack([_lm(coords, starts[h], i) for i in range(21)], 1)[det]  # (T, 21, 3)
     for name, ch in CHAINS.items():
         for j in range(3):
@@ -83,6 +83,7 @@ def clip_table(data_dir: Path, lmdb_path: Path, df: pd.DataFrame) -> pd.DataFram
             c, p = load_clip(txn.get(lmdb_key(r.path)))
             f = features(c.numpy(), p.numpy())
             if f is not None:
+                assert not set(f) & {"path", "sign", "signer", "split"}, "feature names collide with clip columns"
                 rows.append({"path": r.path, "sign": r.sign, "signer": r.participant_id,
                              "split": getattr(r, "split", None), **f})
     return pd.DataFrame(rows)
