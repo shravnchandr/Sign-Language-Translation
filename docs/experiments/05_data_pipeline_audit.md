@@ -600,7 +600,7 @@ phrases06's ASL Citizen score is in-domain (trained on other ASL Citizen signers
 |---|---|---|---|---|
 | phrases05 (retrained on the accepted releases) | 15 / 15 | 0.2826 (epoch 27 / 30) | 82.5 / 95.4 % | 70.4 / 88.6 % |
 | phrases07 (+ PopSign, 20 % of phrases) | 16 / 16 | 0.2326 (epoch 29 / 30) | 84.0 / 95.7 % | 73.2 / 89.9 % |
-| phrases06 (research only) | pending | | | |
+| phrases06 (research only; + ASL Citizen train) | 17 / 17 | 0.2857 (epoch 23; early stop at 29, patience 6) | 85.0 / 97.8 % | 87.1 / 97.2 % (in-domain) |
 
 Paired against the re-scored legacy checkpoints (same clips): phrases05 legacy → frozen WLASL 82.7 →
 82.5 % (+28 / −29, p = 1), ASL Citizen 71.4 → 70.4 % (+149 / −183, p = 0.07). Broadly similar, with no
@@ -620,6 +620,14 @@ built from ASL Signs fold-0 signers, so some of it may be the val signers' own P
 WLASL test half and ASL Citizen test split are signer-disjoint from their own datasets' training
 signers, and no shared signers with ASL Signs or PopSign are known (only WLASL vs ASL Signs was
 screened, `signer_overlap`, and a screen is not proof).
+
+**Frozen phrases06 (research only).** Same freeze record; the profile check confirms it read the
+research-only ASL Citizen release. WLASL test half: frozen phrases05 → phrases06 82.5 → 85.0 % (+56 /
+−36, p = 0.047); frozen phrases07 → phrases06 84.0 → 85.0 % (+46 / −38, p = 0.45, no detectable
+difference). Its ASL Citizen score (87.1 %) is in-domain and not compared with the others. Against the
+legacy phrases06 (85.9 / 86.8 %) only unpaired: the research re-score kept no per-clip CSVs. It stopped
+early at epoch 29 under the same patience rule the other two ran with (they never triggered it). Not
+exportable (`research_only` meta).
 
 **Browser / export review (2026-11-15; ASL-App issues are the app owner's to fix, this repo supplies the
 reference).**
