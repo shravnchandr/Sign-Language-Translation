@@ -32,7 +32,7 @@ from kaggle_run import REPO_URL, ROOT, kaggle, user  # noqa: E402
 
 # extractor → (script holding CELL_SELECT, datasets, the selection globals its push used)
 EXTRACTORS = {
-    "popsign": ("extract_popsign.py", POPSIGN_DATASETS, {"PER_PAIR": 4}),
+    "popsign": ("extract_popsign.py", POPSIGN_DATASETS, {"PER_PAIR": 4, "SPLIT": "train"}),
     "popsign-test": ("extract_popsign.py", POPSIGN_SPLITS["test"], {"PER_PAIR": 4, "SPLIT": "test"}),
     "aslcitizen": ("extract_aslcitizen.py", [ASLC_DATASET], {"ALL": False}),
     "wlasl": ("extract_wlasl.py", [WLASL_DATASET], {}),

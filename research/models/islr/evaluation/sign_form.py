@@ -16,6 +16,9 @@ than its own label in some group says where the forms differ; it does not say wh
 tracking or recording) — that is for a reviewer who knows the signs. Writes aggregates and derived
 numbers only, no landmarks.
 
+Runs compared with each other (a pair and its reverse, a dataset and its control) must share
+--ref-pool: the centroids and the MAD scales are fitted on the pooled reference labels.
+
   PYTHONPATH=research/models python -m islr.evaluation.sign_form \
       --ref-dir {IS_LMDB_DIR} --ref-lmdb {IS_LMDB_DIR}/is.lmdb.mdb \
       --data-dir {ASLC_DIR} --lmdb-path {ASLC_DIR}/aslcitizen.lmdb.mdb \
@@ -23,6 +26,8 @@ numbers only, no landmarks.
 """
 
 import argparse
+import hashlib
+import zlib
 from pathlib import Path
 
 import numpy as np
@@ -96,14 +101,20 @@ def main() -> None:
     p.add_argument("--data-dir", required=True, type=Path)
     p.add_argument("--lmdb-path", required=True, type=Path)
     p.add_argument("--sign", action="append", required=True, help="label:confusion (ASL Signs label names)")
-    p.add_argument("--ref-per-sign", type=int, default=300, help="reference clips per sign (all signers, seeded)")
+    p.add_argument("--ref-per-sign", type=int, default=300, help="reference clips per sign (all signers, seeded per sign)")
+    p.add_argument("--ref-pool", help="comma-separated reference labels that define the centroids and scales "
+                   "(default: the labels of --sign); runs that are compared must use the same pool")
     p.add_argument("--out", required=True, type=Path)
     a = p.parse_args()
     pairs = [tuple(s.split(":")) for s in a.sign]
     signs = sorted({x for pr in pairs for x in pr})
+    pool = sorted(set(a.ref_pool.split(","))) if a.ref_pool else signs
+    if set(signs) - set(pool):
+        raise SystemExit(f"--ref-pool lacks {sorted(set(signs) - set(pool))}")
     ref = pd.read_csv(a.ref_dir / "train.csv")
-    ref = ref[ref["sign"].isin(signs)]
-    ref = ref.sample(frac=1.0, random_state=0).groupby("sign").head(a.ref_per_sign)
+    # each label's sample depends only on that label (own seed), never on which other labels are pooled
+    ref = pd.concat([g.sample(min(len(g), a.ref_per_sign), random_state=zlib.crc32(s.encode()))
+                     for s, g in ref[ref["sign"].isin(pool)].groupby("sign")])
     tgt = pd.read_csv(a.data_dir / "train.csv")
     tgt = tgt[tgt["sign"].isin(signs)]
     R, T = clip_table(a.ref_dir, a.ref_lmdb, ref), clip_table(a.data_dir, a.lmdb_path, tgt)
@@ -116,6 +127,11 @@ def main() -> None:
     cent = R.groupby("sign")[feats].median()
     mad = R.groupby("sign")[feats].apply(lambda g: (g - g.median()).abs().median()).median()
     scale = mad.where(mad > 1e-3, R[feats].std()).replace(0, 1.0)
+    calib = cent.copy()
+    calib.loc["__scale__"] = scale
+    calib.to_csv(a.out / "sign_form_calibration.csv")  # identical across runs that share a pool
+    print(f"reference pool {len(pool)} labels: {','.join(pool)} | calibration digest "
+          f"{hashlib.sha256(calib.round(10).to_csv().encode()).hexdigest()[:16]}")
     out = []
     for lab, conf in pairs:
         for r in T[T["sign"] == lab].itertuples():
