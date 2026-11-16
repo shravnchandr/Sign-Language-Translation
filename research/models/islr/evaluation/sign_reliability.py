@@ -12,6 +12,12 @@ Output JSON:
   overall      top-1 / top-3 / top-5 and exact single-sign decode, per source and combined
   calibration  top-1 accuracy by top-1 pooled probability, and the thresholds that give
                80 / 90 / 95 % top-1 precision with the share of clips they keep
+  emitted      the app's "not sure" calibration: every sign the greedy CTC decode emits, scored as
+               ASL-App's decodeWithScores does (pooled over the sign's own stretch, stretches split
+               halfway between neighbouring emissions), correct iff it is the clip's label; same
+               table and thresholds. Single-sign clips only — not validated on multi-sign phrases
+Thresholds: score groups are never split (ties are kept or dropped together), the cutoff is the exact
+score (unrounded; keep iff score >= cutoff), and its precision is re-measured by applying it.
   signs        per sign: n, top1, top3, top5, exact, confused_with [[sign, share of clips]]
 
 Usage:
@@ -55,12 +61,15 @@ def score_clips(model, df: pd.DataFrame, lmdb_path: Path, sign2idx: dict, max_fr
                 if c != prev and c != blank:
                     hyp.append(c)
                 prev = c
-            pooled = out.float().softmax(-1)[:, :blank].max(0).values
+            probs = out.float().softmax(-1)
+            pooled = probs[:, :blank].max(0).values
             top = pooled.topk(5)
             y = sign2idx[r.sign]
+            emitted = emitted_scores(probs, blank)
             rows.append(dict(source=source, signer=r.participant_id, sign=y,
                              ranked=top.indices.tolist(), p1=float(top.values[0]),
-                             exact=hyp == [y]))
+                             exact=hyp == [y], emitted=[c for c, _ in emitted],
+                             emitted_scores=[v for _, v in emitted]))
     res = pd.DataFrame(rows)
     for k in (1, 3, 5):
         res[f"top{k}"] = [y in t[:k] for y, t in zip(res["sign"], res["ranked"])]
@@ -68,24 +77,66 @@ def score_clips(model, df: pd.DataFrame, lmdb_path: Path, sign2idx: dict, max_fr
     return res
 
 
+def emitted_scores(probs: torch.Tensor, blank: int) -> list[tuple[int, float]]:
+    """ASL-App decodeWithScores: greedy CTC runs; each emitted sign pooled (max over frames of its
+    probability) over its own stretch — from halfway after the previous run to halfway before the
+    next (floor((end_prev + start) / 2) + 1 .. floor((end + start_next) / 2))."""
+    runs, prev = [], -1
+    for t, c in enumerate(probs.argmax(-1).tolist()):
+        if c != prev and c != blank:
+            runs.append([c, t, t])
+        elif c == prev and c != blank:
+            runs[-1][2] = t
+        prev = c
+    out = []
+    for i, (c, start, end) in enumerate(runs):
+        lo = 0 if i == 0 else (runs[i - 1][2] + start) // 2 + 1
+        hi = len(probs) - 1 if i == len(runs) - 1 else (end + runs[i + 1][1]) // 2
+        out.append((c, float(probs[lo:hi + 1, c].max())))
+    return out
+
+
+def cutoffs(score: np.ndarray, correct: np.ndarray, targets=(0.8, 0.9, 0.95)) -> dict:
+    """Lowest exact score s whose kept set {score >= s} reaches each precision target. Candidates
+    are the distinct scores, so a tie is kept or dropped as a whole; the cutoff is applied again
+    to report the precision and share it actually gives."""
+    score, correct = np.asarray(score, float), np.asarray(correct, bool)
+    out = {}
+    for target in targets:
+        best = None
+        for s in np.unique(score):  # ascending: the first that reaches the target keeps most
+            keep = score >= s
+            if correct[keep].mean() >= target:
+                best = float(s)
+                break
+        if best is not None:
+            keep = score >= best
+            prec = float(correct[keep].mean())
+            assert prec >= target, (target, best, prec)
+            out[str(target)] = {"min_score": best, "precision": prec, "keeps": float(keep.mean()),
+                                "n_kept": int(keep.sum())}
+    return out
+
+
+def calibration_table(score: pd.Series, correct: pd.Series) -> list:
+    bins = [0, 0.2, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0001]
+    cut = pd.cut(score, bins, right=False)
+    return [{"from": float(b.left), "to": min(float(b.right), 1.0), "n": len(d),
+             "precision": round(float(d.mean()), 4) if len(d) else None}
+            for b, d in correct.groupby(cut, observed=False)]
+
+
 def summarise(res: pd.DataFrame, idx2sign: dict) -> dict:
     acc = lambda d: {k: round(float(d[k].mean()), 4) for k in ("top1", "top3", "top5", "exact")} | {"n": len(d)}
     overall = {"combined": acc(res)} | {s: acc(d) for s, d in res.groupby("source")}
 
-    bins = [0, 0.2, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0001]
-    cut = pd.cut(res["p1"], bins, right=False)
-    table = [{"p1_from": float(b.left), "p1_to": min(float(b.right), 1.0), "n": len(d),
-              "top1": round(float(d["top1"].mean()), 4) if len(d) else None}
-             for b, d in res.groupby(cut, observed=False)]
-    order = res.sort_values("p1", ascending=False)
-    prec = order["top1"].cumsum().to_numpy() / np.arange(1, len(order) + 1)
-    thresholds = {}
-    for target in (0.8, 0.9, 0.95):
-        ok = np.nonzero(prec >= target)[0]
-        if len(ok):
-            i = ok[-1]
-            thresholds[str(target)] = {"min_p1": round(float(order["p1"].iloc[i]), 4),
-                                       "keeps": round(float((i + 1) / len(order)), 4)}
+    table = calibration_table(res["p1"], res["top1"])
+    thresholds = cutoffs(res["p1"].to_numpy(), res["top1"].to_numpy())
+    em = pd.DataFrame([{"score": v, "correct": c == y} for y, cs, vs in
+                       zip(res["sign"], res["emitted"], res["emitted_scores"]) for c, v in zip(cs, vs)])
+    emitted = {"n_emitted": len(em), "clips_without_emission": int((res["emitted"].str.len() == 0).sum()),
+               "by_score": calibration_table(em["score"], em["correct"]) if len(em) else [],
+               "thresholds": cutoffs(em["score"].to_numpy(), em["correct"].to_numpy()) if len(em) else {}}
 
     signs = {}
     for y, d in res.groupby("sign"):
@@ -94,7 +145,7 @@ def summarise(res: pd.DataFrame, idx2sign: dict) -> dict:
             "n": len(d), **{k: round(float(d[k].mean()), 4) for k in ("top1", "top3", "top5", "exact")},
             "confused_with": [[idx2sign[int(p)], round(n / len(d), 4)] for p, n in wrong.head(3).items()],
         }
-    return {"overall": overall, "calibration": {"by_p1": table, "thresholds": thresholds},
+    return {"overall": overall, "calibration": {"by_p1": table, "thresholds": thresholds}, "emitted": emitted,
             "signs": dict(sorted(signs.items()))}
 
 
@@ -143,10 +194,14 @@ def main() -> None:
     args.out.write_text(json.dumps(summary, indent=1))
     if args.per_clip:
         res.assign(sign=res["sign"].map(idx2sign), pred=res["pred"].map(idx2sign),
-                   ranked=[" ".join(idx2sign[i] for i in t) for t in res["ranked"]]).to_csv(args.per_clip, index=False)
+                   ranked=[" ".join(idx2sign[i] for i in t) for t in res["ranked"]],
+                   emitted=[" ".join(idx2sign[i] for i in t) for t in res["emitted"]],
+                   emitted_scores=[" ".join(repr(v) for v in t) for t in res["emitted_scores"]]
+                   ).to_csv(args.per_clip, index=False)
     o = summary["overall"]["combined"]
     print(f"{o['n']} clips: top-1 {o['top1']:.3f} top-3 {o['top3']:.3f} top-5 {o['top5']:.3f} "
-          f"exact {o['exact']:.3f} | thresholds {summary['calibration']['thresholds']} → {args.out}")
+          f"exact {o['exact']:.3f} | pooled thresholds {summary['calibration']['thresholds']} | "
+          f"emitted-sign thresholds {summary['emitted']['thresholds']} → {args.out}")
 
 
 if __name__ == "__main__":
