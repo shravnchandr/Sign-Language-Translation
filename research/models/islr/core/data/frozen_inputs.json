@@ -135,6 +135,7 @@
   "common": "islr.phrases.train --data-dir {IS_LMDB_DIR} --lmdb-path {IS_LMDB_DIR}/is.lmdb.mdb --val-fold 0 --arch graph --init {MODEL_fold0-graph}/best_phase1.pth --num-workers 4 --aug-rotate 20 --aug-shear 0.15 --aug-scale 0.3 --aug-affine-prob 0.8 --vocab {WLASL_ALL_DIR}/sign_to_prediction_index_map.json",
   "phrases05": "--extra-data-dir {WLASL_ALL_DIR} --extra-lmdb-path {WLASL_ALL_DIR}/wlasl_all.lmdb.mdb --extra-frac 0.3",
   "phrases06 (research only)": "--extra-data-dir {WLASL_ALL_DIR} {ASLC_DIR} --extra-lmdb-path {WLASL_ALL_DIR}/wlasl_all.lmdb.mdb {ASLC_DIR}/aslcitizen.lmdb.mdb --extra-frac 0.3 0.15 --extra-kinds identical variant",
-  "phrases07": "--extra-data-dir {WLASL_ALL_DIR} {POPSIGN_DIR} --extra-lmdb-path {WLASL_ALL_DIR}/wlasl_all.lmdb.mdb {POPSIGN_DIR}/popsign.lmdb.mdb --extra-frac 0.3 0.2"
+  "phrases07": "--extra-data-dir {WLASL_ALL_DIR} {POPSIGN_DIR} --extra-lmdb-path {WLASL_ALL_DIR}/wlasl_all.lmdb.mdb {POPSIGN_DIR}/popsign.lmdb.mdb --extra-frac 0.3 0.2",
+  "phrases07-w50": "--extra-data-dir {WLASL_ALL_DIR} {POPSIGN_DIR} --extra-lmdb-path {WLASL_ALL_DIR}/wlasl_all.lmdb.mdb {POPSIGN_DIR}/popsign.lmdb.mdb --extra-frac 0.5 0.2"
  }
 }

@@ -57,7 +57,7 @@ def main() -> None:
     p.add_argument("--vocab-map", required=True, type=Path, help="the WLASL-all release's label map (the run's --vocab)")
     p.add_argument("--init", required=True, type=Path, help="local copy of the frozen initial checkpoint")
     p.add_argument("--commit", help="expected code revision (default: any clean commit containing the freeze record)")
-    p.add_argument("--profile", choices=["phrases05", "phrases06", "phrases07"],
+    p.add_argument("--profile", choices=["phrases05", "phrases06", "phrases07", "phrases07-w50"],
                    help="also require this comparison run's full recipe and extra sources")
     a = p.parse_args()
     spec, fz = json.loads(a.spec.read_text()), json.loads(a.frozen.read_text())

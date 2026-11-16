@@ -629,6 +629,52 @@ legacy phrases06 (85.9 / 86.8 %) only unpaired: the research re-score kept no pe
 early at epoch 29 under the same patience rule the other two ran with (they never triggered it). Not
 exportable (`research_only` meta).
 
+**ASL Citizen official validation split (`islr-aslc-val`, 1,045 clips / 5 signers; never scored before
+2026-11-15).** Frozen phrases05 → frozen phrases07: 74.4 → 76.8 % (+51 / −26, McNemar p = 0.006); two-hand
+clips (442) 67.2 → 70.4 % (+29 / −15, p = 0.049); one-hand clips (603) 79.8 → 81.6 % (+22 / −11, p = 0.08);
+4 of 5 signers higher, one unchanged. Same direction as the test split. (This is not a minimum detectable
+change: McNemar depends on the discordant pairs, e.g. +11 / −0 on the same clips is a 1.05-point gain at
+p ≈ 0.001.)
+
+**Two-hand exposure of the mixture (`islr.phrases.exposure`, `islr-mix-exposure`, 4,000 epoch-0 training
+phrases per mix, seed 42; model-input frames with both presence flags).** ASL Signs / WLASL-all / PopSign
+50 / 30 / 20 (frozen phrases07): 10.48 %; 40 / 40 / 20: 14.23 % (1.36×); 30 / 50 / 20: 18.82 % (1.80×). WLASL-all
+supplies 97–99 % of the two-hand frames in every mix (≈ 35 % of its frames; ASL Signs 0.2–0.3 %, PopSign
+0.4–0.9 %).
+
+### Pre-registration: phrases07-w50 (30 / 50 / 20) vs frozen phrases07 (registered 2026-11-15, before launch)
+
+Hypothesis: more two-hand exposure (via WLASL-all's phrase share) improves recognition on unseen signers.
+A gain would support the mixture change, not isolate two-hand coverage as its cause (WLASL's recording
+style and extra-gloss labels rise with it).
+
+- **Arms.** Baseline = the existing frozen phrases07 run (seed 42). New arm = profile `phrases07-w50` in
+  `frozen_inputs.json` (differs from `phrases07` only in `--extra-frac 0.5 0.2`), code at the commit that
+  registers this, same reference spec (`--frozen-spec`, `--allow-diff spec_only`); its spec must pass
+  `check_freeze --profile phrases07-w50`. Everything else fixed (releases, init, vocabulary, folds,
+  validation phrases, seed 42, epochs / patience, augmentation, runtime).
+- **Checkpoint.** The trainer's rule, as for the baseline: lowest synthetic validation WER
+  (`best_phrases.pth`). That checkpoint is scored once on each set below; no other checkpoint is scored.
+- **Primary.** ASL Citizen validation split, single-sign exact decode, paired by clip. Adopt only if the
+  gain is ≥ 1.0 point and exact two-sided McNemar p < 0.05.
+- **Guards (all must hold).**
+  1. ASL Signs fold-0 held-out signers (`cross_dataset --val-fold 0`: 14,076 clips, signers 34503 / 49445 /
+     62590), single-sign exact: lower bound of the 95 % paired-difference interval (w50 − baseline) > −2.0
+     points. Method fixed now: clip-level Wald interval, d = (b − c) / n, SE = √(b + c − (b − c)² / n) / n,
+     d − 1.96 · SE (b = clips right only in w50, c = right only in baseline). Scope: these three signers'
+     clips only — it guards the cohort, not non-inferiority for new signers. Each signer's change is reported.
+     PopSign may contain these signers (shared game), which affects both arms.
+  2. Synthetic validation WER (same 3,000 fixed phrases, ASL Signs fold-0 signers) ≤ 0.25262946797215996
+     (baseline 0.23262946797215997 + 0.02; the margin is a judgment, not a noise estimate).
+- **Reported, not decisive.** ASL Citizen validation two-hand / one-hand / per-signer changes; ASL Signs
+  per-signer changes; ASL Citizen test and WLASL test half, scored once after the decision (both inspected
+  repeatedly before; WLASL is in-domain for the source being increased).
+- **Replication (only if adopted).** Both arms again with seed 43, otherwise identical (needs a
+  `check_freeze` option for an expected seed, added and committed before launch). Replicated iff the seed-43
+  pair also meets the primary rule and both guards. If it does not, the result is reported as not
+  replicated and no further mixture search starts from it.
+- **Not established by any of this:** a product improvement — that needs the consented camera holdout.
+
 **Browser / export review (2026-11-15; ASL-App issues are the app owner's to fix, this repo supplies the
 reference).**
 

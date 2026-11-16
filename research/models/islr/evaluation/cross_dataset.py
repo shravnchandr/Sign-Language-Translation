@@ -83,7 +83,11 @@ def main() -> None:
                    help="WLASL signer half (build_wlasl_lmdb.signer_split); use test for a "
                         "model trained with --extra-data-dir")
     p.add_argument("--split", help="keep rows whose `split` column equals this (ASL Citizen: train / val / test)")
+    p.add_argument("--val-fold", type=int, help="ASL Signs: score the held-out signers of this frozen fold "
+                   "(dataset.signer_fold_split; no aspect correction, both_hands from stored presence)")
     args = p.parse_args()
+    if args.val_fold is not None and (args.signers != "all" or args.split):
+        raise SystemExit("--val-fold selects ASL Signs signers; it does not combine with --signers / --split")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     sign2idx = load_map(args.sign_map or args.data_dir / "sign_to_prediction_index_map.json", extended=True)
@@ -121,6 +125,19 @@ def main() -> None:
         df = df[df["participant_id"].isin(signer_split(df)[args.signers])]
     if args.split:
         df = df[df["split"] == args.split]
+    fold_signers = None
+    if args.val_fold is not None:  # ASL Signs: the frozen fold's held-out signers, as the phrase validation
+        from ..core.data.dataset import _FOLDS, signer_fold_split
+
+        folds = json.loads(_FOLDS.read_text())
+        if not 0 <= args.val_fold < folds["n_folds"]:
+            raise SystemExit(f"--val-fold {args.val_fold}: the frozen ASL Signs folds are 0..{folds['n_folds'] - 1}")
+        unknown = sorted(set(df["participant_id"].astype(str)) - set(folds["folds"]))
+        if unknown or "source" in df:
+            raise SystemExit(f"--val-fold needs the ASL Signs release (signers not in the frozen folds: {unknown[:5]})")
+        df = df.iloc[signer_fold_split(df, args.val_fold)[1]]
+        fold_signers = sorted(df["participant_id"].astype(str).unique())
+        df = df.assign(synonym=False, aspect_k=1.0, ratio_raw=np.nan, fps=30, source="aslsigns", both_hands=-1)
     lmdb_path = args.lmdb_path or args.data_dir / "wlasl.lmdb.mdb"
     release = require_accepted(args.data_dir, lmdb_path)  # scores only on a validated dataset release
     env = _open_lmdb_env(str(lmdb_path))  # the handle require_accepted opened (one env per process)
@@ -136,7 +153,8 @@ def main() -> None:
             rows.append(dict(path=r.path, sign=r.sign, signer=r.participant_id,
                              synonym=bool(r.synonym),
                              kind=getattr(r, "kind", "synonym" if r.synonym else "identical"),
-                             split=getattr(r, "split", None), two_hands=r.both_hands > 0,
+                             split=getattr(r, "split", None),
+                             two_hands=bool(pres.all(1).any()) if r.both_hands < 0 else r.both_hands > 0,
                              n_frames=len(coords), hand_frac=float(pres.any(1).mean()),
                              aspect_k=r.aspect_k, ratio_raw=r.ratio_raw, fps=r.fps,
                              source=r.source, **predict(coords, presence),
@@ -150,6 +168,7 @@ def main() -> None:
         "checkpoint": str(args.checkpoint),
         "wlasl_signers": args.signers,
         "split": args.split,
+        "val_fold": args.val_fold, "fold_signers": fold_signers,
         "kind": "phrase (single-sign exact decode)" if phrase else "isolated (top-1)",
         "dataset_release": release,
         "clips": len(res), "signs": int(df["sign"].nunique()), "signers": int(res["signer"].nunique()),
