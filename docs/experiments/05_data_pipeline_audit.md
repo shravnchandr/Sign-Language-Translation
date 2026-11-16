@@ -837,6 +837,14 @@ before inference and records manifest, sha256, part and signers in the summary. 
 development 2,677 clips (708031 / 708036 / 708037), final 3,686 with `--score-final`, refused without it,
 and each refusal on an edited manifest copy.
 
+**Frozen phrases07 on PopSign test development (2026-11-16, local CPU, manifest sha256 a883056c1d960e28).**
+2,677 clips, 3 signers, 250 signs: **87.1 % exact single-sign decode** (pooled top-1 88.7 %, top-5 98.2 %).
+Per signer 81.0 / 84.4 / 94.4 % (708031 / 708036 / 708037); no sign at 0 %, 5 below 50 %. By camera
+1080×1920 88.5 %, 1944×2592 84.4 % — but the larger size is one signer (708036) here, so camera and
+signer are not separable. Two-hand clips: 25 (88 %). Higher than WLASL test half (84.0 %) and ASL Citizen
+test (73.2 %), as expected for the training sources' own recording setup; with 3 signers, the per-signer
+spread (13 points) is as large as the gap to WLASL. The sealed final part was not scored.
+
 **Browser / export review (2026-11-15; ASL-App issues are the app owner's to fix, this repo supplies the
 reference).**
 
