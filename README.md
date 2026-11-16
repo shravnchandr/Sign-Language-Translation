@@ -55,6 +55,15 @@ These are synthetic phrases (citation-form clips, artificial transitions, no coa
 
 On **ASL Citizen** (51 unseen Deaf signers, webcam, 8,557 clips; research use only — no model is trained on it) the same order holds independently: phrases01 53.7 %, phrases03 69.0 %, phrases04 68.7 % (66.9 % with the framing correction undone, phrases03 44.2 %), **phrases05 72.4 %** (paired vs phrases04 p = 2e-19; pooled top-1 75.4 vs 74.2 %, p = 0.002), isolated classifier 65.2 %.
 
+**PopSign and the frozen comparison.** `phrases07` adds PopSign ASL (CC BY 4.0, the game ASL Signs came from) as 20 % of phrases. After the data-pipeline audit (`docs/experiments/05_data_pipeline_audit.md`) every release was rebuilt under one data contract and phrases05 / phrases07 retrained from one frozen specification, so the runs differ only in their data mix:
+
+| Frozen run | Synthetic WER | WLASL test half | ASL Citizen test | PopSign held-out (development) |
+|---|---|---|---|---|
+| phrases05 (ASL Signs 70 % + WLASL 30 %) | 0.283 | 82.5 % | 70.4 % | 72.8 % |
+| **phrases07** (+ PopSign: 50 / 30 / 20 %) — **candidate browser model** | **0.233** | 84.0 % | **73.2 %** | **87.1 %** |
+
+ASL Citizen 70.4 → 73.2 % (paired p = 2.3e-7, 9 of 11 signers up); WLASL +1.5 points (p = 0.18, no detectable difference). The PopSign column is the game's own test split: 8 participants who supplied no training clips, screened against ASL Signs for shared recordings and against both training sources by a landmark fingerprint (one participant flagged and dropped), then split by a committed rule into development (3 signers, 2,677 clips) and a sealed final part (4 signers, 3,686 clips) that has not been scored. On development every signer improves (81–94 % with phrases07). A pre-registered stronger PopSign share (30 / 50 / 20) failed its criteria and was not adopted. Frozen phrases07 is exported and verified (`exports/frozen-phrases07/browser/`, with PopSign attribution); the app still runs phrases05 until it switches.
+
 Two follow-ups: an ablation (`phrases05b`, 30 % WLASL but shared signs only) shows the bigger WLASL share gives phrases05's ranking gain and the wider vocabulary a cleaner decode. A research-only run trained on ASL Citizen's train split (`phrases06`, never exported) reaches 86.7 % on its test signers (phrases05 70.9 %) — mostly by learning that dataset's sign forms — and also improves WLASL 83.7 → 86.9 %: more Deaf webcam signers help. The shippable route to that gain is openly licensed data (PopSign ASL, CC BY 4.0).
 
 On ASL Signs' held-out signers phrases05 ranks the right sign first 64 % of the time and in its top 3 81 % (phrases04 65 / 81 %); `sign_reliability.json` gives per-sign accuracy, common confusions (often near-synonyms: cat/kitty, pen/pencil, wake/awake) and score thresholds for a "not sure" state. Caveats: the WLASL halves share recording sources, the viewpoint augmentation was chosen on the same test half (ASL Citizen, above, is the independent check), and live webcam use is still untested beyond anecdotes.
@@ -182,7 +191,8 @@ Spatial-Temporal Graph Convolutional Network. Legacy baseline, superseded by `--
 research/models/       # model code (PYTHONPATH=research/models) — see tree below
 scripts/               # tools: run_pipeline_isolated.sh / run_pipeline_vqvae_seq2seq.sh, setup_runpod.sh,
                        #   runpod_results.sh, kaggle_run.py (any module on a Kaggle GPU),
-                       #   extract_aslcitizen.py (ASL Citizen landmarks, research only),
+                       #   extract_aslcitizen.py (ASL Citizen landmarks, research only), extract_popsign.py,
+                       #   extract_wlasl.py, extraction_inventory.py,
                        #   download_kernel_output.py (large Kaggle outputs; used by setup_runpod.sh)
 notebooks/             # by approach — see notebooks/README.md
   data/                #   dataset builders + MediaPipe extraction (LMDBs, WLASL); legacy/ older builders
@@ -192,8 +202,8 @@ notebooks/             # by approach — see notebooks/README.md
   first_place/         #   1st-place Kaggle solution reproduced on our signer fold
 archive/research/      # superseded prototypes, feature experiments and tools (kept for reference)
 data/                  # datasets (gitignored) — see below
-exports/               # browser-ready model (gitignored): phrases05/ = ONNX + labels + preprocess spec +
-                       #   sign_reliability.json + fixtures/
+exports/               # browser-ready models (gitignored): phrases05/ = ONNX + labels + preprocess spec +
+                       #   sign_reliability.json + fixtures/ (what the app runs); frozen-phrases07/browser/ = candidate
 results/               # run outputs (gitignored), by approach: isolated/, pretrain/, phrases/<run>/,
                        #   evaluation/ (wlasl, error_review, signer_diagnostics); kaggle/ = download inbox
 docs/                  # local notes (gitignored); docs/experiments/ = the experiment log (tracked)
@@ -204,12 +214,15 @@ research/
 │   │   ├── core/                       # Shared by every approach
 │   │   │   ├── config.py               # Landmark layout constants, feature dimensions
 │   │   │   ├── model/                  # LandmarkConformer, GraphConformer (--arch graph), VQ, GRL, SupCon
-│   │   │   └── data/                   # Datasets, augmentation, LMDB builders (ASL Signs, fingerspelling, WLASL)
+│   │   │   └── data/                   # Data contract, datasets, augmentation, LMDB builders (ASL Signs, fingerspelling,
+│   │   │                               #    WLASL, ASL Citizen, PopSign), validation, frozen folds / splits
 │   │   ├── isolated/                   # A: isolated-sign classifier — train.py, error_review, signer_diagnostics
 │   │   ├── pretrain/                   # B: fingerspelling CTC pre-training — fingerspelling.py
 │   │   ├── phrases/                    # C (current product model): continuous CTC on synthetic phrases —
 │   │   │                               #    train.py, dataset.py, grammar.py, breakdown.py
-│   │   ├── evaluation/                 # cross_dataset.py (WLASL), sign_reliability.py (per-sign, for the app)
+│   │   ├── evaluation/                 # cross_dataset.py (WLASL / ASL Citizen / PopSign holdout parts),
+│   │   │                               #    sign_reliability.py (per-sign, for the app), signer_overlap.py,
+│   │   │                               #    sign_form.py (failure-review pre-screen)
 │   │   └── export/                     # export_onnx.py (browser model), browser_fixtures.py
 │   ├── vqvae_seq2seq/          # Approach 0 (dormant): factorized VQ-VAE → translator
 │   │   ├── vqvae/
@@ -272,7 +285,7 @@ kaggle competitions download -c asl-fingerspelling       # Fingerspelling (~189 
 
 Extract to `data/Isolated_ASL_Recognition/` and `data/ASL_Fingerspelling_Recognition/` respectively.
 
-**Other datasets.** WLASL (C-UDA) is used for cross-dataset tests and, by signer half, for training. ASL Citizen (webcam recordings by Deaf signers) is under the Microsoft Research License — **research use only**: its landmarks are extracted privately (`scripts/extract_aslcitizen.py`) and models trained on it are not exported for the app. PopSign ASL v1.0 (CC BY 4.0, the source of ASL Signs) is the permissive option for product data.
+**Other datasets.** WLASL (C-UDA) is used for cross-dataset tests and, by signer half, for training. ASL Citizen (webcam recordings by Deaf signers) is under the Microsoft Research License — **research use only**: its landmarks are extracted privately (`scripts/extract_aslcitizen.py`) and models trained on it are not exported for the app. PopSign ASL v1.0 (CC BY 4.0, the source of ASL Signs) is the permissive option for product data: its game-train videos feed phrases07 (`scripts/extract_popsign.py`, credited in the export's `ATTRIBUTION.md`), its game-test videos are the held-out evaluation set.
 
 **Parquet format:** columns `frame`, `type`, `landmark_index`, `x`, `y`, `z`. Types: `pose` (33), `left_hand` (21), `right_hand` (21), `face` (468) — 543 landmarks per frame.
 
