@@ -854,6 +854,34 @@ tokens), so extra-token cleanup would reach few. Signs below 50 % (8–12 clips 
 pooled top-1 and are hypotheses about similar forms, for a reviewer, not findings. 25 two-hand clips are
 too few to guide two-hand changes.
 
+### PopSign 4 → 8 recordings per (signer, sign): nested expansion (2026-11-16, in progress)
+
+Motivation: PopSign training data raised held-out PopSign development signers 72.8 → 87.1 %; does more
+of the same 31 signers' recordings help further? (The 14-point gain does not predict this.)
+
+**Selection (nested, `extract_popsign.py --base-per-pair 4 --per-pair 4`, 66e9ff8).** `PER_PAIR=8`
+would not contain the accepted 4 (evenly spaced 4 and 8 are not nested), so the accepted selection is
+recomputed, left out, and 4 more are spaced over the remaining recordings. `inventory-popsign-add4`
+(selection only, every added video probed): the recomputed base equals the accepted inventory exactly
+(26,278 paths); **24,945 additions**, disjoint from it, no duplicates (pairs with < 8 recordings get
+fewer); fps 30: 19,393, 120: 5,449, 60: 12, 29–31: 91. Extraction `extract-popsign-add4-s0..11` at
+26c2a9d (cells unchanged since 66e9ff8).
+
+**Signer weighting (registered, not frozen).** `extra_source` weights PopSign signers by clip count.
+With the additions, each signer's share of PopSign phrases changes by ×0.872 (gtsignstudy4a.8043, fewer
+remaining recordings) to ×1.054 (gtsignstudy4a.8049); total variation 0.87 % of PopSign phrases. Small
+enough to report rather than freeze; the realised shares go in the pre-registration.
+
+**Builder (333f84c, 45928b2).** One release from both versions (`--expect-shards extract-popsign-v2=12
+extract-popsign-add4=12`): every version complete, selections disjoint across all shards (single-version
+builds too), at most one version on `--inventory`; several `--fps-csv`, a clip probed at two rates
+refused.
+
+**Still to do before training:** audit of old + added + test shards together (additions vs ASL Signs;
+any recording shared between training and the test partitions); matches appended to the frozen
+exclusion list; build + validate; old clips byte-identical to the accepted release; pin the release in
+`frozen_inputs.json` and write the criteria. The test release's final part stays sealed.
+
 **Browser / export review (2026-11-15; ASL-App issues are the app owner's to fix, this repo supplies the
 reference).**
 
