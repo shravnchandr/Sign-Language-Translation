@@ -710,6 +710,58 @@ Note for any future canonical-only WLASL experiment: filter the WLASL-all releas
 (1,508 clips: 725 train half / 783 test half), do not swap in the shared-sign `accepted-wlasl` release
 (1,605 clips — a superset with 97 extra clips, none missing), or the 97 become a second difference.
 
+### Failure review: the 8 zero-accuracy ASL Citizen signs (frozen phrases07; started 2026-11-16)
+
+Queue: all 93 ASL Citizen **test** clips of cowboy, finger, hate, hen, into (ASL Citizen gloss IN, a
+`synonym` mapping), listen, pretend, yucky — every test clip of these signs fails, across 10–11 of the 11
+test signers each (so not one signer's tracking). Dropping the less active hand rescues 5 of 93 (into 3,
+yucky 2). Labels stay frozen during the review.
+
+**Automatic pre-screen (`evaluation.sign_form`, `islr-sign-form` / `islr-sign-form-reverse`; derived numbers
+only, the ASL Citizen data stays on Kaggle).** Per clip: dominant-hand location (wrist relative to the
+nose, shoulder widths, chirality folded), motion (wrist path), handshape (15 joint-angle cosines), share
+of two-hand frames; each ASL Citizen clip (all splits, 30–31 per sign) is called "like the confusion" in
+a feature group when it is nearer the ASL Signs centroid of the model's confusion than of its own label
+(units: pooled within-sign MAD). Two controls: ASL Signs' own clips (how separable the pair is in the
+training data), and the reverse pair on ASL Citizen (its clips of the confusion sign scored against the
+failing sign — how much is plain dataset shift: landscape webcam, hands entering from below, longer
+paths).
+
+| sign → confusion | location like confusion: ASLC / ASL Signs ctrl / reverse | handshape: ASLC / ctrl / reverse | reading |
+|---|---|---|---|
+| cowboy → dog | 93 / 12 / 2 % | 27 / 3 / 29 % | location differs: ASL Signs cowboy is at head height (median wrist 0.08 shoulder widths below the nose), ASL Citizen's at the hips (0.82) with both hands in 47 % of frames — likely another form |
+| pretend → mouse | 94 / 19 / 3 % | 81 / 14 / 3 % | location and handshape differ, specific to this sign |
+| hen → pen | 87 / 32 / 13 % | 87 / 26 / 45 % | location and handshape differ |
+| finger → first | 57 / 39 / 61 % | 80 / 7 / 0 % | handshape differs (location difference is dataset shift) |
+| hate → grandma | 71 / 30 / 45 % | 81 / 17 / 14 % | differs; and ASL Citizen *hate* is nearer ASL Signs *yucky* than ASL Signs *hate* in 97 % of clips (reverse of the yucky pair) |
+| yucky → hate | 13 / 36 / 65 % | 64 / 47 / 90 % | ASL Citizen yucky looks like ASL Signs yucky (location, motion); the model still says hate — a recognition error, or hate/yucky forms crossed between the datasets |
+| listen → hear | 63 / 43 / 20 % | 67 / 51 / 67 % | not separable even within ASL Signs (half its own listen clips are nearer hear): a hard or near-synonym pair |
+| into (IN) → store | 3 / 24 / — | 55 / 38 / — | location matches; no ASL Citizen *store* for the reverse control; the IN → into mapping is a non-signer's choice — check first |
+
+Motion is mostly dataset shift (reverse rates 72–97 % for dog / first / hate) and is not used above.
+This is a screen: "differs" says where the forms differ, not why (variant, mapping, tracking or
+recording). It cannot replace the semantic review.
+
+**Human review (outstanding — needs a reviewer who knows ASL).** Sheet
+`results/evaluation/frozen-phrases07-model-diagnostics/review_sheet.csv` (93 rows, one per failing test
+clip): ASL Citizen gloss and video file (`videos/<id>-<GLOSS>.mp4` in the Kaggle dataset
+`abd0kamel/asl-citizen`; watch it there, do not download or redistribute — research use only), the
+model's top sign, and the screen's location / handshape calls. Fields to fill, per clip:
+- `review_semantics`: `same` (the ASL Citizen gloss means the ASL Signs label) / `different` (mapping
+  error) / `unsure`;
+- `review_variant`: `citation` (the form the reviewer expects for the label) / `variant` (another accepted
+  form of the same sign) / `other_sign`;
+- `review_tracking`: `ok` / `hand_missing` / `wrong_hand` / `other` (from the video: is MediaPipe's view
+  plausible — needs the landmark overlay, optional);
+- `review_ctc_segmentation`: leave empty unless the clip contains more than the sign (extra signs, long
+  rest);
+- `review_notes`: free text, e.g. what the clip actually shows.
+Order of review: into (IN) first (a mapping question, cheapest to settle), then cowboy, pretend, hen
+(strongest form differences), then hate / yucky together (possible crossing), finger, listen. A per-sign
+decision only after all its clips: a confirmed mapping error → versioned label correction (separate
+from any training experiment); a confirmed variant → report it as a variant and treat it as a coverage
+question; neither → a recognition error.
+
 **Browser / export review (2026-11-15; ASL-App issues are the app owner's to fix, this repo supplies the
 reference).**
 
