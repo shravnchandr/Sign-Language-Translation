@@ -785,11 +785,46 @@ Only the four game-*train* parts of the PopSign Kaggle mirror were ever extracte
 (users 8031, 8032, 8033, 8035, 8036, 8037, 8038, 8039), all 250 signs; none of them among the 31 users of the
 accepted PopSign training release.** (The `gtsignstudy4a.` prefix does not mark another study: training has
 `gtsignstudy4a.8040`; the test users are numbered among the training users' 8027–8054 — likely the same
-recording programme, different people by id.) The test videos seen so far are 1080×1920 (9:16), like
-5 % of the training clips (the rest 1944×2592).
-Not yet checked: overlap with ASL Signs signers (same project; 257 PopSign training videos matched ASL
-Signs recordings) — needs landmarks, so it comes after extraction. Until then it is a candidate, not a
-holdout. The rest of the game-train videos are not a holdout (the same 31 training signers).
+recording programme, different people by id.) The rest of the game-train videos are not a holdout (the
+same 31 training signers).
+
+**Extraction and release (2026-11-16).** `extract_popsign.py --split test` at 0878858, 4 per participant
+and sign (7,274 selected, 4 shards; 1 failed), fps probe `fps-popsign-test` (632 clips at 120 fps → step 4,
+1 at 60). Frame sizes: 5 participants 1080×1920, 3 participants 1944×2592 (one size per participant;
+both portrait, no aspect correction). Raw audit `islr-audit-popsign-test` at cfcccbb:
+7,273 clips, no read / structure errors, no exact duplicates, 8 signers, 250 glosses. **Same recording as
+ASL Signs:** 4,680 clips comparable (same sign and frame count); 37 at ≤ 0.095 — but none below 0.074,
+whereas the training split's 257 matches include a cluster far below (104 under 0.07 of 13,271); and two
+*different* test participants come within 0.075 of each other (23 cross-participant near-duplicate pairs),
+so this range occurs between different recordings. The 37 are excluded anyway, as a precaution
+(`core/data/popsign_test_asl_signs_matches.csv`, aaf3f35). Release `islr-release-popsign-test` at aaf3f35:
+**7,236 clips, 250 signs, 8 signers**, validated with `--raw-root` (policy 7, 200 clips re-prepared;
+content 44b2d0de445f5f71, train.csv d0ef418227c9d912); two-hand clip rate 1.8 %.
+
+**Signer fingerprint screen** (`evaluation.signer_overlap`, run locally on the accepted releases;
+`results/evaluation/popsign-test/`). Within the test release the fingerprint separates the 8 signers
+(split-half AUC 1.000, same-person max 0.40, different-person min 0.95).
+
+| Test signer | Nearest ASL Signs signer | Nearest PopSign training signer |
+|---|---|---|
+| 708033 | 28656 0.59 | **708053 0.50 — flagged** (training same-person max 0.58; 0.8 % of different-person pairs closer) |
+| 708036 | 4718 0.76 | 708046 0.68 |
+| 708035 | 22343 0.88 | 707041 0.82 |
+| 708032 | 37055 1.03 | 708902 0.83 |
+| 708031 | 4718 1.11 | 708040 0.85 |
+| 708038 | 2044 1.31 | 708902 0.80 |
+| 708037 | 37055 1.43 | 707042 1.25 |
+| 708039 | 37055 1.58 | 708902 1.01 |
+
+ASL Signs reference: same-person max 0.41, so no test signer is flagged there. 708033 / 708053 (ids one
+digit apart) is plausibly one person under two ids, and phrases07 trained on 708053. The screen is
+calibrated within a dataset; "not flagged" does not establish absence.
+
+**Split (committed before any model is scored on it; `core/data/popsign_test_split.json`).** Drop flagged
+signers (708033); sort the rest by frame width, then `crc32(str(participant_id))`; assign alternately
+final, development, … → **development 708031, 708036, 708037 (2,677 clips; 918 at 1944×2592)**, **sealed
+final 708032, 708035, 708038, 708039 (3,686 clips; 893 at 1944×2592)**. The final part is scored once, for
+a model already chosen on development, with the decision rule written down first.
 
 **Browser / export review (2026-11-15; ASL-App issues are the app owner's to fix, this repo supplies the
 reference).**

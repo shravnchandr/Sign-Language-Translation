@@ -1,0 +1,17 @@
+{
+ "release": {
+  "kaggle_notebook": "schandranyc/islr-release-popsign-test",
+  "code": "aaf3f35",
+  "content_digest": "44b2d0de445f5f71",
+  "csv_digest": "d0ef418227c9d912",
+  "clips": 7236,
+  "signers": 8
+ },
+ "rule": "Drop every signer the fingerprint screen flags as likely also in a training source (ASL Signs or the PopSign training release). Sort the rest by frame width, then by zlib.crc32(str(participant_id)); assign alternately final, development, final, ... Written before any model is scored on this release.",
+ "excluded": {
+  "708033": "signer_overlap vs PopSign training release: nearest 708053 at 0.50, inside the training same-person range (max 0.58); 0.8 % of different-person pairs closer. Also the closest test signer to ASL Signs (28656, 0.59, not flagged)."
+ },
+ "development": [708031, 708036, 708037],
+ "final": [708032, 708035, 708038, 708039],
+ "final_use": "Sealed: scored once, for a model already chosen on development, with the decision rule written down before scoring."
+}
