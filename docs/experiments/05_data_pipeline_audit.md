@@ -706,6 +706,10 @@ extra-gloss labels). Test splits (post-decision, `islr-w50-tests`, reported only
 p = 0.21); ASL Citizen test 73.2 → 72.7 % (+155 / −170, p = 0.44), two-hand clips 64.7 → 64.7 %, one-hand 79.7 →
 78.9 %. No detectable difference on either, and no two-hand gain — consistent with the decision.
 
+Note for any future canonical-only WLASL experiment: filter the WLASL-all release to the canonical 250
+(1,508 clips: 725 train half / 783 test half), do not swap in the shared-sign `accepted-wlasl` release
+(1,605 clips — a superset with 97 extra clips, none missing), or the 97 become a second difference.
+
 **Browser / export review (2026-11-15; ASL-App issues are the app owner's to fix, this repo supplies the
 reference).**
 
