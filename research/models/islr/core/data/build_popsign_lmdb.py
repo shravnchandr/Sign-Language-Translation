@@ -108,7 +108,12 @@ def main() -> None:
         raise SystemExit(f"PopSign user ids collide after numbering: {clash[clash > 1].index.tolist()}")
     df["sequence_id"] = df["video"].map(lambda v: os.path.splitext(str(v))[0])
     df["source"] = "popsign"
-    probe = pd.concat([pd.read_csv(f) for f in args.fps_csv]).drop_duplicates("path").set_index("path")["fps"]
+    probes = pd.concat([pd.read_csv(f) for f in args.fps_csv])
+    conflict = probes.groupby("path")["fps"].nunique()
+    if (conflict > 1).any():  # the step would depend on the order of the probe files
+        raise SystemExit(f"{int((conflict > 1).sum())} clips probed with different frame rates across --fps-csv, "
+                         f"e.g. {conflict[conflict > 1].index[:3].tolist()}")
+    probe = probes.drop_duplicates("path").set_index("path")["fps"]
     df["fps"] = df["path"].map(probe)  # the video's own frame rate (probed)
     if df["fps"].isna().any() or (df["fps"] <= 0).any():
         bad = df.loc[df["fps"].isna() | (df["fps"] <= 0), "path"].tolist()

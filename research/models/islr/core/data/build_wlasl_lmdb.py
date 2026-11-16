@@ -210,8 +210,8 @@ def load_shards(root: Path, keyword: str, expect: int | dict, inventory: Path | 
                 allow_missing: int = 0) -> tuple[pd.DataFrame, dict]:
     """The shard_*.csv of ONE extraction version under root (path containing keyword) → clips;
     expect = {version: shards} names several versions instead (a nested extraction added to an
-    accepted one: each version's shards 0..n-1 all present, selections disjoint, at most one version
-    taking its selection from the --inventory).
+    accepted one: each version's shards 0..n-1 all present, at most one version taking its
+    selection from the --inventory). Selections must be disjoint across every shard and version.
 
     Each shard must sit inside its notebook's folder `<version>-s<k>` (how Kaggle mounts a
     kernel's output). Exits when shards of two versions are mounted together, a shard number
@@ -255,13 +255,10 @@ def load_shards(root: Path, keyword: str, expect: int | dict, inventory: Path | 
         parts.append(d)
         v, k = found[c]
         sel, fail, src = _selection(c, k, inv)
-        if len(expect) > 1:
-            sources[f"{v}-s{k}"] = src
-            if sel & seen_sel:
-                raise SystemExit(f"{v} shard {k}: {len(sel & seen_sel)} videos also selected by another shard / version")
-            seen_sel |= sel
-        else:
-            sources[k] = src
+        sources[f"{v}-s{k}" if len(expect) > 1 else k] = src
+        if sel & seen_sel:  # a video selected twice could hide as one listed copy + one "missing"
+            raise SystemExit(f"{v} shard {k}: {len(sel & seen_sel)} videos also selected by another shard / version")
+        seen_sel |= sel
         listed = set(d["path"])
         if listed - sel:
             raise SystemExit(f"shard {k}: {len(listed - sel)} listed clips were never selected, e.g. {sorted(listed - sel)[0]}")
