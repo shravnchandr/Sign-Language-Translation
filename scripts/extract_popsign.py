@@ -53,10 +53,19 @@ videos = pd.DataFrame(rows).sort_values("video").reset_index(drop=True)
 print(f"{len(videos)} videos, {videos['participant'].nunique()} participants, {videos['gloss'].nunique()} "
       f"signs (listed in {time.time() - t0:.0f}s)")
 
-def spaced(g):  # PER_PAIR recordings evenly spaced over the pair's sessions
-    idx = np.unique(np.linspace(0, len(g) - 1, min(PER_PAIR, len(g))).round().astype(int))
+def spaced(g, n=None):  # n (default PER_PAIR) recordings evenly spaced over the pair's sessions
+    n = PER_PAIR if n is None else n
+    idx = np.unique(np.linspace(0, len(g) - 1, min(n, len(g))).round().astype(int))
     return g.iloc[idx]
 
+BASE = globals().get("BASE_PER_PAIR", 0)
+if BASE:  # nested: the BASE-per-pair selection (an accepted release) kept out; PER_PAIR more, evenly spaced over the rest
+    base = videos.groupby(["participant", "gloss"], group_keys=False).apply(lambda g: spaced(g, BASE))
+    os.makedirs("/kaggle/working", exist_ok=True)
+    base.assign(path=[f"train_landmark_files/{os.path.splitext(v)[0]}.parquet" for v in base["video"]])[
+        ["path", "participant", "gloss"]].sort_values("path").to_csv("/kaggle/working/base_selection.csv", index=False)
+    videos = videos.drop(base.index)
+    print(f"nested: {len(base)} base videos ({BASE} per pair) left out, {len(videos)} remain")
 picked = videos.groupby(["participant", "gloss"], group_keys=False).apply(spaced).sort_values("video")
 picked = picked.reset_index(drop=True).assign(split=SPLIT)
 mine = picked.iloc[SHARD::SHARDS]
@@ -66,7 +75,8 @@ print(f"{len(picked)} clips selected ({PER_PAIR} per participant × sign), shard
 """
 
 
-def notebook(ref: str, shard: int, shards: int, per_pair: int, max_side: int, limit: int, split: str = "train") -> dict:
+def notebook(ref: str, shard: int, shards: int, per_pair: int, max_side: int, limit: int, split: str = "train",
+             base_per_pair: int = 0) -> dict:
     c = {**cells_at(ref, "extract_aslcitizen.py", ("CELL_SETUP", "CELL_RUN")),
          **cells_at(ref, "extract_popsign.py", ("CELL_SELECT",))}
     digest = cells_digest(c["CELL_SETUP"], c["CELL_SELECT"], c["CELL_RUN"])
@@ -76,7 +86,8 @@ def notebook(ref: str, shard: int, shards: int, per_pair: int, max_side: int, li
                 "source": src.strip("\n").splitlines(True)}
 
     head = (f"REF, SHARD, SHARDS, PER_PAIR, LIMIT, REPO_URL = {ref!r}, {shard}, {shards}, {per_pair}, "
-            f"{limit}, {REPO_URL!r}\nMAX_SIDE, OUT, SPLIT = {max_side or None}, '/kaggle/working/popsign_landmarks', {split!r}\n")
+            f"{limit}, {REPO_URL!r}\nMAX_SIDE, OUT, SPLIT = {max_side or None}, '/kaggle/working/popsign_landmarks', {split!r}\n"
+            f"BASE_PER_PAIR = {base_per_pair}\n")
     return {
         "cells": [
             {"cell_type": "markdown", "metadata": {},
@@ -97,6 +108,9 @@ def main() -> None:
     p.add_argument("--shards", type=int, default=12)
     p.add_argument("--only", type=int, nargs="*", help="shard numbers (default: all)")
     p.add_argument("--per-pair", type=int, default=4, help="clips per (participant, sign)")
+    p.add_argument("--base-per-pair", type=int, default=0,
+                   help="nested selection: leave out the --base-per-pair selection (an accepted release's clips) and "
+                        "take --per-pair more per (participant, sign) from the remaining recordings")
     p.add_argument("--max-side", type=int, default=1280, help="downscale frames to this long side (0 = off)")
     p.add_argument("--limit", type=int, default=0, help="first N videos per shard (smoke test)")
     p.add_argument("--ref", help="commit to clone (default HEAD; must be pushed) — pin it for queued pushes")
@@ -117,7 +131,7 @@ def main() -> None:
     for k in shards:
         name = f"{a.name}-s{k}"
         with tempfile.TemporaryDirectory() as tmp:
-            nb = notebook(ref, k, a.shards, a.per_pair, a.max_side, a.limit, a.split)
+            nb = notebook(ref, k, a.shards, a.per_pair, a.max_side, a.limit, a.split, a.base_per_pair)
             (Path(tmp) / f"{name}.ipynb").write_text(json.dumps(nb, indent=1))
             meta = {"id": f"{user()}/{name}", "title": name, "code_file": f"{name}.ipynb",
                     "language": "python", "kernel_type": "notebook", "is_private": True,
