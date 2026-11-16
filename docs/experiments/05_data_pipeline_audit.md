@@ -685,6 +685,25 @@ style and extra-gloss labels rise with it).
   replicated and no further mixture search starts from it.
 - **Not established by any of this:** a product improvement — that needs the consented camera holdout.
 
+**Result (`islr-frozen-phrases07-w50` at 0ffdde3; spec matched the reference with `--allow-diff spec_only
+code`; `check_freeze --commit 0ffdde3 --profile phrases07-w50`: 16 / 16). Not adopted — all three
+registered criteria fail; no replication.**
+
+| criterion (registered) | baseline frozen phrases07 | w50 (30 / 50 / 20) | rule | result |
+|---|---|---|---|---|
+| ASL Citizen val exact (1,045) | 76.84 % | 75.69 % (+31 / −43, McNemar p = 0.20) | gain ≥ 1.0 point and p < 0.05 | fail |
+| ASL Signs fold 0 exact (14,076) | 67.87 % | 64.64 % (+724 / −1,179; d = −3.23, Wald lower bound −3.84 points) | lower bound > −2.0 | fail |
+| synthetic val WER | 0.23262946797215997 | 0.2701427391765955 (epoch 28) | ≤ 0.25262946797215996 | fail |
+
+Reported, not decisive: ASL Citizen val two-hand clips (442) 70.4 → 67.4 % (+15 / −28, p = 0.066), one-hand
+(603) 81.6 → 81.8 % (+16 / −15); per signer 4 of 5 lower (800005 82.7 → 80.8, 800012 81.1 → 82.2, 800021
+78.0 → 77.0, 800026 71.5 → 70.6, 800039 78.9 → 76.9 %). ASL Signs per signer: 34503 59.5 → 57.4, 49445 64.9 →
+59.6, 62590 79.5 → 77.3 %. Raising WLASL-all's share to 50 % (1.8× two-hand input frames) did not improve
+two-hand recognition on unseen ASL Citizen signers — the point estimate went the other way — and cost
+ASL Signs accuracy. One seed; this rejects the 30 / 50 / 20 mix as registered, it does not show that
+two-hand coverage is irrelevant (WLASL's two-hand frames come with its recording style and 1,767
+extra-gloss labels). Test splits (post-decision, `islr-w50-tests`): pending.
+
 **Browser / export review (2026-11-15; ASL-App issues are the app owner's to fix, this repo supplies the
 reference).**
 
