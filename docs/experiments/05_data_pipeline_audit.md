@@ -727,16 +727,20 @@ training data), and the reverse pair on ASL Citizen (its clips of the confusion 
 failing sign — how much is plain dataset shift: landscape webcam, hands entering from below, longer
 paths).
 
+Rerun with one calibration (`islr-sign-form-v2`, `--ref-pool` = the 15 labels, per-label seeded samples;
+the three calibration files are byte-identical). The first run (`islr-sign-form`) fitted centroids and
+scales on 15 labels forward but 13 in reverse, so its controls were not comparable; superseded.
+
 | sign → confusion | location like confusion: ASLC / ASL Signs ctrl / reverse | handshape: ASLC / ctrl / reverse | reading |
 |---|---|---|---|
-| cowboy → dog | 93 / 12 / 2 % | 27 / 3 / 29 % | location differs: ASL Signs cowboy is at head height (median wrist 0.08 shoulder widths below the nose), ASL Citizen's at the hips (0.82) with both hands in 47 % of frames — likely another form |
-| pretend → mouse | 94 / 19 / 3 % | 81 / 14 / 3 % | location and handshape differ, specific to this sign |
-| hen → pen | 87 / 32 / 13 % | 87 / 26 / 45 % | location and handshape differ |
-| finger → first | 57 / 39 / 61 % | 80 / 7 / 0 % | handshape differs (location difference is dataset shift) |
-| hate → grandma | 71 / 30 / 45 % | 81 / 17 / 14 % | differs; and ASL Citizen *hate* is nearer ASL Signs *yucky* than ASL Signs *hate* in 97 % of clips (reverse of the yucky pair) |
-| yucky → hate | 13 / 36 / 65 % | 64 / 47 / 90 % | ASL Citizen yucky looks like ASL Signs yucky (location, motion); the model still says hate — a recognition error, or hate/yucky forms crossed between the datasets |
-| listen → hear | 63 / 43 / 20 % | 67 / 51 / 67 % | not separable even within ASL Signs (half its own listen clips are nearer hear): a hard or near-synonym pair |
-| into (IN) → store | 3 / 24 / — | 55 / 38 / — | location matches; no ASL Citizen *store* for the reverse control; the IN → into mapping is a non-signer's choice — check first |
+| cowboy → dog | 93 / 12 / 2 % | 20 / 3 / 29 % | location differs: ASL Signs cowboy is at head height (median wrist 0.08 shoulder widths below the nose), ASL Citizen's at the hips (0.82) with both hands in 47 % of frames — likely another form |
+| pretend → mouse | 94 / 20 / 3 % | 81 / 14 / 10 % | location and handshape differ, specific to this sign |
+| hen → pen | 81 / 34 / 13 % | 87 / 27 / 42 % | location and handshape differ |
+| finger → first | 53 / 40 / 61 % | 80 / 7 / 3 % | handshape differs (location difference is dataset shift) |
+| hate → grandma | 71 / 28 / 45 % | 81 / 18 / 14 % | differs; and ASL Citizen *hate* is nearer ASL Signs *yucky* than ASL Signs *hate* in 87 % of clips overall (location 84 %, handshape 74 %) |
+| yucky → hate | 13 / 38 / 84 % | 71 / 46 / 74 % | location as ASL Signs yucky; the handshape gap is as large in reverse (dataset shift) — a recognition error, or hate / yucky forms crossed between the datasets |
+| listen → hear | 70 / 43 / 13 % | 67 / 49 / 37 % | hard within ASL Signs already (43–49 % of its own listen clips are nearer hear); ASL Citizen listen sits further toward hear than either control |
+| into (IN) → store | 3 / 25 / — | 55 / 38 / — | location matches; no ASL Citizen *store* for the reverse control; the IN → into mapping is a non-signer's choice — check first |
 
 Motion is mostly dataset shift (reverse rates 72–97 % for dog / first / hate) and is not used above.
 This is a screen: "differs" says where the forms differ, not why (variant, mapping, tracking or
