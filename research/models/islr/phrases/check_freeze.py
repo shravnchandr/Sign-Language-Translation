@@ -3,7 +3,8 @@ core/data/frozen_inputs.json: code revision committed and clean, contract / cach
 dataset release it read (content, train.csv and sign-map digests), the vocabulary (digest of the
 canonical 250 + WLASL-all map), the initial checkpoint bytes, seed and validation fold, and that the
 recorded runtime is a GPU; with --profile, also the full recipe and the exact list of extra sources of
-that comparison run (phrases05 / phrases06 / phrases07, from the recipes in frozen_inputs.json): the
+that comparison run (phrases05 / phrases06 / phrases07 / …, from the recipes in frozen_inputs.json; a
+release with "profiles" is used only by those profiles, e.g. the expanded PopSign release by phrases07-add4): the
 profile's arguments are run through phrases.train's own parser (training stubbed out), so every
 argument the profile does not set must equal the trainer's default. Path arguments are compared by the
 release / init / vocab digests instead. Check every comparison run's own spec, not only the reference:
@@ -57,7 +58,7 @@ def main() -> None:
     p.add_argument("--vocab-map", required=True, type=Path, help="the WLASL-all release's label map (the run's --vocab)")
     p.add_argument("--init", required=True, type=Path, help="local copy of the frozen initial checkpoint")
     p.add_argument("--commit", help="expected code revision (default: any clean commit containing the freeze record)")
-    p.add_argument("--profile", choices=["phrases05", "phrases06", "phrases07", "phrases07-w50"],
+    p.add_argument("--profile", choices=["phrases05", "phrases06", "phrases07", "phrases07-w50", "phrases07-add4"],
                    help="also require this comparison run's full recipe and extra sources")
     a = p.parse_args()
     spec, fz = json.loads(a.spec.read_text()), json.loads(a.frozen.read_text())
@@ -84,11 +85,25 @@ def main() -> None:
         return got == {"content": r["content_digest"], "csv": r["csv_digest"], "sign_map": r["sign_map_digest"], "lmdb": r["lmdb"]}
 
     check(same_release(spec["data"]["release"], "aslsigns"), f"main data = the frozen ASL Signs release {rel['aslsigns']['content_digest']}")
-    by_lmdb = {r["lmdb"]: n for n, r in rel.items()}
+    by_lmdb: dict = {}
+    for n, r in rel.items():
+        by_lmdb.setdefault(r["lmdb"], []).append(n)
+
+    def release_for(lmdb: str, got: dict) -> str | None:
+        """The frozen release of that LMDB file: a release listing --profile in its "profiles", else
+        the one listing no profiles (several releases can share a file name, e.g. popsign.lmdb.mdb);
+        without --profile, whichever of them the spec read."""
+        names = by_lmdb.get(lmdb, [])
+        if not a.profile:
+            return next((n for n in names if same_release(got, n)), names[0] if names else None)
+        own = [n for n in names if a.profile in rel[n].get("profiles", [])]
+        return (own or [n for n in names if "profiles" not in rel[n]] or [None])[0]
+
     for e in spec.get("extra_data", []):
-        name = by_lmdb.get((e.get("release") or {}).get("lmdb"))
+        lm = (e.get("release") or {}).get("lmdb")
+        name = release_for(lm, e.get("release") or {})
         check(name is not None and same_release(e["release"], name),
-              f"extra data {(e.get('release') or {}).get('lmdb')} = the frozen {name} release")
+              f"extra data {lm} = the frozen {name} release")
     vm = json.loads(a.vocab_map.read_text())
     check(hashlib.sha256(a.vocab_map.read_bytes()).hexdigest() == fz["vocabulary"]["wlasl_all_map_sha256"],
           "--vocab-map file = the frozen WLASL-all map")
@@ -108,7 +123,7 @@ def main() -> None:
         have = [(e.get("release") or {}).get("lmdb") for e in spec.get("extra_data", [])]
         check(have == lmdbs, f"extra sources {have} = {lmdbs} (in order)")
         if "research" in next(k for k in fz["recipes"] if k.split()[0] == a.profile):
-            check(any(rel[n].get("research_only") for n in (by_lmdb.get(x) for x in have) if n), "research-only profile reads the research-only release")
+            check(any(rel[n].get("research_only") for n in (release_for(e["release"]["lmdb"], e["release"]) for e in spec.get("extra_data", [])) if n), "research-only profile reads the research-only release")
     rt = spec.get("runtime") or {}
     check(rt.get("device") not in (None, "cpu") and rt.get("torch_cuda"), f"runtime on GPU: {rt}")
     check(bool(spec.get("val_set")), f"validation phrases digest {spec.get('val_set')}")

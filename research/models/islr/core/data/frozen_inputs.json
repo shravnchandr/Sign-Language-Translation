@@ -99,6 +99,33 @@
    "validated_at": "0b4a6080ce64ba2d20abd5729460c9e496dfb19f",
    "report_sha256": "a99728bca4c56f8c21c3d651ee6827352d6c2ede9d7fcc8397edf64718a43ae0",
    "manifest_sha256": "4aa5d45ee5669f33f6959fab8845ac75877d2d33ab1fafe81e9e2701e19eea2c"
+  },
+  "popsign-add4": {
+   "kaggle_notebook": "schandranyc/islr-release-popsign-add4",
+   "lmdb": "popsign.lmdb.mdb",
+   "clips": 50715,
+   "content_digest": "d721bffbe279f779",
+   "csv_digest": "1564a1e3f3f909c6",
+   "sign_map_digest": "1fe747c2f44c68db",
+   "validation_policy": 7,
+   "contract": "v4",
+   "cache_version": "1b7b9fed",
+   "raw_resampled": 200,
+   "frame_steps": {
+    "1": 38846,
+    "4": 11835,
+    "2": 34
+   },
+   "built_at": "fc25fcd56abc1c7e12eb32fdd0e526ec19c0237a",
+   "validated_at": "fc25fcd56abc1c7e12eb32fdd0e526ec19c0237a",
+   "report_sha256": "481b1a8e39fff42899693fdd664000e4de43f737970d9f2ea0075abd8623071d",
+   "manifest_sha256": "c483e8e2222b196e7ab502d5176289d6fbfa6b28e9e9ad2b80044b5e4591f1b1",
+   "profiles": [
+    "phrases07-add4"
+   ],
+   "frozen_on": "2026-11-17",
+   "contains": "the accepted popsign release unchanged: its 26,021 paths give content digest 81ed6e98b3858883 here, train.csv rows identical; + 24,694 nested additions (extract-popsign-add4, 249 ASL Signs matches excluded, 2 videos with nothing tracked = build errors)",
+   "signer_weights": "registered, not frozen: per-signer share of PopSign phrases ×0.876 (708043) to ×1.033 (708006) vs the accepted release; total variation 0.80 % of PopSign phrases, 0.16 % of all phrases at --extra-frac 0.2"
   }
  },
  "vocabulary": {
@@ -136,6 +163,7 @@
   "phrases05": "--extra-data-dir {WLASL_ALL_DIR} --extra-lmdb-path {WLASL_ALL_DIR}/wlasl_all.lmdb.mdb --extra-frac 0.3",
   "phrases06 (research only)": "--extra-data-dir {WLASL_ALL_DIR} {ASLC_DIR} --extra-lmdb-path {WLASL_ALL_DIR}/wlasl_all.lmdb.mdb {ASLC_DIR}/aslcitizen.lmdb.mdb --extra-frac 0.3 0.15 --extra-kinds identical variant",
   "phrases07": "--extra-data-dir {WLASL_ALL_DIR} {POPSIGN_DIR} --extra-lmdb-path {WLASL_ALL_DIR}/wlasl_all.lmdb.mdb {POPSIGN_DIR}/popsign.lmdb.mdb --extra-frac 0.3 0.2",
-  "phrases07-w50": "--extra-data-dir {WLASL_ALL_DIR} {POPSIGN_DIR} --extra-lmdb-path {WLASL_ALL_DIR}/wlasl_all.lmdb.mdb {POPSIGN_DIR}/popsign.lmdb.mdb --extra-frac 0.5 0.2"
+  "phrases07-w50": "--extra-data-dir {WLASL_ALL_DIR} {POPSIGN_DIR} --extra-lmdb-path {WLASL_ALL_DIR}/wlasl_all.lmdb.mdb {POPSIGN_DIR}/popsign.lmdb.mdb --extra-frac 0.5 0.2",
+  "phrases07-add4": "--extra-data-dir {WLASL_ALL_DIR} {POPSIGN_DIR} --extra-lmdb-path {WLASL_ALL_DIR}/wlasl_all.lmdb.mdb {POPSIGN_DIR}/popsign.lmdb.mdb --extra-frac 0.3 0.2"
  }
 }

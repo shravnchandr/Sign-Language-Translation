@@ -877,10 +877,79 @@ extract-popsign-add4=12`): every version complete, selections disjoint across al
 builds too), at most one version on `--inventory`; several `--fps-csv`, a clip probed at two rates
 refused.
 
-**Still to do before training:** audit of old + added + test shards together (additions vs ASL Signs;
-any recording shared between training and the test partitions); matches appended to the frozen
-exclusion list; build + validate; old clips byte-identical to the accepted release; pin the release in
-`frozen_inputs.json` and write the criteria. The test release's final part stays sealed.
+**Extraction.** All 12 shards complete (shard 5 was refused at push — 5 CPU sessions busy — and the queue
+script recorded it as pushed; relaunched at the same ref, 2026-11-17).
+
+**Combined audit (`islr-audit-popsign-add4` at 80418d9: accepted v2 s0–11 + add4 s0–11 + test s0–3,
+`--asl-signs-lmdb`).** 58,496 clips (26,278 / 24,945 / 7,273; no path in two extractions), no structure
+errors, no frame gaps, no exact duplicates, no signer in both splits, no mirrored clip.
+- **Same recording as ASL Signs.** The frozen lists reproduce exactly (accepted 257 of 257, test 37 of 37).
+  Additions: 249 of 13,143 comparable (accepted: 257 of 13,271), 98 below 0.07 (accepted: 104) — same
+  rate and profile, so the same rule: all 249 appended to `popsign_asl_signs_matches.csv` (fc25fcd; 506 rows,
+  the first 257 unchanged).
+- **Training ↔ test recordings.** 312 near-duplicate pairs (same gloss and length, frame-wise pose distance
+  ≤ 0.095) between training (162 accepted, 150 additions) and test clips. Triage: none looks like one
+  recording listed twice. Closest training ↔ test pair 0.0546, none below 0.05; pairs between *different
+  training signer ids* reach 0.0544 (none below 0.05), whereas the PopSign ↔ ASL Signs matches (likely the
+  same game players) include 72 below 0.05; same-signer repeat takes go down to 0.0315. By test signer:
+  708033 (already excluded) 166 pairs over 17 training signers, most with 708044 (69) — not 708053, which
+  the fingerprint screen flagged (no recording-level pairs); 708031 54 over 13 signers; 708032 33; 708038
+  30; 708039 21; 708035 2; 708036 2; 708037 4. One training signer (708902) is the top partner of three
+  different test signers — a shared posture, not one person. Conclusion: no test clip or signer excluded;
+  this is a pose-trajectory screen, it does not prove the people differ (as for the fingerprint screen).
+- **Read errors: 2 additions** (water / 8045, fall / 7043) with nothing tracked in any frame (no pose,
+  hand or face). `contract.prepare` crashed on them instead of returning T = 0 (fixed in 73a6c4f, contract
+  case added); builders refuse T = 0 clips either way, so they are build errors under `--allow-errors 2`.
+  The release below was built at fc25fcd, so its manifest shows the old message ("cannot reshape …"); the
+  fix touches only T = 0, every stored clip is the same.
+
+**Release (`islr-release-popsign-add4` at fc25fcd, built + validated in one notebook).** `--expect-shards
+extract-popsign-v2=12 extract-popsign-add4=12 --allow-errors 2 --inventory <inventory-popsign> --fps-csv
+<fps-popsign> <inventory-popsign-add4>`: listed 51,223 = filtered 506 (listed exclusions) + errors 2 +
+duplicates 0 + **written 50,715** (250 signs, 31 signers; frame steps 1: 38,846, 4: 11,835, 2: 34; both hands
+in a frame 2.6 %, 89 clips with no hand ever). Validation policy 7 passed (200 clips re-prepared from raw =
+stored). Content d721bffbe279f779, train.csv 1564a1e3f3f909c6. **Old clips unchanged:** the accepted
+release's 26,021 paths give content digest 81ed6e98b3858883 in this LMDB (= the accepted release) and
+identical train.csv rows; additions 24,694. Pinned in `frozen_inputs.json` as `popsign-add4`, used only by
+profile `phrases07-add4` (`check_freeze` resolves a release by profile, since both PopSign releases are
+`popsign.lmdb.mdb`; frozen phrases07's own spec still passes `--profile phrases07`, 16 / 16, and fails
+`--profile phrases07-add4` on the PopSign release only).
+
+**Signer weights, realised (after exclusions).** Each PopSign signer's share of PopSign phrases ×0.876
+(708043) to ×1.033 (708006) vs the accepted release; total variation 0.80 % of PopSign phrases, 0.16 % of
+all phrases (PopSign is 20 %). Registered, not frozen.
+
+### Pre-registration: phrases07-add4 (PopSign 8 per pair) vs frozen phrases07 (registered 2026-11-17, before launch)
+
+Hypothesis: twice the recordings per (signer, sign) from the same 31 PopSign signers improve recognition of
+held-out PopSign participants without costing the other sources. A gain would support more same-signer
+recordings, not more signers (the signer set is unchanged).
+
+- **Arms.** Baseline = the existing frozen phrases07 run (seed 42). New arm = profile `phrases07-add4`:
+  the same recipe (`--extra-frac 0.3 0.2`), PopSign = release `popsign-add4` instead of `popsign`; code at
+  the commit that registers this; reference spec `--frozen-spec`, `--allow-diff spec_only code` (as for
+  w50). Since 2de95c1 no training-path file changed (`phrases/train.py`, `phrases/dataset.py`,
+  `core/data/dataset.py`, `core/model/` identical; `core/data/contract.py` differs only in `prepare`'s T = 0
+  branch, used by builders). Its spec must pass `check_freeze --profile phrases07-add4`. Everything else fixed.
+- **Checkpoint.** Lowest synthetic validation WER (`best_phrases.pth`), scored once on each set below.
+- **Primary.** PopSign test development part (`cross_dataset --partition
+  core/data/popsign_test_split.json:development`, test release 44b2d0de445f5f71; 2,677 clips, 708031 /
+  708036 / 708037), single-sign exact decode, paired by clip with frozen phrases07 (87.1 %). Adopt only if
+  the gain is ≥ 1.0 point and exact two-sided McNemar p < 0.05. Scored locally (the test release and the
+  training release cannot be mounted together: same LMDB name).
+- **Guards (all must hold).** Clip-level Wald lower bound of the paired difference (add4 − baseline),
+  d − 1.96 · SE with d = (b − c) / n, SE = √(b + c − (b − c)² / n) / n, as registered for w50:
+  1. ASL Citizen validation split (1,045 clips; baseline 76.84 %): lower bound > −2.0 points.
+  2. ASL Signs fold-0 held-out signers (14,076 clips; baseline 67.87 %): lower bound > −2.0 points.
+  3. Synthetic validation WER (same 3,000 phrases) ≤ 0.25262946797215996 (baseline 0.23262946797215997 + 0.02).
+- **Reported, not decisive.** Development per signer and per frame size (camera and signer not separable);
+  ASL Citizen val two-hand / one-hand; ASL Signs per signer; WLASL test half and ASL Citizen test, scored once
+  after the decision.
+- **Replication (only if adopted).** As registered for w50: both arms with seed 43, the seed-43 control's
+  WER + 0.02 as the WER guard, primary and real-clip guards unchanged.
+- **Final part.** Stays sealed in this experiment. Whether a chosen model is scored on it is a separate
+  decision, with its rule written down first.
+- **Not established by any of this:** a product improvement — that needs the consented camera holdout.
 
 ### Frozen phrases07 sign reliability and the app's "not sure" cutoff (2026-11-16)
 
