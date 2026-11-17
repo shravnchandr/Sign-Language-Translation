@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from ..config import SELECTED_FACE_INDICES
+from ..config import COORD_FEAT, SELECTED_FACE_INDICES
 
 FACE_START = (21 + 33 + 21) * 3  # stored layout: left hand, pose, right hand, face (config.ALL_COLUMNS)
 from . import contract as K
@@ -198,6 +198,12 @@ def frame_step_cases() -> None:
         except ValueError:
             pass
     print("ok  frame step: 120 → 4, 60 / 50 → 2, ≤ 44 → 1; step k = every k-th raw frame, bit-exact; bad steps and an infinity in a discarded frame refused")
+    empty = clip(50, no_pose=range(50), seed=8)  # nothing tracked in any frame (2 PopSign videos)
+    for k in (1, 4):
+        e = K.prepare(empty, 0.75, k)
+        if e["coords"].shape != (0, COORD_FEAT) or any(len(e[x]) for x in K.RECORD_KEYS) or e["stats"]["frames_no_pose"] != len(range(0, 50, k)):
+            fail(f"frame_step {k}: a clip without any pose gave {e['coords'].shape}, stats {e['stats']}")
+    print("ok  a clip without any pose frame prepares to T = 0 (the builders then refuse it as an error)")
 
 
 def timing_cases() -> list:

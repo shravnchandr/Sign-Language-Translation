@@ -195,8 +195,8 @@ def prepare(df: pd.DataFrame, aspect: float = 0.75, frame_step: int = 1) -> dict
         else:  # per landmark: MediaPipe pose / face are all-or-nothing per frame
             ok = ~np.isnan(a[:, 0, 0])
             a = _hold_fill(a, ok)
-        blocks.append(np.where(np.isnan(a), 0.0, a).reshape(len(a), -1))  # never-seen parts → 0
-    coords = np.concatenate(blocks, 1).astype(np.float32) if len(origin) else np.zeros((0, sum(n for _, n in _PARTS) * COORDS_PER_LM), np.float32)
+        blocks.append(np.where(np.isnan(a), 0.0, a).reshape(len(a), -1 if len(a) else a.shape[1] * a.shape[2]))  # never-seen parts → 0
+    coords = np.concatenate(blocks, 1).astype(np.float32)
     return {"coords": coords, "presence": presence.astype(np.uint8), "status": status,
             "assignment_uncertain": uncertain.astype(np.uint8), "frames": raw["frame"], "stats": stats}
 
