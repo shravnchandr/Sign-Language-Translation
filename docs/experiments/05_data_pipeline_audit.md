@@ -882,6 +882,19 @@ any recording shared between training and the test partitions); matches appended
 exclusion list; build + validate; old clips byte-identical to the accepted release; pin the release in
 `frozen_inputs.json` and write the criteria. The test release's final part stays sealed.
 
+### Frozen phrases07 sign reliability and the app's "not sure" cutoff (2026-11-16)
+
+`sign_reliability` (31ec9c1: thresholds over whole tie groups, unrounded and re-verified; emitted-sign
+calibration scored as ASL-App `decodeWithScores`, matching its TypeScript to 7e-7 on 400 sequences incl.
+near-ties) on ASL Signs fold 0 (14,076) + WLASL test half (808), accepted releases, local CPU →
+`exports/frozen-phrases07/sign_reliability.json` (next to the bundle, not in it). Pooled top-1 70.4 %
+(ASL Signs 69.6, WLASL 84.4), exact 68.8 %. **Emitted signs** (14,984; 253 clips emit nothing): precision
+by score 0–0.2 7 %, 0.2–0.4 20 %, 0.4–0.5 29 %, 0.5–0.6 41 %, 0.6–0.7 44 %, 0.7–0.8 55 %, 0.8–0.9 64 %,
+0.9–1 92 %. Cutoffs: 80 % precision at 0.5480 (keeps 82 %), 90 % at 0.8497 (62 %), 95 % at 0.9541 (49 %).
+The app's 0.7 (from phrases05) on frozen 07: kept 71.8 % at 85.3 % correct, signs below it 31.9 % correct;
+the 0.55–0.7 band is right less than half the time, so 0.7 stays (an 80 % cutoff would show those as
+sure). Limits: single-sign clips (94 % ASL Signs), not phrases, not live camera.
+
 **Browser / export review (2026-11-15; ASL-App issues are the app owner's to fix, this repo supplies the
 reference).**
 
