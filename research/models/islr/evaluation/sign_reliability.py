@@ -65,7 +65,8 @@ def score_clips(model, df: pd.DataFrame, lmdb_path: Path, sign2idx: dict, max_fr
             pooled = probs[:, :blank].max(0).values
             top = pooled.topk(5)
             y = sign2idx[r.sign]
-            emitted = emitted_scores(probs, blank)
+            emitted = emitted_scores(out.float(), blank)
+            assert [c for c, _ in emitted] == hyp, (r.path, emitted, hyp)
             rows.append(dict(source=source, signer=r.participant_id, sign=y,
                              ranked=top.indices.tolist(), p1=float(top.values[0]),
                              exact=hyp == [y], emitted=[c for c, _ in emitted],
@@ -77,12 +78,15 @@ def score_clips(model, df: pd.DataFrame, lmdb_path: Path, sign2idx: dict, max_fr
     return res
 
 
-def emitted_scores(probs: torch.Tensor, blank: int) -> list[tuple[int, float]]:
-    """ASL-App decodeWithScores: greedy CTC runs; each emitted sign pooled (max over frames of its
-    probability) over its own stretch — from halfway after the previous run to halfway before the
-    next (floor((end_prev + start) / 2) + 1 .. floor((end + start_next) / 2))."""
+def emitted_scores(logits: torch.Tensor, blank: int) -> list[tuple[int, float]]:
+    """ASL-App decodeWithScores on (T, C) logits: greedy CTC runs from the logits' argmax (as the
+    app and the decode do — float32 softmax can round distinct logits into a tie); each emitted sign
+    pooled (max over frames of its softmax probability) over its own stretch — from halfway after
+    the previous run to halfway before the next (floor((end_prev + start) / 2) + 1 ..
+    floor((end + start_next) / 2))."""
+    probs = logits.softmax(-1)
     runs, prev = [], -1
-    for t, c in enumerate(probs.argmax(-1).tolist()):
+    for t, c in enumerate(logits.argmax(-1).tolist()):
         if c != prev and c != blank:
             runs.append([c, t, t])
         elif c == prev and c != blank:
@@ -149,7 +153,33 @@ def summarise(res: pd.DataFrame, idx2sign: dict) -> dict:
             "signs": dict(sorted(signs.items()))}
 
 
+def self_test() -> None:
+    """Edge cases of the app-parity decode and of the cutoffs (`--self-test`, no data needed)."""
+    f = lambda rows: torch.tensor(rows, dtype=torch.float32)
+    # classes 0, 1 = signs, 2 = blank; 1e-8 apart = equal after float32 softmax
+    assert [c for c, _ in emitted_scores(f([[0, 1e-8, -20]]), 2)] == [1], "near-tie sign: the logit argmax"
+    assert emitted_scores(f([[0, -20, 1e-8]]), 2) == [], "near-tie with blank: no emission"
+    # runs 0 (t 0-1), 1 (t 4): stretches 0..2 and 3..4 (halfway split); repeats after blank re-emit
+    em = emitted_scores(f([[9, 0, 0], [9, 0, 0], [0, 0, 9], [0, 0, 9], [0, 9, 0], [0, 0, 9], [0, 9, 0]]), 2)
+    assert [c for c, _ in em] == [0, 1, 1], em
+    assert cutoffs(np.array([0.9, 0.9]), np.array([1, 0])) == {}, "a tie is never split"
+    c = cutoffs(np.array([0.99, 0.9, 0.9]), np.array([1, 1, 0]), (0.8,))
+    assert c["0.8"]["min_score"] == 0.99 and c["0.8"]["n_kept"] == 1, c
+    c = cutoffs(np.array([0.1234567891, 0.5]), np.array([1, 1]), (0.8,))
+    assert c["0.8"]["min_score"] == 0.1234567891, "cutoff kept unrounded"
+    rng = np.random.default_rng(0)
+    sc = np.round(rng.random(5000), 2)
+    ok = rng.random(5000) < sc
+    for t, v in cutoffs(sc, ok).items():
+        assert ok[sc >= v["min_score"]].mean() >= float(t)
+    print("sign_reliability self-test passed")
+
+
 def main() -> None:
+    import sys
+
+    if "--self-test" in sys.argv:
+        return self_test()
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--checkpoint", required=True, type=Path)
     p.add_argument("--data-dir", default="data/asl-is-lmdb", type=Path)
