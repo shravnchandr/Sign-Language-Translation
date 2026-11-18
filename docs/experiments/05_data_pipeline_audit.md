@@ -854,7 +854,7 @@ tokens), so extra-token cleanup would reach few. Signs below 50 % (8–12 clips 
 pooled top-1 and are hypotheses about similar forms, for a reviewer, not findings. 25 two-hand clips are
 too few to guide two-hand changes.
 
-### PopSign 4 → 8 recordings per (signer, sign): nested expansion (2026-11-16, in progress)
+### PopSign 4 → 8 recordings per (signer, sign): nested expansion (2026-11-16 – 17; not adopted)
 
 Motivation: PopSign training data raised held-out PopSign development signers 72.8 → 87.1 %; does more
 of the same 31 signers' recordings help further? (The 14-point gain does not predict this.)
@@ -950,6 +950,34 @@ recordings, not more signers (the signer set is unchanged).
 - **Final part.** Stays sealed in this experiment. Whether a chosen model is scored on it is a separate
   decision, with its rule written down first.
 - **Not established by any of this:** a product improvement — that needs the consented camera holdout.
+
+**Result (`islr-frozen-phrases07-add4` at 2402964, 30 epochs, Kaggle T4, 2.4 h; `check_freeze --commit
+2402964 --profile phrases07-add4`: 16 / 16; development scored locally with `--partition …:development`,
+manifest a883056c1d960e28). Not adopted — the primary criterion fails; guards hold; no replication.**
+
+| criterion (registered) | baseline frozen phrases07 | add4 (PopSign 8 per pair) | rule | result |
+|---|---|---|---|---|
+| PopSign development exact (2,677) | 87.08 % | 86.96 % (+91 / −94, McNemar p = 0.88) | gain ≥ 1.0 point and p < 0.05 | **fail** |
+| ASL Citizen val exact (1,045) | 76.84 % | 77.89 % (+40 / −29; d = +1.05, Wald lower bound −0.50 points) | lower bound > −2.0 | pass |
+| ASL Signs fold 0 exact (14,076) | 67.87 % | 67.77 % (+679 / −694; d = −0.11, lower bound −0.62 points) | lower bound > −2.0 | pass |
+| synthetic val WER | 0.23262946797215997 | 0.23015217647752742 (epoch 27) | ≤ 0.25262946797215996 | pass |
+
+Reported, not decisive. Development per signer: 708031 81.0 → 79.4 % (+26 / −39), 708036 84.4 → 86.5 % (+51 /
+−32), 708037 94.4 → 93.5 % (+14 / −23) — one up, two down, no consistent direction (708036 is also the only
+1944×2592 development signer, so this is not a camera result either); 25 two-hand clips 88 → 84 %. ASL Citizen
+val two-hand (442) 70.4 → 71.5 %, one-hand (603) 81.6 → 82.6 %; per signer 800005 82.7 → 75.0 (52 clips,
++0 / −4), 800012 81.1 → 81.1, 800021 78.0 → 79.0, 800026 71.5 → 74.8, 800039 78.9 → 79.6 %. ASL Signs per
+signer: 34503 59.5 → 60.2, 49445 64.9 → 65.2, 62590 79.5 → 78.1 % (+152 / −217, p = 0.0008). Test splits
+(post-decision, `islr-add4-tests` at 2402964, reported only): WLASL test half 84.0 → 83.2 % (+25 / −32, p =
+0.43); ASL Citizen test 73.2 → 74.0 % (+150 / −120, p = 0.077), two-hand 64.7 → 65.3 %, one-hand 79.7 → 80.8 %.
+No detectable difference on any of them.
+
+Reading: doubling the recordings per (signer, sign) of the same 31 PopSign signers did not improve held-out
+PopSign participants (point estimate −0.1 point, 95 % interval about −1.1 to +0.9) and cost nothing
+measurable elsewhere. The 72.8 → 87.1 % gain from adding PopSign is therefore not limited by the number of
+recordings per signer at 4 per pair; if more PopSign data helps, more *signers* is the untested candidate
+(the game-train release has no more — its 31 are all used). One seed; this rejects the 8-per-pair release
+as registered. Frozen phrases07 stays the candidate browser model. Outputs: `results/phrases/frozen-phrases07-add4/`.
 
 ### Frozen phrases07 sign reliability and the app's "not sure" cutoff (2026-11-16)
 
