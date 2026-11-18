@@ -972,12 +972,15 @@ signer: 34503 59.5 → 60.2, 49445 64.9 → 65.2, 62590 79.5 → 78.1 % (+152 / 
 0.43); ASL Citizen test 73.2 → 74.0 % (+150 / −120, p = 0.077), two-hand 64.7 → 65.3 %, one-hand 79.7 → 80.8 %.
 No detectable difference on any of them.
 
-Reading: doubling the recordings per (signer, sign) of the same 31 PopSign signers did not improve held-out
-PopSign participants (point estimate −0.1 point, 95 % interval about −1.1 to +0.9) and cost nothing
-measurable elsewhere. The 72.8 → 87.1 % gain from adding PopSign is therefore not limited by the number of
-recordings per signer at 4 per pair; if more PopSign data helps, more *signers* is the untested candidate
-(the game-train release has no more — its 31 are all used). One seed; this rejects the 8-per-pair release
-as registered. Frozen phrases07 stays the candidate browser model. Outputs: `results/phrases/frozen-phrases07-add4/`.
+Reading: under this recipe, training budget and seed, going from 4 to 8 recordings per (signer, sign) of
+the same 31 PopSign signers gave no measurable gain on held-out PopSign participants (point estimate −0.1
+point, 95 % interval about −1.1 to +0.9). The budget is fixed (30 epochs of 1,250 batches in both arms), so
+each PopSign clip was drawn about half as often; a longer schedule or another seed is not tested. It passed
+the aggregate regression guards, but not every signer held: ASL Signs 62590 fell 79.5 → 78.1 % (+152 / −217,
+p = 0.0008; the other two fold-0 signers rose slightly) and ASL Citizen val 800005 82.7 → 75.0 % (52 clips,
++0 / −4). More PopSign *signers* remains a plausible experiment (the game-train release has no more — its 31
+are all used). One seed; this rejects the 8-per-pair release as registered. Frozen phrases07 stays the
+candidate browser model. Outputs: `results/phrases/frozen-phrases07-add4/`.
 
 ### Frozen phrases07 sign reliability and the app's "not sure" cutoff (2026-11-16)
 
