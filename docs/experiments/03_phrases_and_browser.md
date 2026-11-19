@@ -505,28 +505,45 @@ similar pair of variant entries). Output `results/evaluation/frozen-phrases07-mo
 | confusions (error-weighted) | 4.4 % | 15.7 % | 28.5 % | 34.1 % | 17.2 % |
 | random pairs of mapped signs | 0.3 % | 4.0 % | 25.2 % | 46.1 % | 24.5 % |
 
-20 % of errors fall on pairs differing in at most one core parameter, against 4 % of random pairs
-(mean 2.44 vs 2.90 differences). Top examples: cut → scissors (movement only), mouth → lips
-(location), listen ↔ hear (handshape), stay ↔ that (one hand vs two), grandpa → dad and grandma →
-mom (movement). Several frequent pairs are also near-synonyms that may share one form in some
-datasets (wake / awake, sleep / sleepy / nap, cat / kitty, dry / dryer). Reading: the model's
-confusions are more often close forms than chance would give, but most errors (80 %) are between
-forms ASL-LEX codes as clearly different (jump → stairs, cowboy → boy, sun → donkey), which points at
-tracking, dataset variants or the model, not form ambiguity. ASL-LEX codes one citation form; which
-variant each dataset recorded is unknown — hypotheses for a reviewer, not label corrections.
+Scope (corrected after review): the shares are of the **3,494 errors with both signs mapped**, not of
+all 4,665 single-sign errors; 1,171 errors involve an unmapped sign (wake → awake, glasswindow →
+tooth, say → chin, goose ↔ duck, …) and are not measured. Of the mapped ones, 705 (20 %) fall on pairs
+differing in at most one core parameter, against 4 % of random pairs (mean 2.44 vs 2.90 differences).
+Top examples: cut → scissors (movement only), mouth → lips (location), listen ↔ hear (handshape),
+stay ↔ that (one hand vs two), grandpa → dad and grandma → mom (movement). Several frequent pairs,
+mapped or not, are near-synonyms that may share one form in some datasets (wake / awake, sleep /
+sleepy / nap, cat / kitty, dry / dryer). Reading: among mapped confusions, close forms are about 5×
+over-represented relative to random pairs; the other 80 % of mapped confusions differ in two or more
+coded parameters, which is not the same as clearly different forms (ASL-LEX codes one citation
+form per entry, the pair takes the most similar variants, and which variant each dataset recorded is
+unknown). Nothing here says what drives the remaining errors — hypotheses for a reviewer, not label
+corrections.
 
-**Live-recording kit**: `scripts/extract_live.py` (MediaPipe 0.10.14 locally, the extraction cell's
-settings; `uv run --script`, Python 3.12) and `islr.evaluation.live_videos` (browser path: 30 fps
-resample by capture timestamps, contract v4 over the whole video, x / z × (W / H) / 0.75, split at
-hand-free gaps; exact decode, WER for phrases, McNemar between checkpoints; contact sheet + `--assign`
-when a video's segment count is off). Script `islr/evaluation/live_script.json`: 32 signs in blocks
-A (10 reliable controls), B (7 confusable pairs, interleaved), C (4 weak, 4 two-handed), P (6 short
-phrases), five conditions (phone baseline, laptop webcam, busy background, dim / backlit, side or low
-angle). Reference videos: 2 PopSign game-train recordings per sign from 2 participants
-(`data/live-recordings/reference/`, private notebook `popsign-reference-videos`). Smoke test on
-block videos stitched from those references: 33 / 33 segments found after one `--assign` fix (a
-spurious detection in the stitching filler). Not a score: the references are PopSign training
-videos, possibly in frozen phrases07's training set.
+**Live-recording kit**: `scripts/extract_live.py` (MediaPipe Holistic 0.10.14 locally, the extraction
+cell's settings; `uv run --script`, Python 3.12) and `islr.evaluation.live_videos`. Script
+`islr/evaluation/live_script.json`: 32 signs in blocks A (10 reliable controls), B (7 confusable
+pairs, interleaved), C (4 weak, 4 two-handed), P (6 short phrases), later D (below); five conditions
+(phone baseline, laptop webcam, busy background, dim / backlit, side or low angle). Reference videos:
+2 PopSign game-train recordings per sign from 2 participants (`data/live-recordings/reference/`,
+private notebook `popsign-reference-videos`).
+
+Review of 9bce6d4 / 39d7dfc (corrected the same day): (1) the first scorer was not the app's path — it
+split at 0.5 s without hands (the app's `PhraseSegmenter` waits 1 s) and prepared the whole recording,
+so hold-fill carried landmarks from one utterance into the next; it also scaled x / z by
+(W / H) / 0.75 where the app crops each frame to 3:4 before detection. Now: an exact port of
+`PhraseSegmenter` (1 s end gap, 1 s pre-roll, the frames after the last hand are the next segment's
+lead-in, 1,800-frame cap), each segment resampled and prepared on its own as `handleSegment` does,
+and extract_live crops with `portraitCrop` before detection. Segments with a hand span under 8
+frames (flickers; the app shows them as too short) are reported and not matched to labels. Still not
+reproduced: the app detects with MediaPipe Tasks (Pose / Hand / Face Landmarker), not Holistic, and
+assigns slots by pose-wrist distance — `--recordings` scores the app's own exported segments
+(`toRecording`) for that. (2) A video that decoded only partly was accepted: now a video that cannot be
+opened, decodes fewer frames than its header lists, or has non-increasing timestamps fails and writes
+nothing (tested: 97 of 240 frames → refused). (3) Cached landmarks were reused by version only: now
+also by the source file's sha256, checked again by the scorer (tested: a replaced video is refused,
+then re-extracted). Checks: the per-segment path reproduces all 14 frozen-phrases07 browser fixtures' features bit-exactly (the app's own parity reference); `portrait_crop` gives the app's crops (1080×1920 → 1080×1440 at y 240, 1280×720 → 540×720 at x 370). Smoke test on block videos stitched from the references (grey no-pose filler
+between clips): 32 / 32 segments matched without `--assign` — not a score: the references are PopSign training videos, possibly in frozen
+phrases07's training set.
 
 ### One hand per clip: the ASL Signs / PopSign signers sign one-handed (2026-11-19)
 
@@ -541,9 +558,13 @@ both hands detected, by ASL-LEX sign type (`*_training_hand_coverage_by_sign.csv
 | WLASL (all glosses) | 44.9 % | 7.1 % |
 | ASL Citizen | 30.0 % | 2.8 % |
 
-A tracking failure would still leave two-handed signs ahead; in the two phone datasets there is no
-difference, so the second hand is absent, not missed. This replaces "cause unknown" in the one-hand
-data limitation (CLAUDE.md). Only WLASL (30 % of phrases) shows real two-handed forms.
+Reading (corrected after review): the detection rates are consistent with one-handed signing — a
+tracker missing the second hand would be expected to leave two-handed signs ahead, and in both phone
+datasets they are not — but low detection rates alone do not prove the hand was absent rather than
+missed or out of frame. Checked by eye only locally: 20 PopSign reference videos (10 two-handed signs,
+2 recordings each, 6 participants), nearly all one-handed. Not established across PopSign, and ASL
+Signs has no videos to check. It replaces "cause unknown" in the one-hand data limitation with a
+likely cause, not a proven one. Only WLASL (30 % of phrases) clearly shows two-handed forms.
 
 Exact decode by sign type (ASL-LEX), frozen phrases05 → frozen phrases07:
 

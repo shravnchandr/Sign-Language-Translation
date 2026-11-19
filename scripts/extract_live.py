@@ -5,20 +5,24 @@
 """Landmarks from your own recordings (live camera-acceptance videos), on this machine.
 
 Same MediaPipe Holistic settings as the Kaggle extraction cell (scripts/extract_aslcitizen.py
-CELL_RUN: 0.10.14, model_complexity 1, confidence 0.5 / 0.5, a fresh tracker per video, full-size
-frames), so the landmarks match the training data's. Every video under --videos (any depth; the first
-folder below --videos is its condition) → <out>/<condition>/<name>.parquet in the competition format,
-plus <name>.meta.json: decoded frame size (after rotation metadata), capture timestamps (ms), fps, and
-the mirroring check (pose 11 x − pose 12 x, median; > 0 = unmirrored like training). A mirrored video
-(front camera with mirroring on) is re-extracted with every frame flipped back and flagged.
+CELL_RUN: 0.10.14, model_complexity 1, confidence 0.5 / 0.5, a fresh tracker per video), so the
+landmarks are training-like. Each frame is first centre-cropped to 3:4 exactly as the app's
+`portraitCrop` (ASL-App signPhrase.ts) does before detection. Every video under --videos (the folder
+below --videos is its condition) → <out>/<condition>/<name>.parquet in the competition format, plus
+<name>.meta.json: crop and source frame size (after rotation metadata), capture timestamps (ms), fps,
+the source file's sha256 (a cached extraction is reused only for the same bytes and VERSION) and the
+mirroring check (pose 11 x − pose 12 x, median; > 0 = unmirrored like training). A mirrored video
+(front camera with mirroring on) is re-extracted with every frame flipped back and flagged. A video
+that cannot be opened, or decodes fewer frames than its header lists, fails (nothing written, exit 1).
 
   uv run --script scripts/extract_live.py --videos data/live-recordings/videos --out data/live-recordings/landmarks
-  uv run --script scripts/extract_live.py --sheet data/live-recordings/landmarks/<condition>/segments.json   # contact sheet
+  uv run --script scripts/extract_live.py --sheet <live_videos out>/segments/<condition>__<video>.json   # contact sheet
 
 The videos and landmarks stay in data/ (gitignored): recordings of a person are never committed.
 """
 
 import argparse
+import hashlib
 import json
 import os
 from multiprocessing import Pool
@@ -35,15 +39,29 @@ N_LM = sum(n for _, n, _ in PARTS)
 TYPES = np.concatenate([[part] * n for part, n, _ in PARTS])
 INDEX = np.concatenate([np.arange(n) for _, n, _ in PARTS])
 VIDEO_EXT = {".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"}
-VERSION = "live-mp0.10.14-v1"  # bump whenever what this writes changes
+VERSION = "live-mp0.10.14-v2"  # v2: 3:4 portraitCrop before detection  # bump whenever what this writes changes
 
 
-def track(video: str, flip: bool) -> tuple[list, list, tuple]:
-    """(per-frame (543, 3) landmarks, capture timestamps ms, (width, height)) of one video."""
+def portrait_crop(width: int, height: int) -> tuple[int, int, int, int]:
+    """ASL-App portraitCrop: (x, y, w, h) centre crop to the training aspect 3:4 (JS Math.round)."""
+    rnd = lambda v: int(np.floor(v + 0.5))  # noqa: E731 — Math.round, not banker's rounding
+    if width / height > 0.75:
+        w = rnd(height * 0.75)
+        return rnd((width - w) / 2), 0, w, height
+    h = min(height, rnd(width / 0.75))
+    return 0, rnd((height - h) / 2), width, h
+
+
+def track(video: str, flip: bool) -> tuple[list, list, tuple, tuple]:
+    """(per-frame (543, 3) landmarks, capture timestamps ms, crop (w, h), source (w, h)) of one video;
+    raises when the video does not decode completely."""
     holistic = mp.solutions.holistic.Holistic(static_image_mode=False, model_complexity=1,
                                               min_detection_confidence=0.5, min_tracking_confidence=0.5)
     cap = cv2.VideoCapture(video)
-    frames, ts, size = [], [], (None, None)
+    if not cap.isOpened():
+        raise RuntimeError("cannot open")
+    listed = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    frames, ts, size, src = [], [], (None, None), (None, None)
     while True:
         ok, img = cap.read()
         if not ok:
@@ -51,7 +69,10 @@ def track(video: str, flip: bool) -> tuple[list, list, tuple]:
         ts.append(float(cap.get(cv2.CAP_PROP_POS_MSEC)))
         if flip:
             img = cv2.flip(img, 1)
-        size = img.shape[1], img.shape[0]
+        src = img.shape[1], img.shape[0]
+        x, y, w, h = portrait_crop(*src)
+        img = img[y:y + h, x:x + w]
+        size = w, h
         res = holistic.process(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
         xyz = np.full((N_LM, 3), np.nan, dtype=np.float32)
         i = 0
@@ -63,7 +84,13 @@ def track(video: str, flip: bool) -> tuple[list, list, tuple]:
         frames.append(xyz)
     cap.release()
     holistic.close()
-    return frames, ts, size
+    if not frames:
+        raise RuntimeError("no frame decoded")
+    if listed > 0 and len(frames) < listed - 1:  # the header count can be one off; fewer is a broken decode
+        raise RuntimeError(f"decoded {len(frames)} of the {listed} frames the header lists")
+    if not all(b > a for a, b in zip(ts, ts[1:])):
+        raise RuntimeError("capture timestamps not strictly increasing")
+    return frames, ts, size, src
 
 
 def lr_dx(frames: list) -> float:
@@ -72,33 +99,47 @@ def lr_dx(frames: list) -> float:
     return float(np.nanmedian(d)) if np.isfinite(d).any() else float("nan")
 
 
+def file_sha256(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def extract(job: tuple) -> dict:
     video, out = job
     meta_path = out.with_suffix(".meta.json")
-    if out.exists() and meta_path.exists() and json.loads(meta_path.read_text()).get("version") == VERSION:
-        return json.loads(meta_path.read_text())
-    frames, ts, size = track(video, flip=False)
-    mirrored = bool(frames) and lr_dx(frames) < 0
-    if mirrored:  # selfie-mirrored recording: training frames are unmirrored
-        frames, ts, size = track(video, flip=True)
-    meta = {"version": VERSION, "video": video, "n_frames": len(frames), "width": size[0], "height": size[1],
-            "fps_header": None, "timestamps_ms": ts, "mirrored_in_file": mirrored,
-            "lr_dx": lr_dx(frames) if frames else None}
+    digest = file_sha256(video)
+    if out.exists() and meta_path.exists():
+        m = json.loads(meta_path.read_text())
+        if m.get("version") == VERSION and m.get("source_sha256") == digest:
+            return m
+    for stale in (out, meta_path):  # never leave landmarks of an older file under this name
+        stale.unlink(missing_ok=True)
+    try:
+        frames, ts, size, src = track(video, flip=False)
+        mirrored = lr_dx(frames) < 0
+        if mirrored:  # selfie-mirrored recording: training frames are unmirrored
+            frames, ts, size, src = track(video, flip=True)
+    except Exception as e:  # noqa: BLE001 — reported, nothing written
+        return {"video": video, "error": str(e)}
     cap = cv2.VideoCapture(video)
-    meta["fps_header"] = float(cap.get(cv2.CAP_PROP_FPS))
+    fps_header = float(cap.get(cv2.CAP_PROP_FPS))
     cap.release()
-    if len(ts) > 1:
-        meta["fps_measured"] = float((len(ts) - 1) / ((ts[-1] - ts[0]) / 1000)) if ts[-1] > ts[0] else None
-    if frames:
-        T = len(frames)
-        xyz = np.concatenate(frames)
-        pd.DataFrame({"frame": np.repeat(np.arange(T), N_LM), "type": np.tile(TYPES, T),
-                      "landmark_index": np.tile(INDEX, T), "x": xyz[:, 0], "y": xyz[:, 1], "z": xyz[:, 2]}
-                     ).to_parquet(out, index=False)
-        pose = np.isfinite(np.stack(frames)[:, 0, 0])
-        hands = np.isfinite(np.stack(frames)[:, 33, 0]) | np.isfinite(np.stack(frames)[:, 54, 0])
-        meta.update(pose_frac=float(pose.mean()), hand_frac=float(hands.mean()))
-    meta_path.write_text(json.dumps(meta))
+    T = len(frames)
+    stack = np.stack(frames)
+    meta = {"version": VERSION, "video": video, "source_sha256": digest, "n_frames": T,
+            "width": size[0], "height": size[1], "source_width": src[0], "source_height": src[1],
+            "fps_header": fps_header, "timestamps_ms": ts, "mirrored_in_file": mirrored, "lr_dx": lr_dx(frames),
+            "fps_measured": float((T - 1) / ((ts[-1] - ts[0]) / 1000)) if T > 1 else None,
+            "pose_frac": float(np.isfinite(stack[:, 0, 0]).mean()),
+            "hand_frac": float((np.isfinite(stack[:, 33, 0]) | np.isfinite(stack[:, 54, 0])).mean())}
+    xyz = np.concatenate(frames)
+    pd.DataFrame({"frame": np.repeat(np.arange(T), N_LM), "type": np.tile(TYPES, T),
+                  "landmark_index": np.tile(INDEX, T), "x": xyz[:, 0], "y": xyz[:, 1], "z": xyz[:, 2]}
+                 ).to_parquet(out, index=False)
+    meta_path.write_text(json.dumps(meta))  # last: a meta file means a complete extraction
     return meta
 
 
@@ -147,12 +188,18 @@ def main() -> None:
         out.parent.mkdir(parents=True, exist_ok=True)
         jobs.append((str(v), out))
     print(f"{len(jobs)} videos")
+    failed = []
     with Pool(a.workers) as pool:
         for m in pool.imap(extract, jobs):
-            print(f"{Path(m['video']).name}: {m['n_frames']} frames {m['width']}x{m['height']} "
-                  f"fps {m.get('fps_measured') or 0:.1f} pose {m.get('pose_frac', 0):.0%} hands {m.get('hand_frac', 0):.0%}"
-                  + (" (mirrored in file: flipped back)" if m["mirrored_in_file"] else ""), flush=True)
-
+            if "error" in m:
+                failed.append(m)
+                print(f"FAILED {m['video']}: {m['error']}", flush=True)
+                continue
+            print(f"{Path(m['video']).name}: {m['n_frames']} frames, crop {m['width']}x{m['height']} of "
+                  f"{m['source_width']}x{m['source_height']}, fps {m['fps_measured'] or 0:.1f}, pose {m['pose_frac']:.0%} "
+                  f"hands {m['hand_frac']:.0%}" + (" (mirrored in file: flipped back)" if m["mirrored_in_file"] else ""), flush=True)
+    if failed:
+        raise SystemExit(f"{len(failed)} of {len(jobs)} videos failed")
 
 if __name__ == "__main__":
     main()
