@@ -1,0 +1,16 @@
+{
+  "_note": "Camera-acceptance recording script (islr.evaluation.live_videos). One video per block per condition: the signs of the block in this order, hands fully down (out of frame) for ~2 s before, between and after signs; a phrase block's phrases are signed without dropping the hands inside a phrase. Signs chosen from frozen phrases07's per-sign results (2026-11-19): A reliable controls (a failure here points at the pipeline), B confusable pairs, interleaved (both members of the model's most frequent confusions), C weak or two-handed signs, P short phrases.",
+  "blocks": {
+    "A": ["flower", "home", "TV", "please", "water", "apple", "now", "owl", "tiger", "balloon"],
+    "B": ["cut", "pen", "hear", "mouth", "wake", "duck", "stay", "scissors", "pencil", "listen", "lips", "awake", "goose", "that"],
+    "C": ["glasswindow", "hide", "say", "go", "book", "shoe", "chocolate", "car"],
+    "P": [["thirsty", "water", "drink"], ["dog", "outside", "go"], ["book", "where"], ["TV", "now"], ["flower", "please"], ["boy", "shoe", "where"]]
+  },
+  "conditions": {
+    "1-baseline": "phone upright (portrait), at chest height ~1.5 m away, even light from the front, plain wall behind; top of head to waist in frame",
+    "2-webcam": "laptop webcam (landscape), seated at a desk as you would use the app",
+    "3-busy": "as 1-baseline, but a cluttered background (shelves, kitchen, a poster)",
+    "4-dim": "as 1-baseline, but dim room light or a window behind you",
+    "5-angle": "as 1-baseline, but the phone ~45 degrees to one side, or low on a table looking up"
+  }
+}

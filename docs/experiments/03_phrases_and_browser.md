@@ -487,3 +487,43 @@ ASL Citizen per signer: 6 of 11 up, 5 down.
 Reading: the same pattern as phrases05-long and phrases06-long — the longer schedule fits the
 training sources (ASL Signs and PopSign, the same game set-up) and does not carry over to either
 independent test. phrases07 (30 epochs) stays the candidate; not exported.
+
+### ASL-LEX phonology of frozen phrases07's confusions; live-recording kit (2026-11-19)
+
+No ASL reviewer is available, so two steps that do not need one.
+
+**ASL-LEX 2.0** (CC BY 4.0, osf.io/zpha4, `data/asl-lex/signdata.csv`): `islr.evaluation.asl_lex_confusions`
+matches the 250 labels to ASL-LEX entries (219 mapped: by name or a numbered variant, 11 by
+non-signer synonyms; unmapped include wake, sleepy, goose, glasswindow, say, kitty) and compares the
+true and predicted sign of every single-sign error of frozen phrases07 on PopSign development,
+ASL Citizen test (identical glosses), WLASL test half and ASL Signs fold 0 (4,665 errors, 3,494 with
+both signs mapped) on four core parameters (handshape, minor location, movement, sign type; the most
+similar pair of variant entries). Output `results/evaluation/frozen-phrases07-model-diagnostics/asllex_confusions.csv`.
+
+| core parameters differing | 0 | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|---|
+| confusions (error-weighted) | 4.4 % | 15.7 % | 28.5 % | 34.1 % | 17.2 % |
+| random pairs of mapped signs | 0.3 % | 4.0 % | 25.2 % | 46.1 % | 24.5 % |
+
+20 % of errors fall on pairs differing in at most one core parameter, against 4 % of random pairs
+(mean 2.44 vs 2.90 differences). Top examples: cut → scissors (movement only), mouth → lips
+(location), listen ↔ hear (handshape), stay ↔ that (one hand vs two), grandpa → dad and grandma →
+mom (movement). Several frequent pairs are also near-synonyms that may share one form in some
+datasets (wake / awake, sleep / sleepy / nap, cat / kitty, dry / dryer). Reading: the model's
+confusions are more often close forms than chance would give, but most errors (80 %) are between
+forms ASL-LEX codes as clearly different (jump → stairs, cowboy → boy, sun → donkey), which points at
+tracking, dataset variants or the model, not form ambiguity. ASL-LEX codes one citation form; which
+variant each dataset recorded is unknown — hypotheses for a reviewer, not label corrections.
+
+**Live-recording kit**: `scripts/extract_live.py` (MediaPipe 0.10.14 locally, the extraction cell's
+settings; `uv run --script`, Python 3.12) and `islr.evaluation.live_videos` (browser path: 30 fps
+resample by capture timestamps, contract v4 over the whole video, x / z × (W / H) / 0.75, split at
+hand-free gaps; exact decode, WER for phrases, McNemar between checkpoints; contact sheet + `--assign`
+when a video's segment count is off). Script `islr/evaluation/live_script.json`: 32 signs in blocks
+A (10 reliable controls), B (7 confusable pairs, interleaved), C (4 weak, 4 two-handed), P (6 short
+phrases), five conditions (phone baseline, laptop webcam, busy background, dim / backlit, side or low
+angle). Reference videos: 2 PopSign game-train recordings per sign from 2 participants
+(`data/live-recordings/reference/`, private notebook `popsign-reference-videos`). Smoke test on
+block videos stitched from those references: 33 / 33 segments found after one `--assign` fix (a
+spurious detection in the stitching filler). Not a score: the references are PopSign training
+videos, possibly in frozen phrases07's training set.
