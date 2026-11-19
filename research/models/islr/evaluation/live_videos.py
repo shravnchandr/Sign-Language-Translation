@@ -174,10 +174,14 @@ def main() -> None:
         df = pd.read_parquet(meta_path.with_name(stem + ".parquet"))
         ts = meta["timestamps_ms"]
         n = len(ts)
-        first = df[df["landmark_index"] == 0].pivot_table(index="frame", columns="type", values="x", aggfunc="first").reindex(range(n))
+        # a part never detected has no column after the pivot (all-NaN): reindex, so it reads as absent
+        first = (df[df["landmark_index"] == 0].pivot_table(index="frame", columns="type", values="x", aggfunc="first")
+                 .reindex(index=range(n), columns=["pose", "left_hand", "right_hand"]))
         posed = first["pose"].notna().to_numpy()
-        hand = (first.get("left_hand", pd.Series(np.nan, first.index)).notna()
-                | first.get("right_hand", pd.Series(np.nan, first.index)).notna()).to_numpy()
+        hand = (first["left_hand"].notna() | first["right_hand"].notna()).to_numpy()
+        if not posed.any():
+            problems.append(f"{key}: no pose detected in any of {n} frames — unscorable (is the person in view?)")
+            continue
         segs_idx = app_segments(posed, hand, ts)
         # segments whose hand span is under MIN_T frames at 30 fps (flickers; the app shows them as
         # "too short to read") are reported, not matched to labels
@@ -219,6 +223,9 @@ def main() -> None:
         truth = r["label"].split()
         if "timestamps_ms" not in r:
             problems.append(f"{rec}: no timestamps_ms — not scored (the app resamples by capture time)")
+            continue
+        if not any(fr.get("pose") for fr in r["frames"]):
+            problems.append(f"{rec}: no pose detected in any of {len(r['frames'])} frames — unscorable")
             continue
         x, info_s = segment_input(frames_to_rows(r["frames"]), r["timestamps_ms"], 0.75, a.max_frames)
         score({"source": "app", "condition": cond, "video": rec.stem, "block": None, "segment": 0, **info_s}, truth, x)

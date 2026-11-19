@@ -541,7 +541,7 @@ assigns slots by pose-wrist distance — `--recordings` scores the app's own exp
 opened, decodes fewer frames than its header lists, or has non-increasing timestamps fails and writes
 nothing (tested: 97 of 240 frames → refused). (3) Cached landmarks were reused by version only: now
 also by the source file's sha256, checked again by the scorer (tested: a replaced video is refused,
-then re-extracted). Checks: the per-segment path reproduces all 14 frozen-phrases07 browser fixtures' features bit-exactly (the app's own parity reference); `portrait_crop` gives the app's crops (1080×1920 → 1080×1440 at y 240, 1280×720 → 540×720 at x 370). Smoke test on block videos stitched from the references (grey no-pose filler
+then re-extracted). Checks: the per-segment path reproduces all 14 frozen-phrases07 browser fixtures' features bit-exactly (the app's own parity reference); `portrait_crop` gives the app's crops (1080×1920 → 1080×1440 at y 240, 1280×720 → 540×720 at x 370). A recording with no pose in any frame (a pivot drops the empty pose column; KeyError found in review) is reported as unscorable and skipped, for both videos and app recordings, instead of ending the run. Smoke test on block videos stitched from the references (grey no-pose filler
 between clips): 32 / 32 segments matched without `--assign` — not a score: the references are PopSign training videos, possibly in frozen
 phrases07's training set.
 
