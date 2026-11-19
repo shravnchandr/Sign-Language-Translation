@@ -527,3 +527,37 @@ angle). Reference videos: 2 PopSign game-train recordings per sign from 2 partic
 block videos stitched from those references: 33 / 33 segments found after one `--assign` fix (a
 spurious detection in the stitching filler). Not a score: the references are PopSign training
 videos, possibly in frozen phrases07's training set.
+
+### One hand per clip: the ASL Signs / PopSign signers sign one-handed (2026-11-19)
+
+Spotted in the PopSign reference videos (user): two-handed signs (book: two flat hands opening; car:
+two fists steering) are made with one hand — the other holds the phone. The data agrees: frames with
+both hands detected, by ASL-LEX sign type (`*_training_hand_coverage_by_sign.csv`):
+
+| | two-handed signs | one-handed signs |
+|---|---|---|
+| ASL Signs | 0.3 % | 0.3 % |
+| PopSign | 0.1 % | 0.7 % |
+| WLASL (all glosses) | 44.9 % | 7.1 % |
+| ASL Citizen | 30.0 % | 2.8 % |
+
+A tracking failure would still leave two-handed signs ahead; in the two phone datasets there is no
+difference, so the second hand is absent, not missed. This replaces "cause unknown" in the one-hand
+data limitation (CLAUDE.md). Only WLASL (30 % of phrases) shows real two-handed forms.
+
+Exact decode by sign type (ASL-LEX), frozen phrases05 → frozen phrases07:
+
+| | two-handed | one-handed |
+|---|---|---|
+| PopSign development (phone) | 73.7 → 88.0 % (699) | 73.6 → 87.6 % (1,383) |
+| ASL Signs fold 0 (phone; 07 only) | 64.1 % (3,695) | 73.2 % (7,205) |
+| ASL Citizen test, identical (webcam) | 70.6 → 73.7 % (678) | 80.5 → 83.9 % (1,376) |
+| WLASL test half (camera) | 82.1 → 80.0 % (235) | 83.4 → 86.9 % (459) |
+
+Reading: on two-hand-signing datasets two-handed signs score 7–10 points lower; on PopSign, signed
+one-handed, there is no gap. Not conclusive — ASL Signs, also one-handed, shows a 9-point gap, so
+sign difficulty differs between the groups — and unpaired. The live script's block D (two-handed
+signs signed one-handed, same signer as blocks A–C signed with both hands) is the paired test. If
+confirmed: app users with both hands free (webcam, phone on a stand) sign forms the model mostly saw
+in WLASL only; hand-held phone users match the training data. Sem-Lex (Deaf signers, likely
+two-handed) would help on both counts.
